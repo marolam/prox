@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Prox Testers – Secure Your Spot</title>
+    <meta
+      name="description"
+      content="Apply to become an early tester for Prox and help shape how real-world meetups work inside the app."
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- HEADER -->
+    <header>
+      <div class="nav-inner">
+        <div class="nav-bar">
+          <div class="nav-left">
+            <div class="nav-logo-mark">PX</div>
+            <div class="nav-logo-text">PROX</div>
+          </div>
+          <div class="nav-right">
+            <nav class="nav-links">
+              <a href="index.html">Home</a>
+              <a href="users.html">For Users</a>
+              <a href="testers.html" class="active">Testers</a>
+              <a href="marketing.html">Marketing</a>
+              <a href="support.html">Support</a>
+              <a href="news.html">News</a>
+              <a href="social.html">Social</a>
+              <a href="contact.html">Contact</a>
+            </nav>
+            <a href="testers.html" class="btn btn-primary nav-cta">
+              Secure Your Spot
+            </a>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <div class="main-inner">
+        <!-- HERO -->
+        <section class="section">
+          <div class="grid-2">
+            <div>
+              <div class="section-eyebrow">Early access</div>
+              <h1 class="section-title">Secure your spot as a Prox tester.</h1>
+              <p class="section-text">
+                Before we invite the public, we’re opening a limited group of
+                testers who will help shape how Prox works in the real world.
+                You’ll get early builds, a direct line to share feedback, and a
+                say in how meetups, trust, and Prox Points evolve.
+              </p>
+              <p class="section-text">
+                At its core, Prox is about people actually meeting each other.
+                As a tester, your notes and real-life experiences will help us
+                make that process smoother, safer, and more enjoyable.
+              </p>
+              <ul class="check-list">
+                <li>Get early access to the app.</li>
+                <li>Receive clear test instructions for each phase.</li>
+                <li>Submit feedback, issues, and ideas in one place.</li>
+                <li>Help us tune safety and trust features.</li>
+              </ul>
+            </div>
+            <div>
+              <div class="card">
+                <span class="badge">Tester signup</span>
+                <h2 style="margin: 0.8rem 0 0.4rem;">Apply to join the list</h2>
+                <p class="muted" style="font-size: 0.88rem;">
+                  Fill out this quick form and we’ll follow up with the next
+                  steps, including when and how you’ll get access to the testing
+                  builds.
+                </p>
+
+                <form
+                  action="#"
+                  method="post"
+                  style="margin-top: 0.8rem;"
+                  onsubmit="alert('This is a placeholder. Connect to your real form handler or service.'); return false;"
+                >
+                  <div class="form-field">
+                    <label for="name">Name</label>
+                    <input id="name" name="name" type="text" required />
+                  </div>
+                  <div class="form-field">
+                    <label for="email">Email</label>
+                    <input id="email" name="email" type="email" required />
+                  </div>
+                  <div class="form-field">
+                    <label for="location">City / Region</label>
+                    <input id="location" name="location" type="text" />
+                  </div>
+                  <div class="form-field">
+                    <label for="why"
+                      >Why are you interested in testing Prox?</label
+                    >
+                    <textarea id="why" name="why"></textarea>
+                  </div>
+                  <button class="btn btn-primary" type="submit">
+                    Request tester access
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TESTER RESOURCES -->
+        <section class="section section-alt">
+          <div class="grid-2">
+            <div>
+              <div class="section-eyebrow">Tester portal</div>
+              <h2 class="section-title">Your testing hub, all in one place.</h2>
+              <p class="section-text">
+                This page will eventually become your full tester portal. Once
+                onboarding begins, testers will be able to:
+              </p>
+              <ul class="check-list">
+                <li>Download the latest test builds.</li>
+                <li>Read test plans and what’s new in each version.</li>
+                <li>Upload logs, screenshots, or meetup notes.</li>
+                <li>See which features are in focus this week.</li>
+              </ul>
+              <p class="section-text">
+                For now, securing your spot ensures you’ll be among the first to
+                know when the portal goes live.
+              </p>
+            </div>
+            <div>
+              <div class="card-soft">
+                <strong style="font-size: 0.9rem;">What we’re looking for</strong>
+                <ul class="check-list">
+                  <li>People who actually plan to meet up with others.</li>
+                  <li>Honest feedback – what felt smooth, what didn’t.</li>
+                  <li>Attention to safety and comfort in real-world use.</li>
+                  <li>A mix of casual users, helpers, and business-minded folks.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- FOOTER -->
+    <footer>
+      <div class="footer-inner">
+        <div>© <span id="year"></span> Prox. All rights reserved.</div>
+        <div class="muted">
+          Bringing the human focus back to the technology world.
+        </div>
+      </div>
+      <script>
+        document.getElementById("year").textContent =
+          new Date().getFullYear();
+      </script>
+    </footer>
+  </body>
+</html>
