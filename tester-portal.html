@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Prox Tester Portal</title>
+    <meta
+      name="description"
+      content="Prox tester portal – download builds, read test plans, and submit feedback."
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- HEADER -->
+    <header>
+      <div class="nav-inner">
+        <div class="nav-bar">
+          <div class="nav-left">
+            <div class="nav-logo-mark">PX</div>
+            <div class="nav-logo-text">PROX</div>
+          </div>
+          <div class="nav-right">
+            <nav class="nav-links">
+              <a href="index.html">Home</a>
+              <a href="users.html">For Users</a>
+              <a href="testers.html">Testers</a>
+              <a href="marketing.html">Marketing</a>
+              <a href="support.html">Support</a>
+              <a href="news.html">News</a>
+              <a href="social.html">Social</a>
+              <a href="contact.html">Contact</a>
+            </nav>
+            <a href="tester-portal.html" class="btn btn-primary nav-cta">
+              Tester Portal
+            </a>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <div class="main-inner">
+        <!-- HERO / INTRO -->
+        <section class="section">
+          <div class="section-eyebrow">Tester portal</div>
+          <h1 class="section-title">Everything you need to test Prox.</h1>
+          <p class="section-text">
+            This page is your hub for testing Prox: download the latest build,
+            grab documentation, and send feedback straight to the team.
+          </p>
+        </section>
+
+        <!-- DOWNLOAD + DOCS -->
+        <section class="section section-alt">
+          <div class="grid-2">
+            <!-- Download card -->
+            <div>
+              <div class="card">
+                <span class="badge">Latest Android build</span>
+                <h2 style="margin: 0.8rem 0 0.4rem;">Download Prox (.apk)</h2>
+                <p class="muted" style="font-size: 0.9rem;">
+                  Below is the most recent tester build. Only install this on
+                  devices you’re comfortable using for testing.
+                </p>
+
+                <!-- TODO: replace href with your real APK URL -->
+                <p style="margin: 0.8rem 0 0.2rem;">
+                  <a
+                    href="https://example.com/path/to/prox-tester-build.apk"
+                    class="btn btn-primary"
+                    download
+                  >
+                    Download APK
+                  </a>
+                </p>
+
+                <!-- Build metadata – update manually when you upload a new build -->
+                <p class="muted" style="font-size: 0.82rem; margin-top: 0.4rem;">
+                  Build: <strong>Prox Tester v0.1.0 (Android)</strong><br />
+                  Uploaded: <strong>Dec 2025</strong><br />
+                  Notes: <em>Initial internal tester build.</em>
+                </p>
+              </div>
+            </div>
+
+            <!-- Docs card -->
+            <div>
+              <div class="card-soft">
+                <strong style="font-size: 0.9rem;">Testing docs & resources</strong>
+                <p class="muted" style="font-size: 0.88rem; margin-top: 0.4rem;">
+                  These documents help you understand what to focus on and how
+                  to report what you find.
+                </p>
+                <ul class="check-list">
+                  <li>
+                    <a href="#" class="muted"
+                      >Test Plan – Phase 1 (PDF) – <em>coming soon</em></a
+                    >
+                  </li>
+                  <li>
+                    <a href="#" class="muted"
+                      >Known Issues / Bugs List – <em>coming soon</em></a
+                    >
+                  </li>
+                  <li>
+                    <a href="#" class="muted"
+                      >Feature Overview – <em>coming soon</em></a
+                    >
+                  </li>
+                </ul>
+                <p class="muted" style="font-size: 0.8rem; margin-top: 0.6rem;">
+                  You can replace these links with PDFs hosted on GitHub,
+                  Google Drive, or anywhere else you prefer.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- UPLOAD / LOGS / SCREENSHOTS -->
+        <section class="section">
+          <div class="grid-2">
+            <div>
+              <div class="section-eyebrow">Uploads</div>
+              <h2 class="section-title">Logs, screenshots, and videos.</h2>
+              <p class="section-text">
+                When you run into something interesting (good or bad), capture
+                it. Screenshots, short screen recordings, and logs are
+                incredibly helpful when reproducing issues.
+              </p>
+              <p class="section-text">
+                Use the button below to upload files (screenshots, videos, log
+                files) to the shared folder.
+              </p>
+              <!-- TODO: replace href with your Google Drive "file request" or folder link -->
+              <p style="margin-top: 0.8rem;">
+                <a
+                  href="https://drive.google.com/drive/folders/YOUR_FOLDER_ID_HERE"
+                  target="_blank"
+                  rel="noopener"
+                  class="btn btn-outline"
+                >
+                  Open upload folder
+                </a>
+              </p>
+              <p class="muted" style="font-size: 0.82rem; margin-top: 0.5rem;">
+                Tip: Include your name and date in filenames, e.g.
+                <code>marty-2025-12-04-login-bug.png</code>.
+              </p>
+            </div>
+
+            <div>
+              <div class="card-soft">
+                <strong style="font-size: 0.9rem;">What to upload</strong>
+                <ul class="check-list">
+                  <li>Crashes or freezes – screenshots or screen recordings.</li>
+                  <li>Map / meetup issues – where things didn’t match reality.</li>
+                  <li>Weird UI behavior – things that felt confusing or broken.</li>
+                  <li>Positive surprises – when something felt especially smooth.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- FEEDBACK FORM (wired to Apps Script / Google Sheet) -->
+        <section class="section section-alt">
+          <div class="section-eyebrow">Feedback</div>
+          <h2 class="section-title">Submit a test report.</h2>
+          <p class="section-text">
+            Use this form to send structured feedback for anything you test:
+            bugs, rough edges, or just observations about how the app feels.
+          </p>
+
+          <div class="section-narrow" style="margin-top: 1.3rem;">
+            <div class="card">
+              <form
+                action="https://script.google.com/macros/s/AKfycby1msi0HCL9ETusO7Xl-SlLav4O4UIK6kcGNcdjCx1dykcvO-53qolegLP5a84ATxwvzg/exec"
+                method="POST"
+                onsubmit="handleTesterFeedbackSubmit()"
+              >
+                <input type="hidden" name="formType" value="tester-feedback" />
+
+                <div class="form-field">
+                  <label for="tf-name">Name</label>
+                  <input id="tf-name" name="name" type="text" required />
+                </div>
+
+                <div class="form-field">
+                  <label for="tf-email">Email</label>
+                  <input id="tf-email" name="email" type="email" required />
+                </div>
+
+                <div class="form-field">
+                  <label for="tf-build">Build version</label>
+                  <input
+                    id="tf-build"
+                    name="subject"
+                    type="text"
+                    placeholder="e.g. v0.1.0-android"
+                  />
+                </div>
+
+                <div class="form-field">
+                  <label for="tf-area">Area / feature under test</label>
+                  <input
+                    id="tf-area"
+                    name="feature"
+                    type="text"
+                    placeholder="e.g. meetup creation, chat, map"
+                  />
+                </div>
+
+                <div class="form-field">
+                  <label for="tf-message">What happened?</label>
+                  <textarea
+                    id="tf-message"
+                    name="message"
+                    placeholder="Describe what you expected vs. what you saw. Include any steps we should follow to reproduce."
+                  ></textarea>
+                </div>
+
+                <div class="form-field">
+                  <label for="tf-device">Device & OS (optional)</label>
+                  <input
+                    id="tf-device"
+                    name="deviceInfo"
+                    type="text"
+                    placeholder="e.g. Pixel 7, Android 14"
+                  />
+                </div>
+
+                <button class="btn btn-primary" type="submit">
+                  Submit feedback
+                </button>
+
+                <div
+                  id="tester-feedback-status"
+                  class="muted"
+                  style="margin-top: 0.6rem; font-size: 0.85rem;"
+                ></div>
+              </form>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- FOOTER -->
+    <footer>
+      <div class="footer-inner">
+        <div>© <span id="year"></span> Prox. All rights reserved.</div>
+        <div class="muted">
+          Bringing the human focus back to the technology world.
+        </div>
+      </div>
+      <script>
+        document.getElementById("year").textContent =
+          new Date().getFullYear();
+
+        function handleTesterFeedbackSubmit() {
+          var statusEl = document.getElementById("tester-feedback-status");
+          if (statusEl) {
+            statusEl.textContent =
+              "Thank you! Your feedback has been sent to the team.";
+          }
+        }
+      </script>
+    </footer>
+  </body>
+</html>
