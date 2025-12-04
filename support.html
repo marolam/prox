@@ -97,10 +97,10 @@
                   issues during a meetup, always prioritize your physical safety
                   and contact local authorities if needed before anything else.
                 </p>
-                <form
+               <form
   action="https://script.google.com/macros/s/AKfycby1msi0HCL9ETusO7Xl-SlLav4O4UIK6kcGNcdjCx1dykcvO-53qolegLP5a84ATxwvzg/exec"
   method="POST"
-  target="_blank"
+  onsubmit="handleSupportSubmit()"
 >
   <input type="hidden" name="formType" value="support-ticket" />
 
@@ -122,7 +122,24 @@
   <button class="btn btn-primary" type="submit">
     Send to support
   </button>
+
+  <div
+    id="support-status"
+    class="muted"
+    style="margin-top: 0.6rem; font-size: 0.85rem;"
+  ></div>
 </form>
+
+<script>
+  function handleSupportSubmit() {
+    var statusEl = document.getElementById("support-status");
+    if (statusEl) {
+      statusEl.textContent =
+        "Thank you! Your message has been sent to support.";
+    }
+  }
+</script>
+
 
               </div>
             </div>
@@ -146,5 +163,6 @@
     </footer>
   </body>
 </html>
+
 
 
