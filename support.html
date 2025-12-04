@@ -98,27 +98,32 @@
                   and contact local authorities if needed before anything else.
                 </p>
                 <form
-                  action="#"
-                  method="post"
-                  style="margin-top: 0.8rem;"
-                  onsubmit="alert('Placeholder – connect to your real support system.'); return false;"
-                >
-                  <div class="form-field">
-                    <label for="s-email">Email</label>
-                    <input id="s-email" name="email" type="email" required />
-                  </div>
-                  <div class="form-field">
-                    <label for="s-topic">Topic</label>
-                    <input id="s-topic" name="topic" type="text" />
-                  </div>
-                  <div class="form-field">
-                    <label for="s-message">Message</label>
-                    <textarea id="s-message" name="message"></textarea>
-                  </div>
-                  <button class="btn btn-primary" type="submit">
-                    Send to support
-                  </button>
-                </form>
+  action="YOUR_WEB_APP_URL_HERE"
+  method="POST"
+  target="_blank"
+>
+  <input type="hidden" name="formType" value="support-ticket" />
+
+  <div class="form-field">
+    <label for="s-email">Email</label>
+    <input id="s-email" name="email" type="email" required />
+  </div>
+
+  <div class="form-field">
+    <label for="s-topic">Topic</label>
+    <input id="s-topic" name="subject" type="text" />
+  </div>
+
+  <div class="form-field">
+    <label for="s-message">Message</label>
+    <textarea id="s-message" name="message"></textarea>
+  </div>
+
+  <button class="btn btn-primary" type="submit">
+    Send to support
+  </button>
+</form>
+
               </div>
             </div>
           </div>
@@ -141,3 +146,4 @@
     </footer>
   </body>
 </html>
+
