@@ -75,33 +75,37 @@
                 </p>
 
                 <form
-                  action="#"
-                  method="post"
-                  style="margin-top: 0.8rem;"
-                  onsubmit="alert('This is a placeholder. Connect to your real form handler or service.'); return false;"
-                >
-                  <div class="form-field">
-                    <label for="name">Name</label>
-                    <input id="name" name="name" type="text" required />
-                  </div>
-                  <div class="form-field">
-                    <label for="email">Email</label>
-                    <input id="email" name="email" type="email" required />
-                  </div>
-                  <div class="form-field">
-                    <label for="location">City / Region</label>
-                    <input id="location" name="location" type="text" />
-                  </div>
-                  <div class="form-field">
-                    <label for="why"
-                      >Why are you interested in testing Prox?</label
-                    >
-                    <textarea id="why" name="why"></textarea>
-                  </div>
-                  <button class="btn btn-primary" type="submit">
-                    Request tester access
-                  </button>
-                </form>
+  action="YOUR_WEB_APP_URL_HERE"
+  method="POST"
+  target="_blank"
+>
+  <input type="hidden" name="formType" value="tester-signup" />
+
+  <div class="form-field">
+    <label for="t-name">Name</label>
+    <input id="t-name" name="name" type="text" required />
+  </div>
+
+  <div class="form-field">
+    <label for="t-email">Email</label>
+    <input id="t-email" name="email" type="email" required />
+  </div>
+
+  <div class="form-field">
+    <label for="t-location">City / Region</label>
+    <input id="t-location" name="subject" type="text" />
+  </div>
+
+  <div class="form-field">
+    <label for="t-why">Why are you interested in testing Prox?</label>
+    <textarea id="t-why" name="message"></textarea>
+  </div>
+
+  <button class="btn btn-primary" type="submit">
+    Request tester access
+  </button>
+</form>
+
               </div>
             </div>
           </div>
@@ -159,3 +163,4 @@
     </footer>
   </body>
 </html>
+
