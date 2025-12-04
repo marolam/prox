@@ -65,30 +65,36 @@
             <div>
               <div class="card">
                 <span class="badge">Message us</span>
-                <form
-                  action="#"
-                  method="post"
-                  style="margin-top: 0.8rem;"
-                  onsubmit="alert('Placeholder – connect to your real email or backend.'); return false;"
-                >
-                  <div class="form-field">
-                    <label for="c-name">Name</label>
-                    <input id="c-name" name="name" type="text" required />
-                  </div>
-                  <div class="form-field">
-                    <label for="c-email">Email</label>
-                    <input id="c-email" name="email" type="email" required />
-                  </div>
-                  <div class="form-field">
-                    <label for="c-type">What are you reaching out about?</label>
-                    <input id="c-type" name="type" type="text" />
-                  </div>
-                  <div class="form-field">
-                    <label for="c-message">Message</label>
-                    <textarea id="c-message" name="message"></textarea>
-                  </div>
-                  <button class="btn btn-primary" type="submit">Send</button>
-                </form>
+               <form
+  action="https://script.google.com/macros/s/AKfycby1msi0HCL9ETusO7Xl-SlLav4O4UIK6kcGNcdjCx1dykcvO-53qolegLP5a84ATxwvzg/exec"
+  method="POST"
+  target="_blank"
+>
+  <input type="hidden" name="formType" value="contact" />
+
+  <div class="form-field">
+    <label for="c-name">Name</label>
+    <input id="c-name" name="name" type="text" required />
+  </div>
+
+  <div class="form-field">
+    <label for="c-email">Email</label>
+    <input id="c-email" name="email" type="email" required />
+  </div>
+
+  <div class="form-field">
+    <label for="c-type">Subject</label>
+    <input id="c-type" name="subject" type="text" />
+  </div>
+
+  <div class="form-field">
+    <label for="c-message">Message</label>
+    <textarea id="c-message" name="message"></textarea>
+  </div>
+
+  <button class="btn btn-primary" type="submit">Send</button>
+</form>
+
               </div>
             </div>
           </div>
@@ -111,3 +117,4 @@
     </footer>
   </body>
 </html>
+
