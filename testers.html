@@ -74,10 +74,10 @@
                   builds.
                 </p>
 
-                <form
+               <form
   action="https://script.google.com/macros/s/AKfycby1msi0HCL9ETusO7Xl-SlLav4O4UIK6kcGNcdjCx1dykcvO-53qolegLP5a84ATxwvzg/exec"
   method="POST"
-  target="_blank"
+  onsubmit="handleTesterSubmit()"
 >
   <input type="hidden" name="formType" value="tester-signup" />
 
@@ -104,7 +104,24 @@
   <button class="btn btn-primary" type="submit">
     Request tester access
   </button>
+
+  <div
+    id="tester-status"
+    class="muted"
+    style="margin-top: 0.6rem; font-size: 0.85rem;"
+  ></div>
 </form>
+
+<script>
+  function handleTesterSubmit() {
+    var statusEl = document.getElementById("tester-status");
+    if (statusEl) {
+      statusEl.textContent =
+        "Thank you! Your request has been sent. We'll be in touch soon.";
+    }
+  }
+</script>
+
 
               </div>
             </div>
@@ -163,5 +180,6 @@
     </footer>
   </body>
 </html>
+
 
 
