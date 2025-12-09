@@ -2,10 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Prox – Marketing & Referrals</title>
+    <title>Prox – Marketing & Partners</title>
     <meta
       name="description"
-      content="Learn how to help grow the Prox community through referrals, local outreach, and future business tools."
+      content="Learn how to partner with Prox, run campaigns, or integrate Prox into your local business or events."
     />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="styles.css" />
@@ -26,98 +26,140 @@
               <a href="testers.html">Testers</a>
               <a href="marketing.html" class="active">Marketing</a>
               <a href="support.html">Support</a>
-              <a href="news.html">News</a>
-              <a href="social.html">Social</a>
-              <a href="contact.html">Contact</a>
             </nav>
-            <a href="testers.html" class="btn btn-primary nav-cta">
-              Secure Your Spot
-            </a>
           </div>
         </div>
       </div>
     </header>
 
-    <main>
-      <div class="main-inner">
-        <section class="section">
-          <div class="section-eyebrow">Spread the word</div>
-          <h1 class="section-title">Grow the Prox network with us.</h1>
-          <p class="section-text">
-            From day one, Prox will depend on real people sharing it in places
-            where it can have the biggest impact. This page is the starting
-            point for referral tools, marketing resources, and – later on –
-            business-focused features.
-          </p>
-        </section>
-
-        <section class="section section-alt">
-          <div class="grid-2">
-            <div>
-              <h2 class="section-title">Referral & growth roles.</h2>
-              <p class="section-text">
-                We’re building a system where people who actively help grow Prox
-                are recognized and rewarded. Think of it as a “field kit” for
-                people who want to bring Prox into their city, niche, or
-                community.
-              </p>
-              <ul class="check-list">
-                <li>Unique referral links tied to your account.</li>
-                <li>Prox Points for verified new users and good meetups.</li>
-                <li>Optional “Prox promoter” or “community builder” badges.</li>
-                <li>Early access to new features in your region.</li>
-              </ul>
-            </div>
-            <div>
-              <div class="card-soft">
-                <strong style="font-size: 0.9rem;">Media kit (coming soon)</strong>
-                <p class="muted" style="font-size: 0.88rem;">
-                  This is where we’ll publish logos, colors, app screenshots,
-                  and simple copy you can use in emails, posts, or your own
-                  materials when you introduce people to Prox.
-                </p>
-                <div class="chip-row" style="margin-top: 0.8rem;">
-                  <span class="chip">Logos</span>
-                  <span class="chip">Brand colors</span>
-                  <span class="chip">Screenshots</span>
-                  <span class="chip">Template text</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="section">
-          <div class="section-narrow">
-            <h2 class="section-title">Business mode (future).</h2>
-            <p class="section-text">
-              Down the road, Prox will include tools aimed at businesses,
-              freelancers, and local professionals. Instead of shouting into the
-              void, they’ll be able to connect with nearby people who are
-              already looking for what they offer.
-            </p>
-            <ul class="check-list">
-              <li>Business profiles tied to a physical location.</li>
-              <li>Availability modes – “here now,” “by appointment,” or “via Prox avatar.”</li>
-              <li>Prox Points and paid tools for responsible promotion, not spam.</li>
-            </ul>
-          </div>
-        </section>
+    <!-- HERO -->
+    <section class="hero marketing-hero">
+      <div class="hero-content">
+        <h1>Marketing & Partnerships</h1>
+        <p>
+          Prox is built for real-world activity. If you run a local business,
+          host events, or manage a community, you can plug into Prox as it
+          grows.
+        </p>
       </div>
-    </main>
+    </section>
+
+    <!-- PARTNER TYPES -->
+    <section class="partner-section">
+      <div class="section-inner">
+        <h2>Who We’re Looking to Work With</h2>
+        <div class="feature-grid">
+          <div class="feature-item">
+            <h3>Local Businesses</h3>
+            <p>
+              Service providers, coworking spaces, makers, and professionals who
+              want reliable, local connections and repeat clients.
+            </p>
+          </div>
+          <div class="feature-item">
+            <h3>Events & Meetups</h3>
+            <p>
+              Organizers who want better tools for connecting attendees before
+              and after events.
+            </p>
+          </div>
+          <div class="feature-item">
+            <h3>Communities</h3>
+            <p>
+              Groups, clubs, and networks that thrive on trust and recurring,
+              real-world interaction.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PARTNER INQUIRY FORM -->
+    <section class="signup-section">
+      <div class="section-inner">
+        <h2>Partner With Prox</h2>
+        <p>
+          Share a bit about your business or community and how you’re thinking
+          about using Prox. We’re starting small, then expanding carefully.
+        </p>
+
+        <form
+          class="simple-form"
+          action="https://formsubmit.co/YOUR_PARTNERS_EMAIL_HERE"
+          method="POST"
+        >
+          <input type="hidden" name="_captcha" value="false" />
+          <input
+            type="hidden"
+            name="_subject"
+            value="New Prox partnership inquiry"
+          />
+          <input
+            type="hidden"
+            name="_template"
+            value="table"
+          />
+
+          <label>
+            Your Name
+            <input type="text" name="name" required />
+          </label>
+
+          <label>
+            Email
+            <input type="email" name="email" required />
+          </label>
+
+          <label>
+            Organization / Business
+            <input type="text" name="organization" />
+          </label>
+
+          <label>
+            Website or Social Link
+            <input type="url" name="url" placeholder="https://..." />
+          </label>
+
+          <label>
+            Type of Partnership
+            <select name="partner_type">
+              <option value="local_business">
+                Local business using Prox with customers
+              </option>
+              <option value="event">
+                Event/meetup integration
+              </option>
+              <option value="community">
+                Community or group collaboration
+              </option>
+              <option value="other">
+                Something else
+              </option>
+            </select>
+          </label>
+
+          <label>
+            How would you like to use Prox?
+            <textarea
+              name="details"
+              rows="4"
+              placeholder="Tell us about your idea, goals, and approximate timeline."
+              required
+            ></textarea>
+          </label>
+
+          <button type="submit" class="btn-primary">Send Inquiry</button>
+        </form>
+      </div>
+    </section>
 
     <!-- FOOTER -->
     <footer>
       <div class="footer-inner">
-        <div>© <span id="year"></span> Prox. All rights reserved.</div>
-        <div class="muted">
-          Bringing the human focus back to the technology world.
-        </div>
+        <div class="footer-logo">PROX</div>
+        <p class="footer-tagline">Let what you seek find you.</p>
+        <p class="footer-copy">&copy; 2025 Prox. All rights reserved.</p>
       </div>
-      <script>
-        document.getElementById("year").textContent =
-          new Date().getFullYear();
-      </script>
     </footer>
   </body>
 </html>
