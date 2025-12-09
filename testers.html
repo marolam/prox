@@ -74,55 +74,53 @@
                   builds.
                 </p>
 
-               <form
-  action="https://script.google.com/macros/s/AKfycby1msi0HCL9ETusO7Xl-SlLav4O4UIK6kcGNcdjCx1dykcvO-53qolegLP5a84ATxwvzg/exec"
-  method="POST"
-  onsubmit="handleTesterSubmit()"
->
-  <input type="hidden" name="formType" value="tester-signup" />
+                <form
+                  action="https://script.google.com/macros/s/AKfycby1msi0HCL9ETusO7Xl-SlLav4O4UIK6kcGNcdjCx1dykcvO-53qolegLP5a84ATxwvzg/exec"
+                  method="POST"
+                  onsubmit="handleTesterSubmit()"
+                >
+                  <input type="hidden" name="formType" value="tester-signup" />
 
-  <div class="form-field">
-    <label for="t-name">Name</label>
-    <input id="t-name" name="name" type="text" required />
-  </div>
+                  <div class="form-field">
+                    <label for="t-name">Name</label>
+                    <input id="t-name" name="name" type="text" required />
+                  </div>
 
-  <div class="form-field">
-    <label for="t-email">Email</label>
-    <input id="t-email" name="email" type="email" required />
-  </div>
+                  <div class="form-field">
+                    <label for="t-email">Email</label>
+                    <input id="t-email" name="email" type="email" required />
+                  </div>
 
-  <div class="form-field">
-    <label for="t-location">City / Region</label>
-    <input id="t-location" name="subject" type="text" />
-  </div>
+                  <div class="form-field">
+                    <label for="t-location">City / Region</label>
+                    <input id="t-location" name="subject" type="text" />
+                  </div>
 
-  <div class="form-field">
-    <label for="t-why">Why are you interested in testing Prox?</label>
-    <textarea id="t-why" name="message"></textarea>
-  </div>
+                  <div class="form-field">
+                    <label for="t-why">Why are you interested in testing Prox?</label>
+                    <textarea id="t-why" name="message"></textarea>
+                  </div>
 
-  <button class="btn btn-primary" type="submit">
-    Request tester access
-  </button>
+                  <button class="btn btn-primary" type="submit">
+                    Request tester access
+                  </button>
 
-  <div
-    id="tester-status"
-    class="muted"
-    style="margin-top: 0.6rem; font-size: 0.85rem;"
-  ></div>
-</form>
+                  <div
+                    id="tester-status"
+                    class="muted"
+                    style="margin-top: 0.6rem; font-size: 0.85rem;"
+                  ></div>
+                </form>
 
-<script>
-  function handleTesterSubmit() {
-    var statusEl = document.getElementById("tester-status");
-    if (statusEl) {
-      statusEl.textContent =
-        "Thank you! Your request has been sent. We'll be in touch soon.";
-    }
-  }
-</script>
-
-
+                <script>
+                  function handleTesterSubmit() {
+                    var statusEl = document.getElementById("tester-status");
+                    if (statusEl) {
+                      statusEl.textContent =
+                        "Thank you! Your request has been sent. We'll be in touch soon.";
+                    }
+                  }
+                </script>
               </div>
             </div>
           </div>
@@ -135,8 +133,8 @@
               <div class="section-eyebrow">Tester portal</div>
               <h2 class="section-title">Your testing hub, all in one place.</h2>
               <p class="section-text">
-                This page will eventually become your full tester portal. Once
-                onboarding begins, testers will be able to:
+                Once you’re approved as a tester, the portal is where you’ll
+                download builds, see current focus areas, and send in feedback.
               </p>
               <ul class="check-list">
                 <li>Download the latest test builds.</li>
@@ -144,10 +142,14 @@
                 <li>Upload logs, screenshots, or meetup notes.</li>
                 <li>See which features are in focus this week.</li>
               </ul>
-              <p class="section-text">
-                For now, securing your spot ensures you’ll be among the first to
-                know when the portal goes live.
+              <p class="section-text" style="margin-top: 1.2rem;">
+                Already an approved tester?
               </p>
+              <div class="hero-actions" style="margin-top: 0.6rem;">
+                <a href="tester-portal.html" class="btn btn-outline">
+                  Go to the Tester Portal
+                </a>
+              </div>
             </div>
             <div>
               <div class="card-soft">
@@ -156,15 +158,12 @@
                   <li>People who actually plan to meet up with others.</li>
                   <li>Honest feedback – what felt smooth, what didn’t.</li>
                   <li>Attention to safety and comfort in real-world use.</li>
-                  <li>A mix of casual users, helpers, and business-minded folks.</li>
+                  <li>
+                    A mix of casual users, helpers, and business-minded folks.
+                  </li>
                 </ul>
               </div>
             </div>
-            <p class="section-text" style="margin-top: 1.2rem;">
-  Already an approved tester?
-  <a href="tester-portal.html">Go to the tester portal</a>.
-</p>
-
           </div>
         </section>
       </div>
