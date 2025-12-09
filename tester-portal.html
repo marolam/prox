@@ -2,10 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Prox Tester Portal</title>
+    <title>Prox – Tester Portal</title>
     <meta
       name="description"
-      content="Prox tester portal – download builds, read test plans, and submit feedback."
+      content="Prox tester portal – access builds, instructions, and feedback tools for early testers."
     />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="styles.css" />
@@ -24,363 +24,90 @@
               <a href="index.html">Home</a>
               <a href="users.html">For Users</a>
               <a href="testers.html">Testers</a>
+              <a href="tester-portal.html" class="active">Tester Portal</a>
               <a href="marketing.html">Marketing</a>
               <a href="support.html">Support</a>
-              <a href="news.html">News</a>
-              <a href="social.html">Social</a>
-              <a href="contact.html">Contact</a>
             </nav>
-            <a href="tester-portal.html" class="btn btn-primary nav-cta">
-              Tester Portal
-            </a>
           </div>
         </div>
       </div>
     </header>
 
-    <main>
-      <div class="main-inner">
-        <!-- PASSWORD GATE -->
-        <section class="section" id="tester-gate">
-          <div class="section-narrow">
-            <div class="section-eyebrow">Tester access</div>
-            <h1 class="section-title">Enter tester password.</h1>
-            <p class="section-text">
-              This area is reserved for approved Prox testers. If you’ve been
-              invited, use the password you were given. You can always ask
-              Marty for the latest one.
+    <!-- HERO -->
+    <section class="hero testers-hero">
+      <div class="hero-content">
+        <h1>Tester Portal</h1>
+        <p>
+          This is the central hub for Prox testers: access builds, see what to
+          focus on, and send feedback after your sessions.
+        </p>
+      </div>
+    </section>
+
+    <!-- PORTAL CONTENT -->
+    <section class="portal-section">
+      <div class="section-inner">
+        <h2>Welcome, Testers</h2>
+        <p>
+          Once you’ve been accepted into the tester program, this portal will
+          contain:
+        </p>
+        <ul class="portal-list">
+          <li>Download links or store instructions for the latest test build</li>
+          <li>What’s new in this build (features to try, areas to stress-test)</li>
+          <li>Links to feedback forms and support</li>
+          <li>Known issues and any temporary workarounds</li>
+        </ul>
+
+        <div class="portal-callouts">
+          <div class="portal-card">
+            <h3>1. Get the Latest Build</h3>
+            <p>
+              Follow the instructions in your tester email to install the
+              current version on your device. We’ll keep this space updated with
+              release notes as we go.
             </p>
-
-            <div class="card" style="margin-top: 1.2rem;">
-              <div class="form-field">
-                <label for="gate-password">Tester password</label>
-                <input
-                  id="gate-password"
-                  type="password"
-                  placeholder="Enter tester password"
-                />
-              </div>
-              <button
-                class="btn btn-primary"
-                type="button"
-                onclick="unlockTesterPortal()"
-              >
-                Unlock portal
-              </button>
-              <div
-                id="gate-status"
-                class="muted"
-                style="margin-top: 0.6rem; font-size: 0.85rem;"
-              >
-                <!-- status text -->
-              </div>
-            </div>
-
-            <noscript>
-              <p class="section-text" style="margin-top: 1rem; color: #b91c1c;">
-                JavaScript is required to access the tester portal. Please
-                enable JavaScript in your browser.
-              </p>
-            </noscript>
           </div>
-        </section>
-
-        <!-- PORTAL CONTENT (hidden until password is correct) -->
-        <div id="tester-portal-content" style="display: none;">
-          <!-- HERO / INTRO -->
-          <section class="section">
-            <div class="section-eyebrow">Tester portal</div>
-            <h1 class="section-title">Everything you need to test Prox.</h1>
-            <p class="section-text">
-              This page is your hub for testing Prox: download the latest build,
-              grab documentation, and send feedback straight to the team.
+          <div class="portal-card">
+            <h3>2. Check the Focus Areas</h3>
+            <p>
+              Each round of testing will highlight certain flows: matching,
+              chat, meetups, trust, or performance. Focus there first, then
+              explore freely.
             </p>
-          </section>
-
-          <!-- DOWNLOAD + DOCS -->
-          <section class="section section-alt">
-            <div class="grid-2">
-              <!-- Download card -->
-              <div>
-                <div class="card">
-                  <span class="badge">Latest Android build</span>
-                  <h2 style="margin: 0.8rem 0 0.4rem;">Download Prox (.apk)</h2>
-                  <p class="muted" style="font-size: 0.9rem;">
-                    Below is the most recent tester build. Only install this on
-                    devices you’re comfortable using for testing.
-                  </p>
-
-                  <p style="margin: 0.8rem 0 0.2rem;">
-                    <a
-                      href="https://github.com/marolam/prox/releases/download/v1.0/app-release.apk"
-                      class="btn btn-primary"
-                      download
-                    >
-                      Download APK
-                    </a>
-                  </p>
-
-                  <p
-                    class="muted"
-                    style="font-size: 0.82rem; margin-top: 0.4rem;"
-                  >
-                    Build: <strong>Prox Tester v1.0 (Android)</strong><br />
-                    Uploaded: <strong>Dec 2025</strong><br />
-                    Notes: <em>First signed tester build via GitHub Releases.</em>
-                  </p>
-                </div>
-              </div>
-
-              <!-- Docs card -->
-              <div>
-                <div class="card-soft">
-                  <strong style="font-size: 0.9rem;"
-                    >Testing docs & resources</strong
-                  >
-                  <p
-                    class="muted"
-                    style="font-size: 0.88rem; margin-top: 0.4rem;"
-                  >
-                    These documents help you understand what to focus on and how
-                    to report what you find.
-                  </p>
-                  <ul class="check-list">
-                    <li>
-                      <a href="#" class="muted"
-                        >Test Plan – Phase 1 (PDF) –
-                        <em>coming soon</em></a
-                      >
-                    </li>
-                    <li>
-                      <a href="#" class="muted"
-                        >Known Issues / Bugs List – <em>coming soon</em></a
-                      >
-                    </li>
-                    <li>
-                      <a href="#" class="muted"
-                        >Feature Overview – <em>coming soon</em></a
-                      >
-                    </li>
-                  </ul>
-                  <p
-                    class="muted"
-                    style="font-size: 0.8rem; margin-top: 0.6rem;"
-                  >
-                    You can replace these links with PDFs hosted on GitHub,
-                    Google Drive, or anywhere else you prefer.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- UPLOAD / LOGS / SCREENSHOTS -->
-          <section class="section">
-            <div class="grid-2">
-              <div>
-                <div class="section-eyebrow">Uploads</div>
-                <h2 class="section-title">Logs, screenshots, and videos.</h2>
-                <p class="section-text">
-                  When you run into something interesting (good or bad), capture
-                  it. Screenshots, short screen recordings, and logs are
-                  incredibly helpful when reproducing issues.
-                </p>
-                <p class="section-text">
-                  Use the button below to upload files (screenshots, videos, log
-                  files) to the shared folder.
-                </p>
-                <p style="margin-top: 0.8rem;">
-                  <a
-                    href="https://drive.google.com/drive/folders/YOUR_FOLDER_ID_HERE"
-                    target="_blank"
-                    rel="noopener"
-                    class="btn btn-outline"
-                  >
-                    Open upload folder
-                  </a>
-                </p>
-                <p
-                  class="muted"
-                  style="font-size: 0.82rem; margin-top: 0.5rem;"
-                >
-                  Tip: Include your name and date in filenames, e.g.
-                  <code>marty-2025-12-04-login-bug.png</code>.
-                </p>
-              </div>
-
-              <div>
-                <div class="card-soft">
-                  <strong style="font-size: 0.9rem;">What to upload</strong>
-                  <ul class="check-list">
-                    <li>Crashes or freezes – screenshots or screen recordings.</li>
-                    <li>Map / meetup issues – where things didn’t match reality.</li>
-                    <li>Weird UI behavior – things that felt confusing or broken.</li>
-                    <li>Positive surprises – when something felt especially smooth.</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- FEEDBACK FORM (wired to Apps Script / Google Sheet) -->
-          <section class="section section-alt">
-            <div class="section-eyebrow">Feedback</div>
-            <h2 class="section-title">Submit a test report.</h2>
-            <p class="section-text">
-              Use this form to send structured feedback for anything you test:
-              bugs, rough edges, or just observations about how the app feels.
+          </div>
+          <div class="portal-card">
+            <h3>3. Send Feedback Quickly</h3>
+            <p>
+              Use the support form or in-app tools to send bugs, screenshots,
+              and suggestions. Short, honest notes beat long essays.
             </p>
+          </div>
+        </div>
 
-            <div class="section-narrow" style="margin-top: 1.3rem;">
-              <div class="card">
-                <form
-                  action="https://script.google.com/macros/s/AKfycby1msi0HCL9ETusO7Xl-SlLav4O4UIK6kcGNcdjCx1dykcvO-53qolegLP5a84ATxwvzg/exec"
-                  method="POST"
-                  onsubmit="handleTesterFeedbackSubmit()"
-                >
-                  <input
-                    type="hidden"
-                    name="formType"
-                    value="tester-feedback"
-                  />
-
-                  <div class="form-field">
-                    <label for="tf-name">Name</label>
-                    <input id="tf-name" name="name" type="text" required />
-                  </div>
-
-                  <div class="form-field">
-                    <label for="tf-email">Email</label>
-                    <input id="tf-email" name="email" type="email" required />
-                  </div>
-
-                  <div class="form-field">
-                    <label for="tf-build">Build version</label>
-                    <input
-                      id="tf-build"
-                      name="subject"
-                      type="text"
-                      placeholder="e.g. v1.0-android"
-                    />
-                  </div>
-
-                  <div class="form-field">
-                    <label for="tf-area">Area / feature under test</label>
-                    <input
-                      id="tf-area"
-                      name="feature"
-                      type="text"
-                      placeholder="e.g. meetup creation, chat, map"
-                    />
-                  </div>
-
-                  <div class="form-field">
-                    <label for="tf-message">What happened?</label>
-                    <textarea
-                      id="tf-message"
-                      name="message"
-                      placeholder="Describe what you expected vs. what you saw. Include any steps we should follow to reproduce."
-                    ></textarea>
-                  </div>
-
-                  <div class="form-field">
-                    <label for="tf-device">Device & OS (optional)</label>
-                    <input
-                      id="tf-device"
-                      name="deviceInfo"
-                      type="text"
-                      placeholder="e.g. Pixel 7, Android 14"
-                    />
-                  </div>
-
-                  <button class="btn btn-primary" type="submit">
-                    Submit feedback
-                  </button>
-
-                  <div
-                    id="tester-feedback-status"
-                    class="muted"
-                    style="margin-top: 0.6rem; font-size: 0.85rem;"
-                  ></div>
-                </form>
-              </div>
-            </div>
-          </section>
+        <div class="portal-actions">
+          <!-- Replace href with real portal/dashboard link when ready -->
+          <a
+            href="#"
+            class="btn-primary"
+            onclick="alert('Portal sign-in coming soon. Please use the links in your tester email for now.'); return false;"
+          >
+            Sign In to Tester Dashboard
+          </a>
+          <a href="support.html" class="btn-secondary">
+            Go to Support / Feedback
+          </a>
         </div>
       </div>
-    </main>
+    </section>
 
     <!-- FOOTER -->
     <footer>
       <div class="footer-inner">
-        <div>© <span id="year"></span> Prox. All rights reserved.</div>
-        <div class="muted">
-          Bringing the human focus back to the technology world.
-        </div>
+        <div class="footer-logo">PROX</div>
+        <p class="footer-tagline">Let what you seek find you.</p>
+        <p class="footer-copy">&copy; 2025 Prox. All rights reserved.</p>
       </div>
-      <script>
-        document.getElementById("year").textContent =
-          new Date().getFullYear();
-
-        // === SIMPLE FRONT-END PASSWORD GATE ===
-        // Change this value whenever you want a new password.
-        const TESTER_PORTAL_PASSWORD = "prox-test-2025";
-        const STORAGE_KEY = "proxTesterPortalUnlocked";
-
-        function unlockTesterPortal() {
-          var input = document.getElementById("gate-password");
-          var statusEl = document.getElementById("gate-status");
-          if (!input) return;
-
-          var value = (input.value || "").trim();
-
-          if (!value) {
-            if (statusEl) {
-              statusEl.textContent = "Please enter the tester password.";
-            }
-            return;
-          }
-
-          if (value === TESTER_PORTAL_PASSWORD) {
-            try {
-              localStorage.setItem(STORAGE_KEY, "true");
-            } catch (e) {
-              // ignore
-            }
-            showPortal();
-          } else {
-            if (statusEl) {
-              statusEl.textContent = "Incorrect password. Please try again.";
-            }
-          }
-        }
-
-        function showPortal() {
-          var gate = document.getElementById("tester-gate");
-          var portal = document.getElementById("tester-portal-content");
-          if (gate) gate.style.display = "none";
-          if (portal) portal.style.display = "block";
-        }
-
-        (function () {
-          try {
-            var unlocked = localStorage.getItem(STORAGE_KEY);
-            if (unlocked === "true") {
-              showPortal();
-            }
-          } catch (e) {
-            // ignore
-          }
-        })();
-
-        function handleTesterFeedbackSubmit() {
-          var statusEl = document.getElementById("tester-feedback-status");
-          if (statusEl) {
-            statusEl.textContent =
-              "Thank you! Your feedback has been sent to the team.";
-          }
-        }
-      </script>
     </footer>
   </body>
 </html>
