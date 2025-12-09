@@ -26,161 +26,139 @@
               <a href="testers.html" class="active">Testers</a>
               <a href="marketing.html">Marketing</a>
               <a href="support.html">Support</a>
-              <a href="news.html">News</a>
-              <a href="social.html">Social</a>
-              <a href="contact.html">Contact</a>
             </nav>
-            <a href="testers.html" class="btn btn-primary nav-cta">
-              Secure Your Spot
-            </a>
           </div>
         </div>
       </div>
     </header>
 
-    <main>
-      <div class="main-inner">
-        <!-- HERO -->
-        <section class="section">
-          <div class="grid-2">
-            <div>
-              <div class="section-eyebrow">Early access</div>
-              <h1 class="section-title">Secure your spot as a Prox tester.</h1>
-              <p class="section-text">
-                Before we invite the public, we’re opening a limited group of
-                testers who will help shape how Prox works in the real world.
-                You’ll get early builds, a direct line to share feedback, and a
-                say in how meetups, trust, and Prox Points evolve.
-              </p>
-              <p class="section-text">
-                At its core, Prox is about people actually meeting each other.
-                As a tester, your notes and real-life experiences will help us
-                make that process smoother, safer, and more enjoyable.
-              </p>
-              <ul class="check-list">
-                <li>Get early access to the app.</li>
-                <li>Receive clear test instructions for each phase.</li>
-                <li>Submit feedback, issues, and ideas in one place.</li>
-                <li>Help us tune safety and trust features.</li>
-              </ul>
-            </div>
-            <div>
-              <div class="card">
-                <span class="badge">Tester signup</span>
-                <h2 style="margin: 0.8rem 0 0.4rem;">Apply to join the list</h2>
-                <p class="muted" style="font-size: 0.88rem;">
-                  Fill out this quick form and we’ll follow up with the next
-                  steps, including when and how you’ll get access to the testing
-                  builds.
-                </p>
-
-                <form
-                  action="https://script.google.com/macros/s/AKfycby1msi0HCL9ETusO7Xl-SlLav4O4UIK6kcGNcdjCx1dykcvO-53qolegLP5a84ATxwvzg/exec"
-                  method="POST"
-                  onsubmit="handleTesterSubmit()"
-                >
-                  <input type="hidden" name="formType" value="tester-signup" />
-
-                  <div class="form-field">
-                    <label for="t-name">Name</label>
-                    <input id="t-name" name="name" type="text" required />
-                  </div>
-
-                  <div class="form-field">
-                    <label for="t-email">Email</label>
-                    <input id="t-email" name="email" type="email" required />
-                  </div>
-
-                  <div class="form-field">
-                    <label for="t-location">City / Region</label>
-                    <input id="t-location" name="subject" type="text" />
-                  </div>
-
-                  <div class="form-field">
-                    <label for="t-why">Why are you interested in testing Prox?</label>
-                    <textarea id="t-why" name="message"></textarea>
-                  </div>
-
-                  <button class="btn btn-primary" type="submit">
-                    Request tester access
-                  </button>
-
-                  <div
-                    id="tester-status"
-                    class="muted"
-                    style="margin-top: 0.6rem; font-size: 0.85rem;"
-                  ></div>
-                </form>
-
-                <script>
-                  function handleTesterSubmit() {
-                    var statusEl = document.getElementById("tester-status");
-                    if (statusEl) {
-                      statusEl.textContent =
-                        "Thank you! Your request has been sent. We'll be in touch soon.";
-                    }
-                  }
-                </script>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- TESTER RESOURCES -->
-        <section class="section section-alt">
-          <div class="grid-2">
-            <div>
-              <div class="section-eyebrow">Tester portal</div>
-              <h2 class="section-title">Your testing hub, all in one place.</h2>
-              <p class="section-text">
-                Once you’re approved as a tester, the portal is where you’ll
-                download builds, see current focus areas, and send in feedback.
-              </p>
-              <ul class="check-list">
-                <li>Download the latest test builds.</li>
-                <li>Read test plans and what’s new in each version.</li>
-                <li>Upload logs, screenshots, or meetup notes.</li>
-                <li>See which features are in focus this week.</li>
-              </ul>
-              <p class="section-text" style="margin-top: 1.2rem;">
-                Already an approved tester?
-              </p>
-              <div class="hero-actions" style="margin-top: 0.6rem;">
-                <a href="tester-portal.html" class="btn btn-outline">
-                  Go to the Tester Portal
-                </a>
-              </div>
-            </div>
-            <div>
-              <div class="card-soft">
-                <strong style="font-size: 0.9rem;">What we’re looking for</strong>
-                <ul class="check-list">
-                  <li>People who actually plan to meet up with others.</li>
-                  <li>Honest feedback – what felt smooth, what didn’t.</li>
-                  <li>Attention to safety and comfort in real-world use.</li>
-                  <li>
-                    A mix of casual users, helpers, and business-minded folks.
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </section>
+    <!-- HERO SECTION -->
+    <section class="hero testers-hero">
+      <div class="hero-content">
+        <h1>Become a Prox Tester</h1>
+        <p>
+          Help shape the future of real-world meetups. As a tester, you’ll get
+          early access, a direct line to the team, and a visible impact on
+          how Prox behaves in the wild.
+        </p>
+        <a href="#apply" class="btn-primary">Apply Now</a>
       </div>
-    </main>
+    </section>
+
+    <!-- WHY TEST SECTION -->
+    <section class="why-test">
+      <div class="section-inner">
+        <h2>Why Join the Tester Program?</h2>
+        <div class="why-grid">
+          <div class="why-item">
+            <h3>Early Access</h3>
+            <p>
+              Use features before they go public—matching, live meetups, trust
+              system, and more.
+            </p>
+          </div>
+          <div class="why-item">
+            <h3>Direct Input</h3>
+            <p>
+              Report bugs, suggest improvements, and see your feedback reflected
+              in updates.
+            </p>
+          </div>
+          <div class="why-item">
+            <h3>Tester Status</h3>
+            <p>
+              Earn in-app tester recognition and have a stronger voice as we
+              grow the community.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- APPLICATION SECTION -->
+    <section id="apply" class="apply-section">
+      <div class="section-inner">
+        <h2>Apply to Test</h2>
+        <p>
+          We’re reviewing applications for a limited group of early testers. The
+          first rounds will be small on purpose so we can respond quickly and
+          keep the experience stable.
+        </p>
+
+        <form
+          class="apply-form"
+          action="https://formsubmit.co/YOUR_TESTER_EMAIL_HERE"
+          method="POST"
+        >
+          <input type="hidden" name="_captcha" value="false" />
+          <input
+            type="hidden"
+            name="_subject"
+            value="New Prox tester application"
+          />
+          <input
+            type="hidden"
+            name="_template"
+            value="table"
+          />
+
+          <label>
+            Name
+            <input type="text" name="name" required />
+          </label>
+
+          <label>
+            Email
+            <input type="email" name="email" required />
+          </label>
+
+          <label>
+            City / Region
+            <input type="text" name="location" required />
+          </label>
+
+          <label>
+            Devices You Can Test On
+            <input
+              type="text"
+              name="devices"
+              placeholder="Android phone, Android tablet, etc."
+            />
+          </label>
+
+          <label>
+            How experienced are you with testing apps or giving feedback?
+            <select name="experience">
+              <option value="new">New to testing</option>
+              <option value="casual">I’ve done casual testing before</option>
+              <option value="experienced">
+                I’ve done structured beta testing
+              </option>
+            </select>
+          </label>
+
+          <label>
+            Why would you like to help test Prox?
+            <textarea
+              name="motivation"
+              rows="4"
+              placeholder="What makes this interesting or important to you?"
+              required
+            ></textarea>
+          </label>
+
+          <button type="submit" class="btn-primary">Submit Application</button>
+        </form>
+      </div>
+    </section>
 
     <!-- FOOTER -->
     <footer>
       <div class="footer-inner">
-        <div>© <span id="year"></span> Prox. All rights reserved.</div>
-        <div class="muted">
-          Bringing the human focus back to the technology world.
-        </div>
+        <div class="footer-logo">PROX</div>
+        <p class="footer-tagline">Let what you seek find you.</p>
+        <p class="footer-copy">&copy; 2025 Prox. All rights reserved.</p>
       </div>
-      <script>
-        document.getElementById("year").textContent =
-          new Date().getFullYear();
-      </script>
     </footer>
   </body>
 </html>
