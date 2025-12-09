@@ -2,10 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Prox Support</title>
+    <title>Prox – Support</title>
     <meta
       name="description"
-      content="Find answers, report issues, and get help with the Prox app."
+      content="Get help with Prox, report a bug, or send feedback to the team."
     />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="styles.css" />
@@ -26,140 +26,128 @@
               <a href="testers.html">Testers</a>
               <a href="marketing.html">Marketing</a>
               <a href="support.html" class="active">Support</a>
-              <a href="news.html">News</a>
-              <a href="social.html">Social</a>
-              <a href="contact.html">Contact</a>
             </nav>
-            <a href="testers.html" class="btn btn-primary nav-cta">
-              Secure Your Spot
-            </a>
           </div>
         </div>
       </div>
     </header>
 
-    <main>
-      <div class="main-inner">
-        <section class="section">
-          <div class="section-eyebrow">Help center</div>
-          <h1 class="section-title">Support, safety, and answers.</h1>
-          <p class="section-text">
-            This page is the starting point when something doesn’t feel right,
-            doesn’t work, or you just need clarity on how Prox behaves.
-          </p>
-        </section>
-
-        <section class="section section-alt">
-          <div class="grid-2">
-            <div>
-              <h2 class="section-title">Common topics.</h2>
-              <table class="simple-table">
-                <thead>
-                  <tr>
-                    <th>Topic</th>
-                    <th>Summary</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>Account & login</td>
-                    <td>Basic account access, verification, and settings.</td>
-                  </tr>
-                  <tr>
-                    <td>Meetups & location</td>
-                    <td>How meetup points, live location, and arrival work.</td>
-                  </tr>
-                  <tr>
-                    <td>Trust & ratings</td>
-                    <td>How ratings, flags, and Prox Points are used.</td>
-                  </tr>
-                  <tr>
-                    <td>Safety concerns</td>
-                    <td>What to do if someone makes you uncomfortable.</td>
-                  </tr>
-                  <tr>
-                    <td>Bug reports</td>
-                    <td>How to share screenshots, steps, and device info.</td>
-                  </tr>
-                </tbody>
-              </table>
-              <p class="section-text" style="margin-top: 1rem;">
-                A more detailed FAQ will appear here as we launch testing and
-                see which questions come up most often.
-              </p>
-            </div>
-            <div>
-              <div class="card">
-                <span class="badge">Contact support</span>
-                <h2 style="margin: 0.8rem 0 0.4rem;">Need direct help?</h2>
-                <p class="muted" style="font-size: 0.88rem;">
-                  Use the form below to reach the Prox team. For urgent safety
-                  issues during a meetup, always prioritize your physical safety
-                  and contact local authorities if needed before anything else.
-                </p>
-               <form
-  action="https://script.google.com/macros/s/AKfycby1msi0HCL9ETusO7Xl-SlLav4O4UIK6kcGNcdjCx1dykcvO-53qolegLP5a84ATxwvzg/exec"
-  method="POST"
-  onsubmit="handleSupportSubmit()"
->
-  <input type="hidden" name="formType" value="support-ticket" />
-
-  <div class="form-field">
-    <label for="s-email">Email</label>
-    <input id="s-email" name="email" type="email" required />
-  </div>
-
-  <div class="form-field">
-    <label for="s-topic">Topic</label>
-    <input id="s-topic" name="subject" type="text" />
-  </div>
-
-  <div class="form-field">
-    <label for="s-message">Message</label>
-    <textarea id="s-message" name="message"></textarea>
-  </div>
-
-  <button class="btn btn-primary" type="submit">
-    Send to support
-  </button>
-
-  <div
-    id="support-status"
-    class="muted"
-    style="margin-top: 0.6rem; font-size: 0.85rem;"
-  ></div>
-</form>
-
-<script>
-  function handleSupportSubmit() {
-    var statusEl = document.getElementById("support-status");
-    if (statusEl) {
-      statusEl.textContent =
-        "Thank you! Your message has been sent to support.";
-    }
-  }
-</script>
-
-
-              </div>
-            </div>
-          </div>
-        </section>
+    <!-- HERO -->
+    <section class="hero support-hero">
+      <div class="hero-content">
+        <h1>Support & Feedback</h1>
+        <p>
+          Need help, found a bug, or have an idea to make Prox better? Use the
+          form below and we’ll follow up as soon as we can.
+        </p>
       </div>
-    </main>
+    </section>
+
+    <!-- SUPPORT FORM -->
+    <section class="signup-section">
+      <div class="section-inner">
+        <h2>Create a Support Ticket</h2>
+        <p>
+          During early testing, this form is the main way to reach us. Please
+          include as much detail as you can, especially device and steps taken.
+        </p>
+
+        <form
+          class="simple-form"
+          action="https://formsubmit.co/YOUR_SUPPORT_EMAIL_HERE"
+          method="POST"
+        >
+          <input type="hidden" name="_captcha" value="false" />
+          <input
+            type="hidden"
+            name="_subject"
+            value="New Prox support ticket"
+          />
+          <input
+            type="hidden"
+            name="_template"
+            value="table"
+          />
+
+          <label>
+            Name
+            <input type="text" name="name" required />
+          </label>
+
+          <label>
+            Email
+            <input type="email" name="email" required />
+          </label>
+
+          <label>
+            Are you a tester?
+            <select name="tester_status">
+              <option value="yes">Yes, I’m in the tester group</option>
+              <option value="no">Not yet / just heard about Prox</option>
+            </select>
+          </label>
+
+          <label>
+            Issue Type
+            <select name="issue_type">
+              <option value="bug">Bug / something broken</option>
+              <option value="account">Account or login issue</option>
+              <option value="suggestion">Suggestion / idea</option>
+              <option value="meetup">Meetup-related concern</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+
+          <label>
+            Priority
+            <select name="priority">
+              <option value="low">Low – whenever you have time</option>
+              <option value="normal">Normal</option>
+              <option value="high">High – blocking me from using Prox</option>
+            </select>
+          </label>
+
+          <label>
+            Subject
+            <input
+              type="text"
+              name="subject"
+              placeholder="Short summary of the issue"
+              required
+            />
+          </label>
+
+          <label>
+            Description
+            <textarea
+              name="description"
+              rows="5"
+              placeholder="What happened? What were you trying to do? Any error messages or screenshots?"
+              required
+            ></textarea>
+          </label>
+
+          <label>
+            Device & OS (optional)
+            <input
+              type="text"
+              name="device"
+              placeholder="Example: Pixel 7, Android 14"
+            />
+          </label>
+
+          <button type="submit" class="btn-primary">Submit Ticket</button>
+        </form>
+      </div>
+    </section>
 
     <!-- FOOTER -->
     <footer>
       <div class="footer-inner">
-        <div>© <span id="year"></span> Prox. All rights reserved.</div>
-        <div class="muted">
-          Bringing the human focus back to the technology world.
-        </div>
+        <div class="footer-logo">PROX</div>
+        <p class="footer-tagline">Let what you seek find you.</p>
+        <p class="footer-copy">&copy; 2025 Prox. All rights reserved.</p>
       </div>
-      <script>
-        document.getElementById("year").textContent =
-          new Date().getFullYear();
-      </script>
     </footer>
   </body>
 </html>
