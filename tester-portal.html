@@ -9,6 +9,67 @@
     />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="styles.css" />
+    <style>
+      /* Optional: small inline tweaks specific to portal */
+      .portal-guard {
+        max-width: 480px;
+        margin: 3rem auto;
+        padding: 2rem;
+        border-radius: 12px;
+        background: #101010;
+        color: #f5f5f5;
+        text-align: left;
+      }
+      .portal-guard h2 {
+        margin-top: 0;
+      }
+      .portal-guard label {
+        display: block;
+        margin-top: 1rem;
+      }
+      .portal-guard input[type="password"] {
+        width: 100%;
+        padding: 0.6rem 0.8rem;
+        margin-top: 0.4rem;
+        border-radius: 8px;
+        border: 1px solid #444;
+        background: #181818;
+        color: #f5f5f5;
+      }
+      .portal-guard button {
+        margin-top: 1.2rem;
+        width: 100%;
+      }
+      .portal-error {
+        margin-top: 0.75rem;
+        font-size: 0.9rem;
+        color: #ff6b6b;
+        min-height: 1.2em;
+      }
+      .portal-note {
+        margin-top: 0.75rem;
+        font-size: 0.85rem;
+        color: #bbbbbb;
+      }
+
+      .portal-actions {
+        margin-top: 2rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+      }
+      .portal-actions .btn-primary,
+      .portal-actions .btn-secondary {
+        flex: 1 1 220px;
+        text-align: center;
+      }
+
+      .download-note {
+        font-size: 0.9rem;
+        margin-top: 0.5rem;
+        color: #bbbbbb;
+      }
+    </style>
   </head>
   <body>
     <!-- HEADER -->
@@ -44,58 +105,100 @@
       </div>
     </section>
 
-    <!-- PORTAL CONTENT -->
-    <section class="portal-section">
+    <!-- PASSWORD GATE -->
+    <section id="portal-gate">
       <div class="section-inner">
-        <h2>Welcome, Testers</h2>
-        <p>
-          Once you’ve been accepted into the tester program, this portal will
-          contain:
-        </p>
-        <ul class="portal-list">
-          <li>Download links or store instructions for the latest test build</li>
-          <li>What’s new in this build (features to try, areas to stress-test)</li>
-          <li>Links to feedback forms and support</li>
-          <li>Known issues and any temporary workarounds</li>
-        </ul>
+        <div class="portal-guard">
+          <h2>Tester Access</h2>
+          <p>
+            This area is for approved testers. Use the password from your
+            tester email to unlock the portal.
+          </p>
 
-        <div class="portal-callouts">
-          <div class="portal-card">
-            <h3>1. Get the Latest Build</h3>
-            <p>
-              Follow the instructions in your tester email to install the
-              current version on your device. We’ll keep this space updated with
-              release notes as we go.
-            </p>
-          </div>
-          <div class="portal-card">
-            <h3>2. Check the Focus Areas</h3>
-            <p>
-              Each round of testing will highlight certain flows: matching,
-              chat, meetups, trust, or performance. Focus there first, then
-              explore freely.
-            </p>
-          </div>
-          <div class="portal-card">
-            <h3>3. Send Feedback Quickly</h3>
-            <p>
-              Use the support form or in-app tools to send bugs, screenshots,
-              and suggestions. Short, honest notes beat long essays.
-            </p>
-          </div>
+          <form id="portal-password-form">
+            <label for="portal-password">
+              Portal Password
+              <input
+                type="password"
+                id="portal-password"
+                autocomplete="current-password"
+                required
+              />
+            </label>
+            <button type="submit" class="btn-primary">Unlock Portal</button>
+            <div id="portal-error" class="portal-error"></div>
+            <div class="portal-note">
+              If you don’t have the password yet, check your tester welcome
+              email or contact us through the
+              <a href="support.html">Support page</a>.
+            </div>
+          </form>
         </div>
+      </div>
+    </section>
 
+    <!-- PORTAL CONTENT (HIDDEN UNTIL UNLOCKED) -->
+    <section id="portal-content" class="portal-section" style="display: none;">
+      <div class="section-inner">
+        <h2>Welcome, Prox Tester</h2>
+        <p>
+          Thanks for helping us shape Prox. Below you’ll find the latest build,
+          what to focus on during this round, and where to send feedback.
+        </p>
+
+        <!-- APK DOWNLOAD -->
+        <h3>Download the Latest Android Build</h3>
+        <p>
+          Install this APK on your Android device. Make sure you’re comfortable
+          installing from unknown sources for testing purposes.
+        </p>
         <div class="portal-actions">
-          <!-- Replace href with real portal/dashboard link when ready -->
           <a
-            href="#"
+            href="YOUR_APK_URL_HERE.apk"
             class="btn-primary"
-            onclick="alert('Portal sign-in coming soon. Please use the links in your tester email for now.'); return false;"
+            download
           >
-            Sign In to Tester Dashboard
+            Download Prox Tester APK
           </a>
           <a href="support.html" class="btn-secondary">
-            Go to Support / Feedback
+            Report Install Issues
+          </a>
+        </div>
+        <p class="download-note">
+          Tip: After installing a new build, open Prox, sign in, and let it sit
+          for a minute so presence and permissions can settle before stress
+          testing.
+        </p>
+
+        <!-- WHAT TO TEST -->
+        <h3 style="margin-top: 2.5rem;">Focus Areas for This Round</h3>
+        <ul class="portal-list">
+          <li>✅ Basic signup and onboarding flow</li>
+          <li>✅ Matching & seeing nearby users</li>
+          <li>✅ Chat: sending/receiving messages and images</li>
+          <li>✅ Meetups: planning, confirming arrival, and giving feedback</li>
+        </ul>
+        <p>
+          If something feels confusing, slow, or clunky, make a note of it—those
+          moments are gold for us.
+        </p>
+
+        <!-- FEEDBACK ROUTES -->
+        <h3 style="margin-top: 2.5rem;">Send Feedback & Bugs</h3>
+        <p>
+          For now, please use the Support form to report issues or suggestions.
+          Include:
+        </p>
+        <ul class="portal-list">
+          <li>What you were trying to do</li>
+          <li>What actually happened</li>
+          <li>Your device model and Android version</li>
+          <li>Screenshots if possible</li>
+        </ul>
+
+        <div class="portal-actions">
+          <a href="support.html" class="btn-primary">
+            Open Support / Feedback Form
           </a>
         </div>
       </div>
@@ -109,5 +212,44 @@
         <p class="footer-copy">&copy; 2025 Prox. All rights reserved.</p>
       </div>
     </footer>
+
+    <!-- SIMPLE FRONT-END PASSWORD CHECK -->
+    <script>
+      (function () {
+        // NOTE: This is a light gate only. For real security, use server-side auth.
+        const PORTAL_PASSWORD = "CHANGE_THIS_PASSWORD"; // <<< set your password here
+
+        const form = document.getElementById("portal-password-form");
+        const input = document.getElementById("portal-password");
+        const errorEl = document.getElementById("portal-error");
+        const gateSection = document.getElementById("portal-gate");
+        const contentSection = document.getElementById("portal-content");
+
+        function unlockPortal() {
+          gateSection.style.display = "none";
+          contentSection.style.display = "block";
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+
+        form.addEventListener("submit", function (e) {
+          e.preventDefault();
+          const value = (input.value || "").trim();
+
+          if (!value) {
+            errorEl.textContent = "Please enter the password.";
+            return;
+          }
+
+          if (value === PORTAL_PASSWORD) {
+            errorEl.textContent = "";
+            unlockPortal();
+          } else {
+            errorEl.textContent = "Incorrect password. Please try again.";
+            input.value = "";
+            input.focus();
+          }
+        });
+      })();
+    </script>
   </body>
 </html>
