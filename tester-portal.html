@@ -5,24 +5,10 @@
     <title>Prox Tester Portal</title>
     <meta
       name="description"
-      content="Prox tester portal – download builds, read test plans, and submit feedback."
+      content="Prox tester portal – download builds, upload screenshots, and send feedback."
     />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="styles.css" />
-
-    <!-- Firebase JS SDK (compat) -->
-    <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-auth-compat.js"></script>
-
-    <script>
-      // TODO: Paste your real Firebase web app config here
-      // from the Firebase console (Project settings → General → Your apps → Web app).
-      const firebaseConfig = {
-      };
-
-      firebase.initializeApp(firebaseConfig);
-      const auth = firebase.auth();
-    </script>
   </head>
   <body>
     <!-- HEADER -->
@@ -31,6 +17,7 @@
         <div class="nav-bar">
           <div class="nav-left">
             <a href="index.html" class="nav-logo-link">
+              <!-- Update the src path/filename to match your actual logo -->
               <img
                 src="img/prox-logo.svg"
                 alt="Prox logo"
@@ -55,44 +42,35 @@
 
     <main>
       <div class="main-inner">
-        <!-- LOGIN GATE -->
-        <section class="section" id="tester-login-section">
+        <!-- PASSWORD GATE -->
+        <section class="section" id="tester-gate">
           <div class="section-narrow">
             <div class="section-eyebrow">Tester access</div>
-            <h1 class="section-title">Tester login.</h1>
+            <h1 class="section-title">Enter tester password.</h1>
             <p class="section-text">
-              This area is reserved for approved Prox testers. Use the email and
-              password we set up for you. If you need help, reach out to Marty.
+              This area is reserved for approved Prox testers. Use the shared
+              tester password Marty gave you. If it doesn’t work, ask for the
+              latest one.
             </p>
 
             <div class="card" style="margin-top: 1.2rem;">
               <div class="form-field">
-                <label for="login-email">Email</label>
+                <label for="gate-password">Tester password</label>
                 <input
-                  id="login-email"
-                  type="email"
-                  autocomplete="email"
-                  placeholder="you@example.com"
-                />
-              </div>
-              <div class="form-field">
-                <label for="login-password">Password</label>
-                <input
-                  id="login-password"
+                  id="gate-password"
                   type="password"
-                  autocomplete="current-password"
-                  placeholder="Your tester password"
+                  placeholder="Enter tester password"
                 />
               </div>
               <button
                 class="btn btn-primary"
                 type="button"
-                onclick="handleTesterLogin()"
+                onclick="unlockTesterPortal()"
               >
-                Log in
+                Unlock portal
               </button>
               <div
-                id="login-status"
+                id="gate-status"
                 class="muted"
                 style="margin-top: 0.6rem; font-size: 0.85rem;"
               ></div>
@@ -107,123 +85,82 @@
           </div>
         </section>
 
-        <!-- PORTAL CONTENT (only visible when logged in) -->
+        <!-- PORTAL CONTENT (hidden until password is correct) -->
         <div id="tester-portal-content" style="display: none;">
           <!-- HERO / INTRO -->
           <section class="section">
             <div class="section-eyebrow">Tester portal</div>
-            <h1 class="section-title">Everything you need to test Prox.</h1>
+            <h1 class="section-title">Your Prox testing workspace.</h1>
             <p class="section-text">
-              This page is your hub for testing Prox: download the latest build,
-              grab documentation, and send feedback straight to the team.
-            </p>
-            <p class="section-text">
-              <button
-                class="btn btn-outline"
-                type="button"
-                onclick="handleTesterLogout()"
-              >
-                Log out
-              </button>
+              Use this page to get the latest build, upload screenshots or
+              videos, and send in reports, bugs, suggestions, and testimonials.
             </p>
           </section>
 
           <!-- DOWNLOAD + DOCS -->
           <section class="section section-alt">
             <div class="grid-2">
-              <!-- Download card -->
               <div>
-                <div class="card">
-                  <span class="badge">Latest Android build</span>
-                  <h2 style="margin: 0.8rem 0 0.4rem;">Download Prox (.apk)</h2>
-                  <p class="muted" style="font-size: 0.9rem;">
-                    Below is the most recent tester build. Only install this on
-                    devices you’re comfortable using for testing.
-                  </p>
-
-                  <p style="margin: 0.8rem 0 0.2rem;">
+                <h2 class="section-title">Download & docs.</h2>
+                <p class="section-text">
+                  Always start here. Install the latest tester build and review
+                  any notes before you dive in.
+                </p>
+                <div style="margin-top: 0.9rem;">
+                  <p style="margin: 0.2rem 0;">
                     <a
                       href="https://github.com/marolam/prox/releases/download/v1.0/app-release.apk"
                       class="btn btn-primary"
                       download
                     >
-                      Download APK
+                      Download latest Android APK
                     </a>
                   </p>
-
-                  <p
-                    class="muted"
-                    style="font-size: 0.82rem; margin-top: 0.4rem;"
-                  >
-                    Build: <strong>Prox Tester v1.0 (Android)</strong><br />
-                    Uploaded: <strong>Dec 2025</strong><br />
-                    Notes:
-                    <em>First signed tester build via GitHub Releases.</em>
+                  <p style="margin: 0.4rem 0 0;">
+                    <!-- TODO: replace with real docs link when ready -->
+                    <a
+                      href="#"
+                      class="btn btn-outline"
+                    >
+                      Open release notes & docs (coming soon)
+                    </a>
                   </p>
                 </div>
+                <p class="muted" style="font-size: 0.82rem; margin-top: 0.8rem;">
+                  Update the APK link above whenever you publish a new build.
+                </p>
               </div>
 
-              <!-- Docs card -->
               <div>
                 <div class="card-soft">
-                  <strong style="font-size: 0.9rem;"
-                    >Testing docs & resources</strong
-                  >
-                  <p
-                    class="muted"
-                    style="font-size: 0.88rem; margin-top: 0.4rem;"
-                  >
-                    These documents help you understand what to focus on and how
-                    to report what you find.
-                  </p>
+                  <strong style="font-size: 0.9rem;">Quick checklist</strong>
                   <ul class="check-list">
+                    <li>Install the latest build over any older tester build.</li>
+                    <li>Glance at the notes for what’s new or in focus.</li>
                     <li>
-                      <a href="#" class="muted"
-                        >Test Plan – Phase 1 (PDF) –
-                        <em>coming soon</em></a
-                      >
-                    </li>
-                    <li>
-                      <a href="#" class="muted"
-                        >Known Issues / Bugs List – <em>coming soon</em></a
-                      >
-                    </li>
-                    <li>
-                      <a href="#" class="muted"
-                        >Feature Overview – <em>coming soon</em></a
-                      >
+                      Pick one area to explore per session (meetups, chat, map,
+                      trust, etc.).
                     </li>
                   </ul>
-                  <p
-                    class="muted"
-                    style="font-size: 0.8rem; margin-top: 0.6rem;"
-                  >
-                    You can replace these links with PDFs hosted on GitHub,
-                    Google Drive, or anywhere else you prefer.
-                  </p>
                 </div>
               </div>
             </div>
           </section>
 
-          <!-- UPLOAD / LOGS / SCREENSHOTS -->
+          <!-- UPLOADS -->
           <section class="section">
             <div class="grid-2">
               <div>
-                <div class="section-eyebrow">Uploads</div>
-                <h2 class="section-title">Logs, screenshots, and videos.</h2>
+                <h2 class="section-title">Upload screenshots & files.</h2>
                 <p class="section-text">
-                  When you run into something interesting (good or bad), capture
-                  it. Screenshots, short screen recordings, and logs are
-                  incredibly helpful when reproducing issues.
+                  When you catch something, grab it. Screenshots, short screen
+                  recordings, or logs are all useful. Drop them into the shared
+                  upload area.
                 </p>
-                <p class="section-text">
-                  Use the button below to upload files (screenshots, videos, log
-                  files) to the shared folder.
-                </p>
-                <p style="margin-top: 0.8rem;">
+                <!-- TODO: replace href with your Drive file request / folder -->
+                <p style="margin-top: 0.9rem;">
                   <a
-                    href="https://drive.google.com/drive/folders/YOUR_FOLDER_ID_HERE"
+                    href="https://drive.google.com/drive/folders/YOUR_UPLOAD_FOLDER_ID"
                     target="_blank"
                     rel="noopener"
                     class="btn btn-outline"
@@ -231,36 +168,33 @@
                     Open upload folder
                   </a>
                 </p>
-                <p
-                  class="muted"
-                  style="font-size: 0.82rem; margin-top: 0.5rem;"
-                >
+                <p class="muted" style="font-size: 0.82rem; margin-top: 0.5rem;">
                   Tip: Include your name and date in filenames, e.g.
-                  <code>marty-2025-12-04-login-bug.png</code>.
+                  <code>marty-2025-12-04-meetup-bug.png</code>.
                 </p>
               </div>
 
               <div>
                 <div class="card-soft">
-                  <strong style="font-size: 0.9rem;">What to upload</strong>
+                  <strong style="font-size: 0.9rem;">Useful uploads</strong>
                   <ul class="check-list">
-                    <li>Crashes or freezes – screenshots or screen recordings.</li>
-                    <li>Map / meetup issues – where things didn’t match reality.</li>
-                    <li>Weird UI behavior – things that felt confusing or broken.</li>
-                    <li>Positive surprises – when something felt especially smooth.</li>
+                    <li>Bug visuals – crashes, glitches, broken layouts.</li>
+                    <li>Map / meetup mismatches – wrong locations or distances.</li>
+                    <li>Weird flows – places where you got stuck or confused.</li>
+                    <li>Happy moments – when something felt especially smooth.</li>
                   </ul>
                 </div>
               </div>
             </div>
           </section>
 
-          <!-- FEEDBACK FORM (wired to Apps Script / Google Sheet) -->
+          <!-- FEEDBACK FORM -->
           <section class="section section-alt">
-            <div class="section-eyebrow">Feedback</div>
-            <h2 class="section-title">Submit a test report.</h2>
+            <h2 class="section-title">Send a report, bug, or testimonial.</h2>
             <p class="section-text">
-              Use this form to send structured feedback for anything you test:
-              bugs, rough edges, or just observations about how the app feels.
+              Use this form for anything you want to share: bugs, suggestions,
+              general reports, or positive stories. It all goes straight into
+              the same pipeline.
             </p>
 
             <div class="section-narrow" style="margin-top: 1.3rem;">
@@ -287,6 +221,16 @@
                   </div>
 
                   <div class="form-field">
+                    <label for="tf-type">Type of feedback</label>
+                    <select id="tf-type" name="category">
+                      <option value="bug">Bug</option>
+                      <option value="suggestion">Suggestion</option>
+                      <option value="testimonial">Testimonial</option>
+                      <option value="general">General report</option>
+                    </select>
+                  </div>
+
+                  <div class="form-field">
                     <label for="tf-build">Build version</label>
                     <input
                       id="tf-build"
@@ -297,21 +241,11 @@
                   </div>
 
                   <div class="form-field">
-                    <label for="tf-area">Area / feature under test</label>
-                    <input
-                      id="tf-area"
-                      name="feature"
-                      type="text"
-                      placeholder="e.g. meetup creation, chat, map"
-                    />
-                  </div>
-
-                  <div class="form-field">
-                    <label for="tf-message">What happened?</label>
+                    <label for="tf-message">What happened / what’s your idea?</label>
                     <textarea
                       id="tf-message"
                       name="message"
-                      placeholder="Describe what you expected vs. what you saw. Include any steps we should follow to reproduce."
+                      placeholder="Bug: steps to reproduce, what you expected, what you saw. Suggestion/testimonial: just talk to us."
                     ></textarea>
                   </div>
 
@@ -354,77 +288,55 @@
         document.getElementById("year").textContent =
           new Date().getFullYear();
 
-        // Handle login
-        function handleTesterLogin() {
-          const emailInput = document.getElementById("login-email");
-          const passInput = document.getElementById("login-password");
-          const statusEl = document.getElementById("login-status");
+        // === SIMPLE FRONT-END PASSWORD GATE ===
+        // Change this value whenever you want a new password.
+        const TESTER_PORTAL_PASSWORD = "prox-test-2025";
+        const STORAGE_KEY = "proxTesterPortalUnlocked";
 
-          const email = (emailInput.value || "").trim();
-          const password = passInput.value || "";
+        function unlockTesterPortal() {
+          const input = document.getElementById("gate-password");
+          const statusEl = document.getElementById("gate-status");
+          if (!input) return;
 
-          if (!email || !password) {
+          const value = (input.value || "").trim();
+
+          if (!value) {
             if (statusEl) {
-              statusEl.textContent = "Please enter both email and password.";
+              statusEl.textContent = "Please enter the tester password.";
             }
             return;
           }
 
-          if (statusEl) {
-            statusEl.textContent = "Signing in...";
+          if (value === TESTER_PORTAL_PASSWORD) {
+            try {
+              localStorage.setItem(STORAGE_KEY, "true");
+            } catch (e) {}
+            showPortal();
+          } else {
+            if (statusEl) {
+              statusEl.textContent = "Incorrect password. Please try again.";
+            }
           }
-
-          auth
-            .signInWithEmailAndPassword(email, password)
-            .then(() => {
-              if (statusEl) {
-                statusEl.textContent = "";
-              }
-              showPortal();
-            })
-            .catch((err) => {
-              console.error(err);
-              if (statusEl) {
-                statusEl.textContent =
-                  "Login failed. Check your credentials or contact Marty.";
-              }
-            });
-        }
-
-        function handleTesterLogout() {
-          auth.signOut().catch((err) => console.error(err));
         }
 
         function showPortal() {
-          const loginSection = document.getElementById(
-            "tester-login-section"
-          );
+          const gate = document.getElementById("tester-gate");
           const portal = document.getElementById("tester-portal-content");
-          if (loginSection) loginSection.style.display = "none";
+          if (gate) gate.style.display = "none";
           if (portal) portal.style.display = "block";
         }
 
-        function showLogin() {
-          const loginSection = document.getElementById(
-            "tester-login-section"
-          );
-          const portal = document.getElementById("tester-portal-content");
-          if (portal) portal.style.display = "none";
-          if (loginSection) loginSection.style.display = "block";
-        }
+        (function () {
+          try {
+            const unlocked = localStorage.getItem(STORAGE_KEY);
+            if (unlocked === "true") {
+              showPortal();
+            }
+          } catch (e) {}
+        })();
 
-        // Watch auth state
-        auth.onAuthStateChanged((user) => {
-          if (user) {
-            showPortal();
-          } else {
-            showLogin();
-          }
-        });
-
-        // Feedback form status
         function handleTesterFeedbackSubmit() {
-          var statusEl = document.getElementById("tester-feedback-status");
+          const statusEl = document.getElementById("tester-feedback-status");
           if (statusEl) {
             statusEl.textContent =
               "Thank you! Your feedback has been sent to the team.";
