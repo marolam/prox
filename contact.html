@@ -65,54 +65,41 @@
             <div>
               <div class="card">
                 <span class="badge">Message us</span>
-              <form
-  action="https://script.google.com/macros/s/AKfycby1msi0HCL9ETusO7Xl-SlLav4O4UIK6kcGNcdjCx1dykcvO-53qolegLP5a84ATxwvzg/exec"
-  method="POST"
-  onsubmit="handleContactSubmit()"
->
-  <input type="hidden" name="formType" value="contact" />
+                <form
+                  action="https://script.google.com/macros/s/AKfycby1msi0HCL9ETusO7Xl-SlLav4O4UIK6kcGNcdjCx1dykcvO-53qolegLP5a84ATxwvzg/exec"
+                  method="POST"
+                  onsubmit="handleContactSubmit()"
+                >
+                  <input type="hidden" name="formType" value="contact" />
 
-  <div class="form-field">
-    <label for="c-name">Name</label>
-    <input id="c-name" name="name" type="text" required />
-  </div>
+                  <div class="form-field">
+                    <label for="c-name">Name</label>
+                    <input id="c-name" name="name" type="text" required />
+                  </div>
 
-  <div class="form-field">
-    <label for="c-email">Email</label>
-    <input id="c-email" name="email" type="email" required />
-  </div>
+                  <div class="form-field">
+                    <label for="c-email">Email</label>
+                    <input id="c-email" name="email" type="email" required />
+                  </div>
 
-  <div class="form-field">
-    <label for="c-type">Subject</label>
-    <input id="c-type" name="subject" type="text" />
-  </div>
+                  <div class="form-field">
+                    <label for="c-type">Subject</label>
+                    <input id="c-type" name="subject" type="text" />
+                  </div>
 
-  <div class="form-field">
-    <label for="c-message">Message</label>
-    <textarea id="c-message" name="message"></textarea>
-  </div>
+                  <div class="form-field">
+                    <label for="c-message">Message</label>
+                    <textarea id="c-message" name="message"></textarea>
+                  </div>
 
-  <button class="btn btn-primary" type="submit">Send</button>
+                  <button class="btn btn-primary" type="submit">Send</button>
 
-  <!-- Status message area -->
-  <div
-    id="contact-status"
-    class="muted"
-    style="margin-top: 0.6rem; font-size: 0.85rem;"
-  ></div>
-</form>
-
-<script>
-  function handleContactSubmit() {
-    var statusEl = document.getElementById("contact-status");
-    if (statusEl) {
-      statusEl.textContent = "Thank you! Your message has been sent.";
-    }
-    // Let the form submit normally so Apps Script receives it
-  }
-</script>
-
-
+                  <div
+                    id="contact-status"
+                    class="muted"
+                    style="margin-top: 0.6rem; font-size: 0.85rem;"
+                  ></div>
+                </form>
               </div>
             </div>
           </div>
@@ -131,6 +118,14 @@
       <script>
         document.getElementById("year").textContent =
           new Date().getFullYear();
+
+        function handleContactSubmit() {
+          var statusEl = document.getElementById("contact-status");
+          if (statusEl) {
+            statusEl.textContent = "Thank you! Your message has been sent.";
+          }
+          // Allow normal submit so Apps Script receives it
+        }
       </script>
     </footer>
   </body>
