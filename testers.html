@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Prox Testers – Secure Your Spot</title>
+    <title>Prox – Testers</title>
     <meta
       name="description"
       content="Apply to become an early tester for Prox and help shape how real-world meetups work inside the app."
@@ -21,14 +21,13 @@
           </div>
           <div class="nav-right">
             <nav class="nav-links">
-  <a href="index.html" class="active">Home</a>
-  <a href="users.html">For Users</a>
-  <a href="testers.html">Testers</a>
-  <a href="tester-portal.html">Tester Portal</a>
-  <a href="marketing.html">Marketing</a>
-  <a href="support.html">Support</a>
-</nav>
-
+              <a href="index.html">Home</a>
+              <a href="users.html">For Users</a>
+              <a href="testers.html" class="active">Testers</a>
+              <a href="tester-portal.html">Tester Portal</a>
+              <a href="marketing.html">Marketing</a>
+              <a href="support.html">Support</a>
+            </nav>
           </div>
         </div>
       </div>
@@ -40,8 +39,8 @@
         <h1>Become a Prox Tester</h1>
         <p>
           Help shape the future of real-world meetups. As a tester, you’ll get
-          early access, a direct line to the team, and a visible impact on
-          how Prox behaves in the wild.
+          early access, a direct line to the team, and a visible impact on how
+          Prox behaves in the wild.
         </p>
         <a href="#apply" class="btn-primary">Apply Now</a>
       </div>
@@ -89,20 +88,11 @@
 
         <form
           class="apply-form"
-          action="https://formsubmit.co/YOUR_TESTER_EMAIL_HERE"
+          action="https://script.google.com/macros/s/AKfycby1msi0HCL9ETusO7Xl-SlLav4O4UIK6kcGNcdjCx1dykcvO-53qolegLP5a84ATxwvzg/exec"
           method="POST"
+          onsubmit="handleTesterApplySubmit()"
         >
-          <input type="hidden" name="_captcha" value="false" />
-          <input
-            type="hidden"
-            name="_subject"
-            value="New Prox tester application"
-          />
-          <input
-            type="hidden"
-            name="_template"
-            value="table"
-          />
+          <input type="hidden" name="formType" value="tester-application" />
 
           <label>
             Name
@@ -116,7 +106,7 @@
 
           <label>
             City / Region
-            <input type="text" name="location" required />
+            <input type="text" name="subject" required />
           </label>
 
           <label>
@@ -133,16 +123,14 @@
             <select name="experience">
               <option value="new">New to testing</option>
               <option value="casual">I’ve done casual testing before</option>
-              <option value="experienced">
-                I’ve done structured beta testing
-              </option>
+              <option value="experienced">I’ve done structured beta testing</option>
             </select>
           </label>
 
           <label>
             Why would you like to help test Prox?
             <textarea
-              name="motivation"
+              name="message"
               rows="4"
               placeholder="What makes this interesting or important to you?"
               required
@@ -150,6 +138,12 @@
           </label>
 
           <button type="submit" class="btn-primary">Submit Application</button>
+
+          <div
+            id="tester-apply-status"
+            class="muted"
+            style="margin-top: 0.6rem; font-size: 0.85rem;"
+          ></div>
         </form>
       </div>
     </section>
@@ -161,7 +155,15 @@
         <p class="footer-tagline">Let what you seek find you.</p>
         <p class="footer-copy">&copy; 2025 Prox. All rights reserved.</p>
       </div>
+      <script>
+        function handleTesterApplySubmit() {
+          var statusEl = document.getElementById("tester-apply-status");
+          if (statusEl) {
+            statusEl.textContent =
+              "Thank you! Your tester application has been sent.";
+          }
+        }
+      </script>
     </footer>
   </body>
 </html>
-
