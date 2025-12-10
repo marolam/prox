@@ -21,14 +21,13 @@
           </div>
           <div class="nav-right">
             <nav class="nav-links">
-  <a href="index.html" class="active">Home</a>
-  <a href="users.html">For Users</a>
-  <a href="testers.html">Testers</a>
-  <a href="tester-portal.html">Tester Portal</a>
-  <a href="marketing.html">Marketing</a>
-  <a href="support.html">Support</a>
-</nav>
-
+              <a href="index.html">Home</a>
+              <a href="users.html">For Users</a>
+              <a href="testers.html">Testers</a>
+              <a href="tester-portal.html">Tester Portal</a>
+              <a href="marketing.html" class="active">Marketing</a>
+              <a href="support.html">Support</a>
+            </nav>
           </div>
         </div>
       </div>
@@ -87,20 +86,11 @@
 
         <form
           class="simple-form"
-          action="https://formsubmit.co/YOUR_PARTNERS_EMAIL_HERE"
+          action="https://script.google.com/macros/s/AKfycby1msi0HCL9ETusO7Xl-SlLav4O4UIK6kcGNcdjCx1dykcvO-53qolegLP5a84ATxwvzg/exec"
           method="POST"
+          onsubmit="handlePartnerSubmit()"
         >
-          <input type="hidden" name="_captcha" value="false" />
-          <input
-            type="hidden"
-            name="_subject"
-            value="New Prox partnership inquiry"
-          />
-          <input
-            type="hidden"
-            name="_template"
-            value="table"
-          />
+          <input type="hidden" name="formType" value="partner-inquiry" />
 
           <label>
             Your Name
@@ -128,22 +118,16 @@
               <option value="local_business">
                 Local business using Prox with customers
               </option>
-              <option value="event">
-                Event/meetup integration
-              </option>
-              <option value="community">
-                Community or group collaboration
-              </option>
-              <option value="other">
-                Something else
-              </option>
+              <option value="event">Event/meetup integration</option>
+              <option value="community">Community or group collaboration</option>
+              <option value="other">Something else</option>
             </select>
           </label>
 
           <label>
             How would you like to use Prox?
             <textarea
-              name="details"
+              name="message"
               rows="4"
               placeholder="Tell us about your idea, goals, and approximate timeline."
               required
@@ -151,6 +135,12 @@
           </label>
 
           <button type="submit" class="btn-primary">Send Inquiry</button>
+
+          <div
+            id="partner-status"
+            class="muted"
+            style="margin-top: 0.6rem; font-size: 0.85rem;"
+          ></div>
         </form>
       </div>
     </section>
@@ -162,7 +152,15 @@
         <p class="footer-tagline">Let what you seek find you.</p>
         <p class="footer-copy">&copy; 2025 Prox. All rights reserved.</p>
       </div>
+      <script>
+        function handlePartnerSubmit() {
+          var statusEl = document.getElementById("partner-status");
+          if (statusEl) {
+            statusEl.textContent =
+              "Thank you! Your partnership inquiry has been sent.";
+          }
+        }
+      </script>
     </footer>
   </body>
 </html>
-
