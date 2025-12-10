@@ -21,14 +21,13 @@
           </div>
           <div class="nav-right">
             <nav class="nav-links">
-  <a href="index.html" class="active">Home</a>
-  <a href="users.html">For Users</a>
-  <a href="testers.html">Testers</a>
-  <a href="tester-portal.html">Tester Portal</a>
-  <a href="marketing.html">Marketing</a>
-  <a href="support.html">Support</a>
-</nav>
-
+              <a href="index.html" class="active">Home</a>
+              <a href="users.html">For Users</a>
+              <a href="testers.html">Testers</a>
+              <a href="tester-portal.html">Tester Portal</a>
+              <a href="marketing.html">Marketing</a>
+              <a href="support.html">Support</a>
+            </nav>
           </div>
         </div>
       </div>
@@ -64,8 +63,8 @@
           <div class="feature-item">
             <h3>Trust & Feedback</h3>
             <p>
-              Lightweight thumbs-up feedback after meetups builds a clear sense
-              of who follows through and shows up.
+              Lightweight feedback after meetups builds a clear sense of who
+              follows through and shows up.
             </p>
           </div>
           <div class="feature-item">
@@ -90,20 +89,11 @@
 
         <form
           class="simple-form"
-          action="https://formsubmit.co/YOUR_LAUNCH_EMAIL_HERE"
+          action="https://script.google.com/macros/s/AKfycby1msi0HCL9ETusO7Xl-SlLav4O4UIK6kcGNcdjCx1dykcvO-53qolegLP5a84ATxwvzg/exec"
           method="POST"
+          onsubmit="handleLaunchSubmit()"
         >
-          <input type="hidden" name="_captcha" value="false" />
-          <input
-            type="hidden"
-            name="_subject"
-            value="New Prox launch-list signup"
-          />
-          <input
-            type="hidden"
-            name="_template"
-            value="table"
-          />
+          <input type="hidden" name="formType" value="launch-signup" />
 
           <label class="inline-label">
             <span>Email</span>
@@ -119,12 +109,18 @@
             <span>City / Area</span>
             <input
               type="text"
-              name="location"
+              name="subject"
               placeholder="City, State or Region"
             />
           </label>
 
           <button type="submit" class="btn-primary">Join the Launch List</button>
+
+          <div
+            id="launch-status"
+            class="muted"
+            style="margin-top: 0.6rem; font-size: 0.85rem;"
+          ></div>
         </form>
       </div>
     </section>
@@ -139,15 +135,12 @@
           </div>
           <form
             class="footer-form"
-            action="https://formsubmit.co/YOUR_LAUNCH_EMAIL_HERE"
+            action="https://script.google.com/macros/s/AKfycby1msi0HCL9ETusO7Xl-SlLav4O4UIK6kcGNcdjCx1dykcvO-53qolegLP5a84ATxwvzg/exec"
             method="POST"
+            onsubmit="handleFooterSubmit()"
           >
-            <input type="hidden" name="_captcha" value="false" />
-            <input
-              type="hidden"
-              name="_subject"
-              value="Footer newsletter signup"
-            />
+            <input type="hidden" name="formType" value="footer-signup" />
+
             <input
               type="email"
               name="email"
@@ -155,11 +148,33 @@
               required
             />
             <button type="submit">Notify Me</button>
+
+            <div
+              id="footer-status"
+              class="muted"
+              style="margin-top: 0.4rem; font-size: 0.8rem;"
+            ></div>
           </form>
         </div>
         <p class="footer-copy">&copy; 2025 Prox. All rights reserved.</p>
       </div>
+      <script>
+        function handleLaunchSubmit() {
+          var statusEl = document.getElementById("launch-status");
+          if (statusEl) {
+            statusEl.textContent =
+              "Thank you! You’re on the launch list. We’ll be in touch.";
+          }
+        }
+
+        function handleFooterSubmit() {
+          var statusEl = document.getElementById("footer-status");
+          if (statusEl) {
+            statusEl.textContent =
+              "Thanks! We’ll send you occasional Prox updates.";
+          }
+        }
+      </script>
     </footer>
   </body>
 </html>
-
