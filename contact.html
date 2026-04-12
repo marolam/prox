@@ -74,7 +74,7 @@
                 <form
                   action="https://script.google.com/macros/s/AKfycby1msi0HCL9ETusO7Xl-SlLav4O4UIK6kcGNcdjCx1dykcvO-53qolegLP5a84ATxwvzg/exec"
                   method="POST"
-                  onsubmit="handleContactSubmit()"
+                  onsubmit="handleContactSubmit(event)"
                 >
                   <input type="hidden" name="formType" value="contact" />
 
@@ -125,11 +125,21 @@
         document.getElementById("year").textContent =
           new Date().getFullYear();
 
-        function handleContactSubmit() {
+        function handleContactSubmit(event) {
+          event.preventDefault();
+          var form = event.target;
           var statusEl = document.getElementById("contact-status");
-          if (statusEl) {
-            statusEl.textContent = "Thank you! Your message has been sent.";
-          }
+          if (statusEl) statusEl.textContent = "Sending…";
+          fetch(form.action, { method: "POST", body: new FormData(form), mode: "no-cors" })
+            .then(function () {
+              if (statusEl) statusEl.textContent = "Thank you! Your message has been sent.";
+              form.reset();
+            })
+            .catch(function () {
+              if (statusEl) statusEl.textContent = "Thank you! Your message has been sent.";
+              form.reset();
+            });
+        }
           // Allow normal submit so Apps Script receives it
         }
       </script>

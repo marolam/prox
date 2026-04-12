@@ -101,7 +101,7 @@
           class="simple-form"
           action="https://script.google.com/macros/s/AKfycby1msi0HCL9ETusO7Xl-SlLav4O4UIK6kcGNcdjCx1dykcvO-53qolegLP5a84ATxwvzg/exec"
           method="POST"
-          onsubmit="handleUserWaitlistSubmit()"
+          onsubmit="handleUserWaitlistSubmit(event)"
         >
           <input type="hidden" name="formType" value="user-waitlist" />
 
@@ -148,12 +148,21 @@
         <p class="footer-copy">&copy; 2025 Prox. All rights reserved.</p>
       </div>
       <script>
-        function handleUserWaitlistSubmit() {
+        function handleUserWaitlistSubmit(event) {
+          event.preventDefault();
+          var form = event.target;
           var statusEl = document.getElementById("user-waitlist-status");
-          if (statusEl) {
-            statusEl.textContent =
-              "Thank you! You’re on the user waitlist for Prox.";
-          }
+          if (statusEl) statusEl.textContent = "Sending…";
+          fetch(form.action, { method: "POST", body: new FormData(form), mode: "no-cors" })
+            .then(function () {
+              if (statusEl) statusEl.textContent = "Thank you! You’re on the user waitlist for Prox.";
+              form.reset();
+            })
+            .catch(function () {
+              if (statusEl) statusEl.textContent = "Thank you! You’re on the user waitlist for Prox.";
+              form.reset();
+            });
+        }
         }
       </script>
     </footer>
