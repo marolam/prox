@@ -1,0 +1,60 @@
+name: iOS Cloud Compile
+
+on:
+  workflow_dispatch:
+    inputs:
+      flutter_channel:
+        description: Flutter channel to use
+        required: false
+        default: stable
+      build_flavor:
+        description: Build flavor dart define
+        required: false
+        default: ios_cloud
+  pull_request:
+    paths:
+      - 'ios/**'
+      - 'lib/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - '.github/workflows/ios_cloud_compile.yml'
+
+jobs:
+  compile-ios:
+    runs-on: macos-14
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ github.event.inputs.flutter_channel || 'stable' }}
+          cache: true
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Compile iOS (no codesign)
+        run: >-
+          flutter build ios --release --no-codesign
+          --dart-define=PROX_TESTER=true
+          --dart-define=PROX_TESTER_BUILD=true
+          --dart-define=BUILD_FLAVOR=${{ github.event.inputs.build_flavor || 'ios_cloud' }}
+
+      - name: Package iOS app bundle artifact
+        run: |
+          cd build/ios/iphoneos
+          ditto -c -k --sequesterRsrc --keepParent Runner.app Runner-no-codesign.zip
+
+      - name: Upload iOS bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Runner-no-codesign
+          path: build/ios/iphoneos/Runner-no-codesign.zip
+          if-no-files-found: error
