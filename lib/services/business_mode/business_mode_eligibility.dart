@@ -1,6 +1,7 @@
 import "package:prox/services/business_mode/business_mode_state_service.dart";
 import "package:prox/services/monetization_service.dart";
 import "package:prox/services/points_service.dart";
+import "package:prox/services/pro_mode_preview_access.dart";
 import "package:prox/services/progression_service.dart";
 import "package:prox/widgets/business_mode_gate.dart";
 
@@ -16,7 +17,9 @@ class BusinessModeEligibility {
   }
 
   static BusinessGateState gateFromMeta(PointsMeta m) {
-    return isEligibleFromMeta(m) ? BusinessGateState.eligible : BusinessGateState.locked;
+    return isEligibleFromMeta(m)
+        ? BusinessGateState.eligible
+        : BusinessGateState.locked;
   }
 
   /// Async gate that upgrades to ACTIVE if the tester-local flag is enabled.
@@ -26,8 +29,12 @@ class BusinessModeEligibility {
   }) async {
     final cleanUid = uid.trim();
     if (cleanUid.isEmpty) return BusinessGateState.locked;
+    if (!ProModePreviewAccess.instance.isAllowedForCurrentUser()) {
+      return BusinessGateState.locked;
+    }
 
-    final testerUnlocked = await BusinessModeStateService.instance.isTesterUnlocked(cleanUid);
+    final testerUnlocked =
+        await BusinessModeStateService.instance.isTesterUnlocked(cleanUid);
     if (testerUnlocked) {
       final active = await BusinessModeStateService.instance.isActive(cleanUid);
       return active ? BusinessGateState.active : BusinessGateState.eligible;
@@ -42,7 +49,8 @@ class BusinessModeEligibility {
     }
 
     final progression = await ProgressionService.instance.loadForUser(uid);
-    final progressionEligible = progression?.has(ProxFeatureUnlock.businessMode) ?? false;
+    final progressionEligible =
+        progression?.has(ProxFeatureUnlock.businessMode) ?? false;
     final eligible = progressionEligible && isEligibleFromMeta(meta);
     if (!eligible) return BusinessGateState.locked;
 

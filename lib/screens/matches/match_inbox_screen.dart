@@ -38,7 +38,7 @@ class MatchInboxScreen extends StatefulWidget {
 }
 
 class _MatchInboxScreenState extends State<MatchInboxScreen>
-  with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin {
   // Guardrail: this anchor marks the Nearby Prox Circle activation control.
   // Keep this widget in the tree; tests enforce this key's presence.
   static const Key _kNearbyProxCircleAnchorKey = ValueKey<String>(
@@ -49,6 +49,8 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
   String _openingUid = "";
 
   static const Duration _kHoldToActivateDuration = Duration(seconds: 3);
+  static const Duration _kStartupTapOffWindow = Duration(seconds: 10);
+  static bool _didApplyNearbyBootDefault = false;
 
   String _topUid = "";
   String _topDistanceLabel = "Nearby";
@@ -58,8 +60,12 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
   // Kept intentionally low-frequency to reduce rebuild cost.
   Timer? _uiTick;
   Timer? _holdTick;
+  Timer? _startupWindowTick;
   double _holdProgress01 = 0.0;
   bool _holdTriggeredActivation = false;
+  bool _cycleUnlocked = false;
+  bool _startupOffPromptActive = true;
+  late final DateTime _startupOffTapUntil;
   late final AnimationController _orbitController;
   Duration? _orbitDuration;
   Stream<List<NearbyDoc>>? _nearbyStream;
@@ -70,10 +76,31 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
   @override
   void initState() {
     super.initState();
+    _startupOffTapUntil = DateTime.now().add(_kStartupTapOffWindow);
+
+    if (!_didApplyNearbyBootDefault) {
+      _didApplyNearbyBootDefault = true;
+      MatchingModeService.instance.setModeKind(MatchingModeKind.normal);
+      MatchingModeService.instance.setMode(ProxMatchingMode.passive);
+    }
+
     _orbitController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2800),
     )..repeat();
+
+    _startupWindowTick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() {});
+      if (!_startupOffWindowOpen || !_startupOffPromptActive) {
+        _startupWindowTick?.cancel();
+      }
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.clearSnackBars();
+    });
 
     final uid = FirebaseAuth.instance.currentUser?.uid ?? "";
     if (uid.trim().isNotEmpty) {
@@ -91,7 +118,8 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
     unawaited(PresenceWriter.instance.forceWrite(reason: "nearby_open"));
     _uiTick = Timer.periodic(const Duration(seconds: 2), (_) {
       ActiveModePolicyService.instance.evaluateAndApplyPenaltyIfNeeded();
-      unawaited(ChatGateService.instance.enforceExpiredIncomingRequestsIfNeeded(forUid: uid));
+      unawaited(ChatGateService.instance
+          .enforceExpiredIncomingRequestsIfNeeded(forUid: uid));
       if (!mounted) return;
       setState(() {});
     });
@@ -101,6 +129,8 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
     switch (d.modeKind) {
       case MatchingModeKind.off:
         return "Matching Off";
+      case MatchingModeKind.listen:
+        return "Listen Mode (${_listenRoleLabel(d.listenRole)})";
       case MatchingModeKind.treasureHunt:
         return "Treasure Hunt";
       case MatchingModeKind.travel:
@@ -129,8 +159,16 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
     }
   }
 
+  String _listenRoleLabel(ListenMatchRole role) {
+    return role == ListenMatchRole.speak ? "Speak" : "Listen";
+  }
+
   Color _proxCircleAccentColor(MatchDiscoverySettings discovery) {
     switch (discovery.modeKind) {
+      case MatchingModeKind.listen:
+        return discovery.listenRole == ListenMatchRole.speak
+            ? const Color(0xFF2AB8A6)
+            : const Color(0xFF35A4FF);
       case MatchingModeKind.treasureHunt:
         return const Color(0xFFF0C04E);
       case MatchingModeKind.travel:
@@ -140,7 +178,7 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
             ? const Color(0xFF22DE74)
             : const Color(0xFFE7B29F);
       case MatchingModeKind.off:
-        return const Color(0xFFE7B29F);
+        return const Color(0xFF8A8F98);
     }
   }
 
@@ -191,8 +229,7 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
     ColorScheme cs,
     double radiusMiles,
   ) {
-    final bool showActiveTag =
-        discovery.modeKind == MatchingModeKind.normal &&
+    final bool showActiveTag = discovery.modeKind == MatchingModeKind.normal &&
         discovery.normalMode == NormalMatchMode.active;
 
     return SliverToBoxAdapter(
@@ -230,15 +267,22 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                   children: [
                     Text(
                       "Mode: ${_modeChipLabel(discovery)}",
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                            fontSize: 39 / 2,
-                            fontWeight: FontWeight.w800,
-                            color: cs.onSurface.withValues(alpha: 0.90),
-                          ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: false,
+                      style:
+                          Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                fontSize: 39 / 2,
+                                fontWeight: FontWeight.w800,
+                                color: cs.onSurface.withValues(alpha: 0.90),
+                              ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       "Radius: ${radiusMiles.toStringAsFixed(1)} mi",
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: false,
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
                             fontSize: 36 / 2,
                             fontWeight: FontWeight.w700,
@@ -247,6 +291,9 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                     ),
                     Text(
                       "Filter: ${discovery.businessOnly ? "Business only" : "All profiles"}",
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: false,
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
                             fontSize: 36 / 2,
                             fontWeight: FontWeight.w700,
@@ -255,12 +302,27 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                     ),
                     Text(
                       "Keywords: ${_keywordModeLabel(discovery.keywordMode)}",
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: false,
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
                             fontSize: 36 / 2,
                             fontWeight: FontWeight.w700,
                             color: cs.onSurface.withValues(alpha: 0.78),
                           ),
                     ),
+                    if (discovery.modeKind == MatchingModeKind.listen)
+                      Text(
+                        "Role: ${_listenRoleLabel(discovery.listenRole)}",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        softWrap: false,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontSize: 36 / 2,
+                              fontWeight: FontWeight.w700,
+                              color: cs.onSurface.withValues(alpha: 0.78),
+                            ),
+                      ),
                   ],
                 ),
               ),
@@ -288,14 +350,18 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                       if (showActiveTag) ...[
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(999),
                             color: cs.surface.withValues(alpha: 0.18),
                           ),
                           child: Text(
                             "Active",
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
                                   fontWeight: FontWeight.w800,
                                   color: cs.onSurface.withValues(alpha: 0.72),
                                 ),
@@ -324,14 +390,25 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
   void dispose() {
     _uiTick?.cancel();
     _holdTick?.cancel();
+    _startupWindowTick?.cancel();
     _orbitController.dispose();
     _incomingDeadlineSub?.cancel();
     super.dispose();
   }
 
+  bool get _startupOffWindowOpen => DateTime.now().isBefore(_startupOffTapUntil);
+
+  Duration get _startupOffWindowLeft {
+    final d = _startupOffTapUntil.difference(DateTime.now());
+    return d > Duration.zero ? d : Duration.zero;
+  }
+
+  bool get _showStartupOffCountdown {
+    return _startupOffPromptActive && !_cycleUnlocked && _startupOffWindowOpen;
+  }
+
   void _snack(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    // Intentionally no-op on Nearby to avoid transient overlays that can disrupt animation.
   }
 
   String _fmtMMSS(Duration d) {
@@ -341,33 +418,21 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
     return "$mm:$ss";
   }
 
-  void _onHoldProxCircle(MatchDiscoverySettings discovery) {
-    if (discovery.modeKind != MatchingModeKind.normal) {
-      _snack("Set mode to Normal first.");
-      return;
-    }
-
-    if (discovery.isActiveLocked) {
-      final left = Duration(
-        milliseconds: (discovery.activeLockUntilEpochMs - DateTime.now().millisecondsSinceEpoch)
-            .clamp(0, 1 << 30),
-      );
-      _snack("Active is locked for ${_fmtMMSS(left)}.");
-      return;
-    }
-
-    _holdTick?.cancel();
-    _holdProgress01 = 0.0;
-    _holdTriggeredActivation = true;
-
-    MatchingModeService.instance.setMode(ProxMatchingMode.active);
-    _snack("Active mode enabled.");
-    if (mounted) setState(() {});
-  }
-
   void _syncOrbitAnimation(MatchDiscoverySettings discovery) {
+    if (discovery.modeKind == MatchingModeKind.off) {
+      _orbitController.stop();
+      _orbitController.value = 0.0;
+      _orbitDuration = null;
+      return;
+    }
+
     final Duration nextDuration;
     switch (discovery.modeKind) {
+      case MatchingModeKind.listen:
+        nextDuration = discovery.listenRole == ListenMatchRole.speak
+            ? const Duration(milliseconds: 1400)
+            : const Duration(milliseconds: 2200);
+        break;
       case MatchingModeKind.treasureHunt:
         nextDuration = const Duration(milliseconds: 1700);
         break;
@@ -384,20 +449,127 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
         break;
     }
 
-    if (_orbitDuration == nextDuration) return;
+    if (_orbitDuration == nextDuration) {
+      if (!_orbitController.isAnimating) {
+        _orbitController.repeat();
+      }
+      return;
+    }
     _orbitDuration = nextDuration;
     _orbitController.duration = nextDuration;
-    if (_orbitController.isAnimating) {
-      _orbitController.repeat();
-    } else {
-      _orbitController.forward();
+    _orbitController.repeat();
+  }
+
+  void _setListenRole(ListenMatchRole role) {
+    final current = MatchingModeService.instance.discovery.listenRole;
+    if (current == role) return;
+    MatchingModeService.instance.setListenRole(role);
+    _snack("Listen role set to ${_listenRoleLabel(role)}.");
+    if (mounted) setState(() {});
+  }
+
+  void _setNormalMode(NormalMatchMode mode) {
+    final current = MatchingModeService.instance.discovery.normalMode;
+    if (current == mode) return;
+    MatchingModeService.instance.setMode(
+      mode == NormalMatchMode.active
+          ? ProxMatchingMode.active
+          : ProxMatchingMode.passive,
+    );
+    if (mode == NormalMatchMode.active) {
+      _cycleUnlocked = true;
     }
+    _snack("Normal mode: ${mode == NormalMatchMode.active ? "Active" : "Passive"}.");
+    if (mounted) setState(() {});
+  }
+
+  void _cycleModeKindFromCircle(MatchDiscoverySettings discovery) {
+    if (!_cycleUnlocked) return;
+
+    const List<MatchingModeKind> order = <MatchingModeKind>[
+      MatchingModeKind.normal,
+      MatchingModeKind.listen,
+      MatchingModeKind.treasureHunt,
+      MatchingModeKind.travel,
+      MatchingModeKind.off,
+    ];
+
+    final int i = order.indexOf(discovery.modeKind);
+    final int nextIndex = i < 0 ? 0 : (i + 1) % order.length;
+    final MatchingModeKind next = order[nextIndex];
+
+    MatchingModeService.instance.setModeKind(next);
+    _snack("Mode: ${_modeChipLabel(MatchingModeService.instance.discovery)}");
+    if (mounted) setState(() {});
+  }
+
+  void _onCircleTap(MatchDiscoverySettings discovery) {
+    final bool isNormalPassive =
+        discovery.modeKind == MatchingModeKind.normal &&
+            discovery.normalMode == NormalMatchMode.passive;
+
+    if (!_cycleUnlocked) {
+      if (discovery.modeKind == MatchingModeKind.off && _startupOffWindowOpen) {
+        MatchingModeService.instance.setModeKind(MatchingModeKind.normal);
+        MatchingModeService.instance.setMode(ProxMatchingMode.passive);
+        _snack("Normal Passive restored.");
+        if (mounted) setState(() {});
+        return;
+      }
+      if (isNormalPassive && _showStartupOffCountdown) {
+        _startupOffPromptActive = false;
+        MatchingModeService.instance.setModeKind(MatchingModeKind.off);
+        _snack("Matching Off enabled.");
+        if (mounted) setState(() {});
+      } else if (isNormalPassive) {
+        _snack("Hold 3s to turn on Active Matching.");
+      }
+      return;
+    }
+
+    _cycleModeKindFromCircle(discovery);
+  }
+
+  void _turnMatchingOffFromActive() {
+    MatchingModeService.instance.setModeKind(MatchingModeKind.off);
+    _startupOffPromptActive = false;
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  void _onHoldProxCircle(MatchDiscoverySettings discovery) {
+    if (discovery.modeKind != MatchingModeKind.normal) {
+      _snack("Set mode to Normal first.");
+      return;
+    }
+    if (discovery.normalMode == NormalMatchMode.active) return;
+
+    if (discovery.isActiveLocked) {
+      final left = Duration(
+        milliseconds: (discovery.activeLockUntilEpochMs -
+                DateTime.now().millisecondsSinceEpoch)
+            .clamp(0, 1 << 30),
+      );
+      _snack("Active is locked for ${_fmtMMSS(left)}.");
+      return;
+    }
+
+    _holdTick?.cancel();
+    _holdProgress01 = 0.0;
+    _holdTriggeredActivation = true;
+    _startupOffPromptActive = false;
+
+    MatchingModeService.instance.setMode(ProxMatchingMode.active);
+    _cycleUnlocked = true;
+    _snack("Active mode enabled.");
+    if (mounted) setState(() {});
   }
 
   void _beginHoldToActivate(MatchDiscoverySettings discovery) {
     if (discovery.modeKind != MatchingModeKind.normal) return;
     if (discovery.normalMode == NormalMatchMode.active) return;
     if (discovery.isActiveLocked) return;
+    if (_startupOffWindowOpen && !_cycleUnlocked) return;
 
     _holdTick?.cancel();
     _holdTriggeredActivation = false;
@@ -406,8 +578,8 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
     _holdTick = Timer.periodic(const Duration(milliseconds: 16), (_) {
       if (!mounted) return;
       final int elapsedMs = DateTime.now().difference(startedAt).inMilliseconds;
-      final double p = (elapsedMs / _kHoldToActivateDuration.inMilliseconds)
-          .clamp(0.0, 1.0);
+      final double p =
+          (elapsedMs / _kHoldToActivateDuration.inMilliseconds).clamp(0.0, 1.0);
       setState(() {
         _holdProgress01 = p;
       });
@@ -430,6 +602,21 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
     setState(() {
       _holdProgress01 = 0.0;
     });
+  }
+
+  String _modeCircleLabel(MatchDiscoverySettings discovery) {
+    switch (discovery.modeKind) {
+      case MatchingModeKind.off:
+        return "OFF";
+      case MatchingModeKind.normal:
+        return "NORMAL";
+      case MatchingModeKind.listen:
+        return "LISTEN";
+      case MatchingModeKind.treasureHunt:
+        return "TREASURE";
+      case MatchingModeKind.travel:
+        return "TRAVEL";
+    }
   }
 
   Future<void> _openChat({required String otherUid}) async {
@@ -541,9 +728,8 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
       child: Text(
         text,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: strong
-                  ? cs.onSurface
-                  : cs.onSurface.withValues(alpha: 0.72),
+              color:
+                  strong ? cs.onSurface : cs.onSurface.withValues(alpha: 0.72),
               fontWeight: strong ? FontWeight.w800 : FontWeight.w600,
             ),
       ),
@@ -718,7 +904,9 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
 
   void _ensureNearbyStream(double radiusMiles) {
     final current = _nearbyStreamRadiusMiles;
-    if (_nearbyStream != null && current != null && (current - radiusMiles).abs() < 0.001) {
+    if (_nearbyStream != null &&
+        current != null &&
+        (current - radiusMiles).abs() < 0.001) {
       return;
     }
     _nearbyStreamRadiusMiles = radiusMiles;
@@ -735,9 +923,17 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
     _syncOrbitAnimation(discovery);
 
     final accent = _proxCircleAccentColor(discovery);
-    final bool showActiveDot =
-        discovery.modeKind == MatchingModeKind.normal &&
+    final bool isNormalMode = discovery.modeKind == MatchingModeKind.normal;
+    final bool isOffMode = discovery.modeKind == MatchingModeKind.off;
+    final bool isListenMode = discovery.modeKind == MatchingModeKind.listen;
+    final bool showActiveDot = discovery.modeKind == MatchingModeKind.normal &&
         discovery.normalMode == NormalMatchMode.active;
+    final bool canHoldToActivate =
+        isNormalMode &&
+            discovery.normalMode == NormalMatchMode.passive &&
+        !_showStartupOffCountdown;
+    final bool showHoldProgress = canHoldToActivate && _holdProgress01 > 0;
+    final bool animateOrbit = !isOffMode;
 
     return SliverToBoxAdapter(
       child: Padding(
@@ -746,30 +942,51 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
           key: _kNearbyProxCircleAnchorKey,
           children: [
             GestureDetector(
-              onTapDown: (_) => _beginHoldToActivate(discovery),
-              onTapUp: (_) => _endHoldToActivate(),
-              onTapCancel: _endHoldToActivate,
-              onTap: () {
-                if (discovery.modeKind == MatchingModeKind.normal &&
-                    discovery.normalMode == NormalMatchMode.active) {
-                  MatchingModeService.instance.setMode(ProxMatchingMode.passive);
-                  _snack("Active mode disabled.");
-                  if (mounted) setState(() {});
-                }
-              },
+              onTapDown:
+                  canHoldToActivate ? (_) => _beginHoldToActivate(discovery) : null,
+              onTapUp: canHoldToActivate ? (_) => _endHoldToActivate() : null,
+              onTapCancel: canHoldToActivate ? _endHoldToActivate : null,
+              onTap: () => _onCircleTap(discovery),
               child: SizedBox(
                 width: 196,
                 height: 196,
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                    if (_holdProgress01 > 0 && !showActiveDot)
+                    if (showHoldProgress)
                       CustomPaint(
                         size: const Size.square(196),
                         painter: _ProxHoldRingPainter(
                           progress01: _holdProgress01,
-                          color: Color.lerp(accent, const Color(0xFF22DE74), _holdProgress01) ?? accent,
+                          color: Color.lerp(
+                                const Color(0xFF2ECF6B),
+                                const Color(0xFF22DE74),
+                                _holdProgress01,
+                              ) ??
+                              const Color(0xFF22DE74),
                         ),
+                      ),
+                    if (isNormalMode && showActiveDot)
+                      AnimatedBuilder(
+                        animation: _orbitController,
+                        builder: (context, _) {
+                          final pulse =
+                              0.82 + (0.18 * math.sin(_orbitController.value * math.pi * 2));
+                          return Opacity(
+                            opacity: pulse.clamp(0.3, 1.0),
+                            child: Container(
+                              width: 194,
+                              height: 194,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: accent.withValues(alpha: 0.46),
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
                       ),
                     Container(
                       width: 178,
@@ -788,45 +1005,187 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: accent.withValues(alpha: 0.34),
-                            blurRadius: 30,
-                            spreadRadius: 3,
+                            color: isOffMode
+                                ? Colors.transparent
+                                : accent.withValues(alpha: 0.34),
+                            blurRadius: isOffMode ? 0 : 30,
+                            spreadRadius: isOffMode ? 0 : 3,
                           ),
                         ],
                       ),
                       child: AnimatedBuilder(
                         animation: _orbitController,
                         builder: (context, _) {
-                          final angle = _orbitController.value * (2 * math.pi);
+                          final angle = animateOrbit
+                              ? _orbitController.value * (2 * math.pi)
+                              : 0.0;
                           return Stack(
                             children: [
-                              const Center(child: ProxLogoMark(size: 104)),
-                              Positioned.fill(
-                                child: Transform.rotate(
-                                  angle: angle,
-                                  child: Align(
-                                    alignment: Alignment.topCenter,
-                                    child: Padding(
-                                      padding: const EdgeInsets.only(top: 14),
-                                      child: Container(
-                                        width: 10,
-                                        height: 10,
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: accent.withValues(alpha: 0.92),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: accent.withValues(alpha: 0.7),
-                                              blurRadius: 12,
-                                              spreadRadius: 1,
+                              Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    AnimatedBuilder(
+                                      animation: _orbitController,
+                                      builder: (context, __) {
+                                        final pulse = isOffMode
+                                            ? 0.0
+                                            : (0.68 +
+                                                (0.32 *
+                                                        math.sin(
+                                                          _orbitController.value *
+                                                              math.pi *
+                                                              2,
+                                                        ).abs()));
+                                        return Container(
+                                          width: 104,
+                                          height: 104,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: const Color(0xFF35A4FF)
+                                                    .withValues(
+                                                      alpha: pulse * 0.75,
+                                                    ),
+                                                blurRadius: 28,
+                                                spreadRadius: 2,
+                                              ),
+                                            ],
+                                          ),
+                                          child: const Center(
+                                            child: ProxLogoMark(size: 92),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      _modeCircleLabel(discovery),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w800,
+                                            letterSpacing: 1.0,
+                                            color: accent.withValues(alpha: 0.92),
+                                          ),
+                                    ),
+                                    if (isNormalMode)
+                                      Text(
+                                        discovery.normalMode == NormalMatchMode.active
+                                            ? "ACTIVE"
+                                            : "PASSIVE",
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelSmall
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w800,
+                                              letterSpacing: 0.8,
+                                              color: cs.onSurface
+                                                  .withValues(alpha: 0.78),
                                             ),
-                                          ],
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              Positioned.fill(
+                                child: animateOrbit
+                                    ? Transform.rotate(
+                                        angle: angle,
+                                        child: Align(
+                                          alignment: Alignment.topCenter,
+                                          child: Padding(
+                                            padding: const EdgeInsets.only(top: 14),
+                                            child: Container(
+                                              width: 10,
+                                              height: 10,
+                                              decoration: BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                color: accent.withValues(alpha: 0.92),
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: accent.withValues(
+                                                      alpha: 0.7,
+                                                    ),
+                                                    blurRadius: 12,
+                                                    spreadRadius: 1,
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      )
+                                    : const SizedBox.shrink(),
+                              ),
+                              if (discovery.modeKind == MatchingModeKind.treasureHunt &&
+                                  animateOrbit)
+                                Positioned.fill(
+                                  child: Transform.rotate(
+                                    angle: -angle,
+                                    child: Align(
+                                      alignment: Alignment.bottomCenter,
+                                      child: Padding(
+                                        padding: const EdgeInsets.only(bottom: 13),
+                                        child: Icon(
+                                          Icons.explore,
+                                          size: 16,
+                                          color: accent.withValues(alpha: 0.9),
                                         ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
+                              if (discovery.modeKind == MatchingModeKind.travel &&
+                                  animateOrbit)
+                                Positioned.fill(
+                                  child: Transform.rotate(
+                                    angle: angle * 1.35,
+                                    child: Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: Padding(
+                                        padding: const EdgeInsets.only(left: 12),
+                                        child: Container(
+                                          width: 8,
+                                          height: 8,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: accent.withValues(alpha: 0.86),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              if (isListenMode && animateOrbit)
+                                Positioned(
+                                  left: 58,
+                                  right: 58,
+                                  bottom: 42,
+                                  child: AnimatedBuilder(
+                                    animation: _orbitController,
+                                    builder: (context, __) {
+                                      final p =
+                                          0.42 + (0.58 * math.sin(_orbitController.value * math.pi * 2).abs());
+                                      return Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: List<Widget>.generate(5, (i) {
+                                          final h = 4 + ((i.isEven ? p : 1 - p) * 10);
+                                          return Container(
+                                            width: 4,
+                                            height: h,
+                                            decoration: BoxDecoration(
+                                              borderRadius: BorderRadius.circular(999),
+                                              color: accent.withValues(alpha: 0.88),
+                                            ),
+                                          );
+                                        }),
+                                      );
+                                    },
+                                  ),
+                                ),
                               if (showActiveDot)
                                 Positioned(
                                   top: 18,
@@ -847,6 +1206,29 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                                     ),
                                   ),
                                 ),
+                              if (isListenMode)
+                                Positioned(
+                                  top: 18,
+                                  right: 28,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(7),
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: cs.surface.withValues(alpha: 0.90),
+                                      border: Border.all(
+                                        color: accent.withValues(alpha: 0.8),
+                                      ),
+                                    ),
+                                    child: Icon(
+                                      discovery.listenRole ==
+                                              ListenMatchRole.speak
+                                          ? Icons.mic_none
+                                          : Icons.hearing,
+                                      size: 14,
+                                      color: accent,
+                                    ),
+                                  ),
+                                ),
                             ],
                           );
                         },
@@ -858,32 +1240,445 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
             ),
             const SizedBox(height: 12),
             Text(
-              "Hold 3s to toggle Active",
+              _cycleUnlocked
+                  ? "Tap circle to cycle mode"
+                : isOffMode
+                  ? "Matching is OFF"
+                  : (isNormalMode &&
+                          discovery.normalMode == NormalMatchMode.passive &&
+                      _showStartupOffCountdown)
+                      ? "Tap in ${_fmtMMSS(_startupOffWindowLeft)} to turn matching OFF"
+                      : (isNormalMode &&
+                              discovery.normalMode == NormalMatchMode.passive)
+                          ? "Hold 3s to turn on Active Matching"
+                          : "",
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: cs.onSurface.withValues(alpha: 0.84),
                     fontWeight: FontWeight.w800,
                   ),
             ),
-            if (showActiveDot) ...[
+            if (isNormalMode && _cycleUnlocked) ...[
               const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(999),
-                  color: cs.surface.withValues(alpha: 0.16),
-                  border: Border.all(color: cs.outline.withValues(alpha: 0.3)),
-                ),
-                child: Text(
-                  "Tap to turn matching off (1s)",
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: cs.onSurface.withValues(alpha: 0.86),
-                      ),
+              SegmentedButton<NormalMatchMode>(
+                segments: const [
+                  ButtonSegment(
+                    value: NormalMatchMode.passive,
+                    icon: Icon(Icons.spa_outlined),
+                    label: Text("Passive"),
+                  ),
+                  ButtonSegment(
+                    value: NormalMatchMode.active,
+                    icon: Icon(Icons.flash_on_outlined),
+                    label: Text("Active"),
+                  ),
+                ],
+                selected: <NormalMatchMode>{discovery.normalMode},
+                onSelectionChanged: (next) {
+                  if (next.isEmpty) return;
+                  _setNormalMode(next.first);
+                },
+              ),
+            ],
+            if (isListenMode) ...[
+              const SizedBox(height: 10),
+              SegmentedButton<ListenMatchRole>(
+                segments: const [
+                  ButtonSegment(
+                    value: ListenMatchRole.speak,
+                    icon: Icon(Icons.mic_none),
+                    label: Text("Speak"),
+                  ),
+                  ButtonSegment(
+                    value: ListenMatchRole.listen,
+                    icon: Icon(Icons.hearing),
+                    label: Text("Listen"),
+                  ),
+                ],
+                selected: <ListenMatchRole>{discovery.listenRole},
+                onSelectionChanged: (next) {
+                  if (next.isEmpty) return;
+                  _setListenRole(next.first);
+                },
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "Cross-role only: Speak users match Listen users.",
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: cs.onSurface.withValues(alpha: 0.74),
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ] else if (showActiveDot) ...[
+              const SizedBox(height: 10),
+              GestureDetector(
+                onTap: _turnMatchingOffFromActive,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(999),
+                    color: cs.surface.withValues(alpha: 0.16),
+                    border: Border.all(color: cs.outline.withValues(alpha: 0.3)),
+                  ),
+                  child: Text(
+                    "Tap to turn matching off",
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: cs.onSurface.withValues(alpha: 0.86),
+                        ),
+                  ),
                 ),
               ),
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildNearbyCardsScrollableArea({
+    required MatchDiscoverySettings discovery,
+    required String? myPartyId,
+    required ColorScheme cs,
+    required double bottomInset,
+  }) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 10,
+        right: 10,
+        bottom: 16 + bottomInset,
+      ),
+      child: StreamBuilder<List<NearbyDoc>>(
+        stream: _nearbyStream,
+        builder: (context, snap) {
+          final rawNearby = snap.data ?? const <NearbyDoc>[];
+          final nearby = _applyBusinessFilter(rawNearby, discovery);
+
+          return FutureBuilder<List<NearbyDoc>>(
+            future: MatchingRuntimeService.instance.filterByMode(nearby),
+            builder: (context, filteredSnap) {
+              if (!filteredSnap.hasData) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 26),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.explore_outlined, color: cs.primary, size: 34),
+                        const SizedBox(height: 8),
+                        Text(
+                          "Loading nearby matches...",
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              final modeFilteredNearby = filteredSnap.data ?? const <NearbyDoc>[];
+
+              return FutureBuilder(
+                future: MatchPipeline.instance.buildCandidates(
+                  nearby: modeFilteredNearby,
+                  myPartyId: myPartyId ?? "",
+                ),
+                builder: (context, rankedSnap) {
+                  if (!rankedSnap.hasData) {
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.only(top: 24),
+                        child: CircularProgressIndicator(),
+                      ),
+                    );
+                  }
+
+                  final items = rankedSnap.data!;
+                  if (items.isEmpty) {
+                    if (_topUid.isNotEmpty) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (!mounted) return;
+                        setState(() {
+                          _topUid = "";
+                          _topDistanceLabel = "Nearby";
+                          _topKeywords = const <String>[];
+                        });
+                      });
+                    }
+
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              "No one nearby",
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    color: cs.onSurface.withValues(alpha: 0.72),
+                                  ),
+                            ),
+                            const SizedBox(height: 12),
+                            const ProxLogoMark(size: 36),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  WidgetsBinding.instance
+                      .addPostFrameCallback((_) => _captureTopCandidate(items));
+
+                  return ListView.builder(
+                    padding: EdgeInsets.zero,
+                    itemCount: items.length,
+                    itemBuilder: (context, i) {
+                      final c = items[i];
+
+                      final String myUid = FirebaseAuth.instance.currentUser?.uid ?? "";
+                      final String? chatId = myUid.isEmpty
+                          ? null
+                          : ChatThreadService.instance.chatIdFor(myUid, c.uid);
+
+                      final bool openingThis = _opening && _openingUid == c.uid;
+
+                      final Stream<DocumentSnapshot<Map<String, dynamic>>>
+                          chatDocStream = (chatId == null)
+                              ? const Stream<DocumentSnapshot<Map<String, dynamic>>>.empty()
+                              : FirebaseFirestore.instance
+                                  .collection("chats")
+                                  .doc(chatId)
+                                  .snapshots();
+
+                      final Stream<MeetupRequestState?> meetupStream =
+                          (chatId == null)
+                              ? const Stream<MeetupRequestState?>.empty()
+                              : MeetupService.instance.watchRequestState(chatId: chatId);
+
+                      NearbyDoc? nd;
+                      for (final d in modeFilteredNearby) {
+                        if (d.uid == c.uid) {
+                          nd = d;
+                          break;
+                        }
+                      }
+                      final bool isBiz = nd?.isBusiness == true;
+                      final int? avail = nd?.availabilityMinutes;
+
+                      final String? distLabel =
+                          ProxDistanceFormat.bucketMilesOrNull(c.distanceMiles);
+                      final bool isPartyScope = (myPartyId ?? "").isNotEmpty;
+
+                      return StreamBuilder<MeetupRequestState?>(
+                        stream: meetupStream,
+                        builder: (context, meetupSnap) {
+                          final meetupState = meetupSnap.data;
+                          final Duration? declineLeft = MeetupService.instance
+                              .declineCooldownLeftFromState(meetupState);
+                          final bool cooling =
+                              (declineLeft != null && declineLeft > Duration.zero);
+
+                          return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                            stream: chatDocStream,
+                            builder: (context, chatSnap) {
+                              ChatGateStatus? gate;
+                              if (chatSnap.data != null && chatSnap.data!.exists) {
+                                gate = ChatGateStatus.fromChatDoc(
+                                  chatSnap.data!.data(),
+                                );
+                              }
+
+                              final bool chatDeclined = (gate?.isDeclined ?? false);
+
+                              final VoidCallback? onTap =
+                                  (openingThis || cooling || chatDeclined)
+                                      ? null
+                                      : () => _openChat(otherUid: c.uid);
+
+                              Widget right;
+                              if (openingThis) {
+                                right = const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                );
+                              } else if (chatId != null) {
+                                final inline = _inlineGateActions(
+                                  chatId: chatId,
+                                  otherUid: c.uid,
+                                  myUid: myUid,
+                                  gate: gate,
+                                  cooling: cooling,
+                                  openingThis: openingThis,
+                                );
+                                if (inline is! SizedBox) {
+                                  right = inline;
+                                } else if (chatDeclined) {
+                                  right = Icon(
+                                    Icons.block_flipped,
+                                    color: cs.onSurface.withValues(alpha: 0.75),
+                                  );
+                                } else if (cooling) {
+                                  right = Icon(
+                                    Icons.lock_clock,
+                                    color: cs.onSurface.withValues(alpha: 0.75),
+                                  );
+                                } else {
+                                  right = StreamBuilder<int>(
+                                    stream: UnreadCounterService.instance
+                                        .unreadCount(chatId, myUid),
+                                    builder: (context, s) {
+                                      final n = s.data ?? 0;
+                                      if (n <= 0) {
+                                        return Icon(
+                                          Icons.chat_bubble_outline,
+                                          color: cs.onSurface.withValues(alpha: 0.75),
+                                        );
+                                      }
+                                      return CircleAvatar(
+                                        radius: 12,
+                                        backgroundColor:
+                                            cs.primary.withValues(alpha: 0.22),
+                                        child: Text(
+                                          n.toString(),
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: cs.onSurface,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  );
+                                }
+                              } else {
+                                right = Icon(
+                                  Icons.chat_bubble_outline,
+                                  color: cs.onSurface.withValues(alpha: 0.75),
+                                );
+                              }
+
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 7,
+                                  horizontal: 6,
+                                ),
+                                child: ProxGlassCard(
+                                  onTap: onTap,
+                                  highlight:
+                                      isBiz ? const Color(0xFFFF8A3D) : cs.primary,
+                                  glow:
+                                      isBiz ? const Color(0xFFFF8A3D) : cs.primary,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 12,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      StreamBuilder<UserProfile?>(
+                                        stream: UserProfileService.instance
+                                            .watchProfile(c.uid),
+                                        builder: (context, ps) {
+                                          final p = ps.data;
+                                          final photoUrl =
+                                              p?.photoUrl?.trim() ?? "";
+                                          return CircleAvatar(
+                                            radius: 18,
+                                            backgroundImage: photoUrl.isNotEmpty
+                                                ? NetworkImage(photoUrl)
+                                                : null,
+                                            child: photoUrl.isEmpty
+                                                ? const Icon(Icons.person, size: 18)
+                                                : null,
+                                          );
+                                        },
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: StreamBuilder<UserProfile?>(
+                                          stream: UserProfileService.instance
+                                              .watchProfile(c.uid),
+                                          builder: (context, ps) {
+                                            final p = ps.data;
+                                            final name = ProxIdentityPolicy.displayName(
+                                              uid: c.uid,
+                                              profile: p,
+                                              isPartyScope: isPartyScope,
+                                            );
+
+                                            return Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Row(
+                                                  children: [
+                                                    Expanded(
+                                                      child: Text(
+                                                        name,
+                                                        overflow:
+                                                            TextOverflow.ellipsis,
+                                                        style: Theme.of(context)
+                                                            .textTheme
+                                                            .titleMedium
+                                                            ?.copyWith(
+                                                              fontWeight:
+                                                                  FontWeight.w800,
+                                                              color: cs.onSurface
+                                                                  .withValues(
+                                                                      alpha: 0.92),
+                                                            ),
+                                                      ),
+                                                    ),
+                                                    if (isBiz) ...[
+                                                      const SizedBox(width: 8),
+                                                      _chip(
+                                                        (avail != null &&
+                                                                avail <= 0)
+                                                            ? "Business  Now"
+                                                            : "Business",
+                                                        strong: true,
+                                                      ),
+                                                    ],
+                                                  ],
+                                                ),
+                                                const SizedBox(height: 6),
+                                                Wrap(
+                                                  spacing: 8,
+                                                  runSpacing: 8,
+                                                  crossAxisAlignment:
+                                                      WrapCrossAlignment.center,
+                                                  children: [
+                                                    if (distLabel != null)
+                                                      _chip(distLabel),
+                                                    _gateChipFrom(
+                                                      gate,
+                                                      myUid,
+                                                      cooling: cooling,
+                                                    ),
+                                                  ],
+                                                ),
+                                              ],
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      right,
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          );
+                        },
+                      );
+                    },
+                  );
+                },
+              );
+            },
+          );
+        },
       ),
     );
   }
@@ -905,12 +1700,12 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                     ssnap.data ?? UserSettingsService.instance.current;
                 final discovery = settings.matchDiscovery;
                 final incomingLeft = _incomingDeadline == null
-                  ? null
-                  : _incomingDeadline!.difference(DateTime.now());
-                final radiusMiles = MatchingRuntimeService.instance
-                  .effectiveRadiusMiles(discovery)
-                  .clamp(0.1, 10.0)
-                  .toDouble();
+                    ? null
+                    : _incomingDeadline!.difference(DateTime.now());
+                final radiusMiles = math.max(
+                  0.1,
+                  MatchingRuntimeService.instance.effectiveRadiusMiles(discovery),
+                );
                 _ensureNearbyStream(radiusMiles);
 
                 return StreamBuilder<String?>(
@@ -919,6 +1714,7 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                     final myPartyId = partyScopeSnap.data;
 
                     return CustomScrollView(
+                      physics: const ClampingScrollPhysics(),
                       slivers: [
                         SliverAppBar(
                           pinned: true,
@@ -964,14 +1760,19 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                                           Icon(
                                             Icons.auto_awesome,
                                             size: 18,
-                                            color: cs.onSurface.withValues(alpha: 0.85),
+                                            color: cs.onSurface
+                                                .withValues(alpha: 0.85),
                                           ),
                                           const SizedBox(width: 8),
                                           Text(
                                             "Match",
-                                            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .labelMedium
+                                                ?.copyWith(
                                                   fontWeight: FontWeight.w800,
-                                                  color: cs.onSurface.withValues(alpha: 0.85),
+                                                  color: cs.onSurface
+                                                      .withValues(alpha: 0.85),
                                                 ),
                                           ),
                                         ],
@@ -995,21 +1796,27 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                                           Icon(
                                             Icons.tune,
                                             size: 18,
-                                            color: cs.onSurface.withValues(alpha: 0.85),
+                                            color: cs.onSurface
+                                                .withValues(alpha: 0.85),
                                           ),
                                           const SizedBox(width: 8),
                                           Text(
                                             "Mode",
-                                            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .labelMedium
+                                                ?.copyWith(
                                                   fontWeight: FontWeight.w700,
-                                                  color: cs.onSurface.withValues(alpha: 0.85),
+                                                  color: cs.onSurface
+                                                      .withValues(alpha: 0.85),
                                                 ),
                                           ),
                                         ],
                                       ),
                                     ),
                                   ),
-                                  if (discovery.modeKind == MatchingModeKind.treasureHunt) ...[
+                                  if (discovery.modeKind ==
+                                      MatchingModeKind.treasureHunt) ...[
                                     const SizedBox(width: 10),
                                     GestureDetector(
                                       onTap: _openTreasureHunt,
@@ -1027,14 +1834,20 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                                             Icon(
                                               Icons.explore,
                                               size: 18,
-                                              color: cs.onSurface.withValues(alpha: 0.85),
+                                              color: cs.onSurface
+                                                  .withValues(alpha: 0.85),
                                             ),
                                             const SizedBox(width: 8),
                                             Text(
                                               "Compass",
-                                              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .labelMedium
+                                                  ?.copyWith(
                                                     fontWeight: FontWeight.w700,
-                                                    color: cs.onSurface.withValues(alpha: 0.85),
+                                                    color: cs.onSurface
+                                                        .withValues(
+                                                            alpha: 0.85),
                                                   ),
                                             ),
                                           ],
@@ -1047,11 +1860,8 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                             ),
                           ],
                         ),
-
                         _buildNearbyStatusPanel(discovery, cs, radiusMiles),
-
                         _buildProxCircleActivatorCard(discovery, cs),
-
                         if (discovery.modeKind == MatchingModeKind.normal &&
                             discovery.normalMode == NormalMatchMode.active &&
                             incomingLeft != null &&
@@ -1061,14 +1871,16 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                               padding: const EdgeInsets.fromLTRB(18, 0, 18, 8),
                               child: Text(
                                 "Accept pending chat in ${_fmtMMSS(incomingLeft)} or Active auto-switches to Passive for 10:00.",
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
                                       color: const Color(0xFFDE5353),
                                       fontWeight: FontWeight.w700,
                                     ),
                               ),
                             ),
                           ),
-
                         if (discovery.modeKind == MatchingModeKind.normal &&
                             discovery.normalMode == NormalMatchMode.passive &&
                             discovery.isActiveLocked)
@@ -1077,28 +1889,34 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                               padding: const EdgeInsets.fromLTRB(18, 0, 18, 8),
                               child: Text(
                                 "Active lock remaining: ${_fmtMMSS(Duration(milliseconds: (discovery.activeLockUntilEpochMs - DateTime.now().millisecondsSinceEpoch).clamp(0, 1 << 30)))}",
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
                                       color: const Color(0xFFDE5353),
                                       fontWeight: FontWeight.w700,
                                     ),
                               ),
                             ),
                           ),
-
                         SliverToBoxAdapter(
                           child: Padding(
                             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                             child: AnimatedBuilder(
                               animation: GeoQueryService.instance.debug,
                               builder: (context, _) {
-                                final err = GeoQueryService.instance.debug.lastError.trim();
+                                final err = GeoQueryService
+                                    .instance.debug.lastError
+                                    .trim();
                                 if (err.isEmpty) return const SizedBox.shrink();
-                                if (!_isLocationBlockingError(err)) return const SizedBox.shrink();
+                                if (!_isLocationBlockingError(err))
+                                  return const SizedBox.shrink();
 
                                 return LocationIssueBanner(
                                   hint: err,
                                   onRetry: () async {
-                                    await PresenceWriter.instance.forceWrite(reason: "nearby_retry");
+                                    await PresenceWriter.instance
+                                        .forceWrite(reason: "nearby_retry");
                                     if (!mounted) return;
                                     _snack("Retry requested.");
                                   },
@@ -1107,296 +1925,13 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                             ),
                           ),
                         ),
-
-                        SliverPadding(
-                          padding: EdgeInsets.only(
-                            left: 10,
-                            right: 10,
-                            bottom: 16 + bottomInset,
-                          ),
-                          sliver: StreamBuilder<List<NearbyDoc>>(
-                            stream: _nearbyStream,
-                            builder: (context, snap) {
-                              final rawNearby = snap.data ?? const <NearbyDoc>[];
-                              final nearby = _applyBusinessFilter(rawNearby, discovery);
-
-                              return FutureBuilder<List<NearbyDoc>>(
-                                future: MatchingRuntimeService.instance.filterByMode(nearby),
-                                builder: (context, filteredSnap) {
-                                  if (!filteredSnap.hasData) {
-                                    return SliverToBoxAdapter(
-                                      child: Padding(
-                                        padding: const EdgeInsets.only(top: 40),
-                                        child: Center(
-                                          child: Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(Icons.explore_outlined, color: cs.primary, size: 34),
-                                              const SizedBox(height: 8),
-                                              Text(
-                                                "Loading nearby matches...",
-                                                style: Theme.of(context).textTheme.titleSmall,
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  }
-
-                                  final modeFilteredNearby = filteredSnap.data ?? const <NearbyDoc>[];
-
-                                  return FutureBuilder(
-                                    future: MatchPipeline.instance.buildCandidates(
-                                      nearby: modeFilteredNearby,
-                                      myPartyId: myPartyId ?? "",
-                                    ),
-                                    builder: (context, rankedSnap) {
-                                  if (!rankedSnap.hasData) {
-                                    return const SliverToBoxAdapter(
-                                      child: Padding(
-                                        padding: EdgeInsets.only(top: 44),
-                                        child: Center(child: CircularProgressIndicator()),
-                                      ),
-                                    );
-                                  }
-
-                                  final items = rankedSnap.data!;
-                                  if (items.isEmpty) {
-                                    if (_topUid.isNotEmpty) {
-                                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                                        if (!mounted) return;
-                                        setState(() {
-                                          _topUid = "";
-                                          _topDistanceLabel = "Nearby";
-                                          _topKeywords = const <String>[];
-                                        });
-                                      });
-                                    }
-
-                                    return SliverToBoxAdapter(
-                                      child: Padding(
-                                        padding: const EdgeInsets.only(top: 26),
-                                        child: Center(
-                                          child: Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Text(
-                                                "No one nearby",
-                                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                                      color: cs.onSurface.withValues(alpha: 0.72),
-                                                    ),
-                                              ),
-                                              const SizedBox(height: 12),
-                                              const ProxLogoMark(size: 36),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  }
-
-                                  WidgetsBinding.instance.addPostFrameCallback((_) => _captureTopCandidate(items));
-
-                                  return SliverList.builder(
-                                    itemCount: items.length,
-                                    itemBuilder: (context, i) {
-                                      final c = items[i];
-
-                                      final String myUid =
-                                          FirebaseAuth.instance.currentUser?.uid ?? "";
-                                      final String? chatId = myUid.isEmpty
-                                          ? null
-                                          : ChatThreadService.instance.chatIdFor(myUid, c.uid);
-
-                                      final bool openingThis = _opening && _openingUid == c.uid;
-
-                                      final Stream<DocumentSnapshot<Map<String, dynamic>>> chatDocStream =
-                                          (chatId == null)
-                                              ? const Stream<DocumentSnapshot<Map<String, dynamic>>>.empty()
-                                              : FirebaseFirestore.instance.collection("chats").doc(chatId).snapshots();
-
-                                      final Stream<MeetupRequestState?> meetupStream =
-                                          (chatId == null)
-                                              ? const Stream<MeetupRequestState?>.empty()
-                                              : MeetupService.instance.watchRequestState(chatId: chatId);
-
-                                      NearbyDoc? nd;
-                                      for (final d in modeFilteredNearby) {
-                                        if (d.uid == c.uid) {
-                                          nd = d;
-                                          break;
-                                        }
-                                      }
-                                      final bool isBiz = nd?.isBusiness == true;
-                                      final int? avail = nd?.availabilityMinutes;
-
-                                      final String? distLabel =
-                                          ProxDistanceFormat.bucketMilesOrNull(c.distanceMiles);
-                                      final bool isPartyScope = (myPartyId ?? "").isNotEmpty;
-
-                                      return StreamBuilder<MeetupRequestState?>(
-                                        stream: meetupStream,
-                                        builder: (context, meetupSnap) {
-                                          final meetupState = meetupSnap.data;
-                                          final Duration? declineLeft =
-                                              MeetupService.instance.declineCooldownLeftFromState(meetupState);
-                                          final bool cooling =
-                                              (declineLeft != null && declineLeft > Duration.zero);
-
-                                          return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                                            stream: chatDocStream,
-                                            builder: (context, chatSnap) {
-                                              ChatGateStatus? gate;
-                                              if (chatSnap.data != null && chatSnap.data!.exists) {
-                                                gate = ChatGateStatus.fromChatDoc(chatSnap.data!.data());
-                                              }
-
-                                              final bool chatDeclined = (gate?.isDeclined ?? false);
-
-                                              final VoidCallback? onTap =
-                                                  (openingThis || cooling || chatDeclined)
-                                                      ? null
-                                                      : () => _openChat(otherUid: c.uid);
-
-                                              Widget right;
-                                              if (openingThis) {
-                                                right = const SizedBox(
-                                                  width: 18,
-                                                  height: 18,
-                                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                                );
-                                              } else if (chatId != null) {
-                                                final inline = _inlineGateActions(
-                                                  chatId: chatId,
-                                                  otherUid: c.uid,
-                                                  myUid: myUid,
-                                                  gate: gate,
-                                                  cooling: cooling,
-                                                  openingThis: openingThis,
-                                                );
-                                                if (inline is! SizedBox) {
-                                                  right = inline;
-                                                } else if (chatDeclined) {
-                                                  right = Icon(Icons.block_flipped, color: cs.onSurface.withValues(alpha: 0.75));
-                                                } else if (cooling) {
-                                                  right = Icon(Icons.lock_clock, color: cs.onSurface.withValues(alpha: 0.75));
-                                                } else {
-                                                  right = StreamBuilder<int>(
-                                                    stream: UnreadCounterService.instance.unreadCount(chatId, myUid),
-                                                    builder: (context, s) {
-                                                      final n = s.data ?? 0;
-                                                      if (n <= 0) {
-                                                        return Icon(Icons.chat_bubble_outline, color: cs.onSurface.withValues(alpha: 0.75));
-                                                      }
-                                                      return CircleAvatar(
-                                                        radius: 12,
-                                                        backgroundColor: cs.primary.withValues(alpha: 0.22),
-                                                        child: Text(
-                                                          n.toString(),
-                                                          style: TextStyle(
-                                                            fontSize: 12,
-                                                            color: cs.onSurface,
-                                                            fontWeight: FontWeight.w800,
-                                                          ),
-                                                        ),
-                                                      );
-                                                    },
-                                                  );
-                                                }
-                                              } else {
-                                                right = Icon(Icons.chat_bubble_outline, color: cs.onSurface.withValues(alpha: 0.75));
-                                              }
-
-                                              return Padding(
-                                                padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 6),
-                                                child: ProxGlassCard(
-                                                  onTap: onTap,
-                                                  highlight: isBiz ? const Color(0xFFFF8A3D) : cs.primary,
-                                                  glow: isBiz ? const Color(0xFFFF8A3D) : cs.primary,
-                                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                                                  child: Row(
-                                                    children: [
-                                                      StreamBuilder<UserProfile?>(
-                                                        stream: UserProfileService.instance.watchProfile(c.uid),
-                                                        builder: (context, ps) {
-                                                          final p = ps.data;
-                                                          final photoUrl = p?.photoUrl?.trim() ?? "";
-                                                          return CircleAvatar(
-                                                            radius: 18,
-                                                            backgroundImage: photoUrl.isNotEmpty ? NetworkImage(photoUrl) : null,
-                                                            child: photoUrl.isEmpty ? const Icon(Icons.person, size: 18) : null,
-                                                          );
-                                                        },
-                                                      ),
-                                                      const SizedBox(width: 12),
-                                                      Expanded(
-                                                        child: StreamBuilder<UserProfile?>(
-                                                          stream: UserProfileService.instance.watchProfile(c.uid),
-                                                          builder: (context, ps) {
-                                                            final p = ps.data;
-                                                            final name = ProxIdentityPolicy.displayName(
-                                                              uid: c.uid,
-                                                              profile: p,
-                                                              isPartyScope: isPartyScope,
-                                                            );
-
-                                                            return Column(
-                                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                                              children: [
-                                                                Row(
-                                                                  children: [
-                                                                    Expanded(
-                                                                      child: Text(
-                                                                        name,
-                                                                        overflow: TextOverflow.ellipsis,
-                                                                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                                                              fontWeight: FontWeight.w800,
-                                                                              color: cs.onSurface.withValues(alpha: 0.92),
-                                                                            ),
-                                                                      ),
-                                                                    ),
-                                                                    if (isBiz) ...[
-                                                                      const SizedBox(width: 8),
-                                                                      _chip(
-                                                                        (avail != null && avail <= 0) ? "Business  Now" : "Business",
-                                                                        strong: true,
-                                                                      ),
-                                                                    ],
-                                                                  ],
-                                                                ),
-                                                                const SizedBox(height: 6),
-                                                                Wrap(
-                                                                  spacing: 8,
-                                                                  runSpacing: 8,
-                                                                  crossAxisAlignment: WrapCrossAlignment.center,
-                                                                  children: [
-                                                                    if (distLabel != null) _chip(distLabel),
-                                                                    _gateChipFrom(gate, myUid, cooling: cooling),
-                                                                  ],
-                                                                ),
-                                                              ],
-                                                            );
-                                                          },
-                                                        ),
-                                                      ),
-                                                      const SizedBox(width: 10),
-                                                      right,
-                                                    ],
-                                                  ),
-                                                ),
-                                              );
-                                            },
-                                          );
-                                        },
-                                      );
-                                    },
-                                  );
-                                    },
-                                  );
-                                },
-                              );
-                            },
+                        SliverFillRemaining(
+                          hasScrollBody: true,
+                          child: _buildNearbyCardsScrollableArea(
+                            discovery: discovery,
+                            myPartyId: myPartyId,
+                            cs: cs,
+                            bottomInset: bottomInset,
                           ),
                         ),
                       ],
@@ -1405,7 +1940,6 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                 );
               },
             ),
-
             if (_opening)
               Positioned.fill(
                 child: IgnorePointer(
@@ -1418,11 +1952,15 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                       blurSigma: 18,
                       fillOpacity: 0.12,
                       borderOpacity: 0.16,
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 12),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: const [
-                          SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                          SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2)),
                           SizedBox(width: 10),
                           Text("Opening chat..."),
                         ],
@@ -1439,27 +1977,41 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
 }
 
 class _ProxHoldRingPainter extends CustomPainter {
-  final double progress01;
-  final Color color;
-
   const _ProxHoldRingPainter({
     required this.progress01,
     required this.color,
   });
 
+  final double progress01;
+  final Color color;
+
   @override
   void paint(Canvas canvas, Size size) {
-    if (progress01 <= 0) return;
-
     final Rect rect = Offset.zero & size;
-    final Paint p = Paint()
-      ..color = color
-      ..strokeWidth = 8
+    final double p = progress01.clamp(0.0, 1.0);
+
+    final Paint track = Paint()
       ..style = PaintingStyle.stroke
+      ..strokeWidth = 4
+      ..color = color.withValues(alpha: 0.24)
       ..strokeCap = StrokeCap.round;
 
-    final double sweep = (2 * math.pi) * progress01.clamp(0.0, 1.0);
-    canvas.drawArc(rect.deflate(4), -math.pi / 2, sweep, false, p);
+    final Paint progress = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 6
+      ..color = color.withValues(alpha: 0.95)
+      ..strokeCap = StrokeCap.round;
+
+    final Offset c = rect.center;
+    final double r = (size.shortestSide / 2) - 3;
+    canvas.drawCircle(c, r, track);
+    canvas.drawArc(
+      Rect.fromCircle(center: c, radius: r),
+      -math.pi / 2,
+      (2 * math.pi) * p,
+      false,
+      progress,
+    );
   }
 
   @override
@@ -1467,3 +2019,4 @@ class _ProxHoldRingPainter extends CustomPainter {
     return oldDelegate.progress01 != progress01 || oldDelegate.color != color;
   }
 }
+

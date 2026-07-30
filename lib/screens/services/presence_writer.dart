@@ -7,6 +7,7 @@ import "package:flutter/foundation.dart";
 import "package:geolocator/geolocator.dart";
 
 import "package:prox/services/app_lifecycle_service.dart";
+import "package:prox/services/app_build_info_service.dart";
 import "package:prox/services/ime_visibility_service.dart";
 import "package:prox/services/motion_classifier.dart";
 import "package:prox/services/ttl/ttl_policy.dart";
@@ -51,6 +52,7 @@ class PresenceWriter {
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+  String? _cachedAppVersion;
 
   final MotionClassifier _motion = MotionClassifier();
 
@@ -799,10 +801,12 @@ class PresenceWriter {
 
     final ref = _db.doc("users/$uid/presence/current");
     try {
+      final String appVersion = await _appVersionLabel();
       await ref.set(
         <String, Object?>{
           "kind": "current",
           "geopoint": GeoPoint(demoAdjusted.lat, demoAdjusted.lon),
+          "appVersion": appVersion,
           "ts": FieldValue.serverTimestamp(),
           "expiresAt": TTLPolicy.expiresAtFromNow(presenceTtl),
           if (cached) "cached": true,
@@ -829,6 +833,17 @@ class PresenceWriter {
       _log("[PresenceWriter] write failed uid=$uid: $e");
       return false;
     }
+  }
+
+  Future<String> _appVersionLabel() async {
+    final cached = _cachedAppVersion;
+    if (cached != null && cached.trim().isNotEmpty) {
+      return cached;
+    }
+
+    final value = await AppBuildInfoService.instance.fullVersion();
+    _cachedAppVersion = value;
+    return value;
   }
 
   Future<({double lat, double lon})> _applyDemoNearbyLocationOverride({

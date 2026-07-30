@@ -62,7 +62,8 @@ class MatchingRuntimeService {
       return raw.where((d) {
         final ts = d.presenceTs;
         if (ts == null) return false;
-        final bool recentlyMoving = now.difference(ts) <= const Duration(minutes: 3);
+        final bool recentlyMoving =
+            now.difference(ts) <= const Duration(minutes: 3);
         return recentlyMoving;
       }).toList(growable: false);
     }
@@ -74,6 +75,18 @@ class MatchingRuntimeService {
       } catch (_) {
         return const <NearbyDoc>[];
       }
+    }
+
+    if (settings.modeKind == MatchingModeKind.listen) {
+      final ListenMatchRole localRole = settings.listenRole;
+      return raw.where((d) {
+        final peerMode = _peerModeKind(d);
+        if (peerMode != MatchingModeKind.listen) return false;
+
+        final peerRole = _peerListenRole(d);
+        if (peerRole == null) return false;
+        return peerRole != localRole;
+      }).toList(growable: false);
     }
 
     if (settings.modeKind == MatchingModeKind.normal &&
@@ -130,7 +143,8 @@ class MatchingRuntimeService {
     }
 
     out.sort((a, b) {
-      final byKeywords = b.sharedKeywords.length.compareTo(a.sharedKeywords.length);
+      final byKeywords =
+          b.sharedKeywords.length.compareTo(a.sharedKeywords.length);
       if (byKeywords != 0) return byKeywords;
       return a.doc.distanceMiles.compareTo(b.doc.distanceMiles);
     });
@@ -146,7 +160,8 @@ class MatchingRuntimeService {
       if (_myKeywords.isEmpty || peer.isEmpty) return const <String>[];
 
       final mine = _myKeywords.toSet();
-      final shared = peer.where(mine.contains).toSet().toList(growable: false)..sort();
+      final shared = peer.where(mine.contains).toSet().toList(growable: false)
+        ..sort();
       return shared;
     } catch (_) {
       return const <String>[];
@@ -161,7 +176,8 @@ class MatchingRuntimeService {
     }
 
     final now = DateTime.now();
-    if (_myKeywordsAt != null && now.difference(_myKeywordsAt!) < const Duration(minutes: 2)) {
+    if (_myKeywordsAt != null &&
+        now.difference(_myKeywordsAt!) < const Duration(minutes: 2)) {
       return;
     }
 
@@ -199,7 +215,8 @@ class MatchingRuntimeService {
     }
   }
 
-  KeywordMatchMode _effectiveKeywordModeForUnlocks(MatchDiscoverySettings settings) {
+  KeywordMatchMode _effectiveKeywordModeForUnlocks(
+      MatchDiscoverySettings settings) {
     switch (settings.keywordMode) {
       case KeywordMatchMode.singleKeyword:
         return settings.singleKeywordMatchUnlocked
@@ -301,6 +318,73 @@ class MatchingRuntimeService {
 
     final sanitized = KeywordQualityService.sanitizeList(out);
     return sanitized.cleaned..sort();
+  }
+
+  MatchingModeKind _peerModeKind(NearbyDoc doc) {
+    final String modeName = _readPeerSettingString(doc, const <List<String>>[
+      <String>["modeKind"],
+      <String>["matching", "modeKind"],
+      <String>["matchingSettings", "modeKind"],
+      <String>["settings", "matching", "modeKind"],
+      <String>["presence", "modeKind"],
+    ]);
+
+    final normalized = _normalizePeerToken(modeName);
+    switch (normalized) {
+      case "off":
+        return MatchingModeKind.off;
+      case "treasurehunt":
+        return MatchingModeKind.treasureHunt;
+      case "travel":
+        return MatchingModeKind.travel;
+      case "listen":
+      case "listenmode":
+        return MatchingModeKind.listen;
+      case "normal":
+      default:
+        return MatchingModeKind.normal;
+    }
+  }
+
+  ListenMatchRole? _peerListenRole(NearbyDoc doc) {
+    final String roleName = _readPeerSettingString(doc, const <List<String>>[
+      <String>["listenRole"],
+      <String>["matching", "listenRole"],
+      <String>["matchingSettings", "listenRole"],
+      <String>["settings", "matching", "listenRole"],
+      <String>["presence", "listenRole"],
+    ]);
+    final normalized = _normalizePeerToken(roleName);
+    switch (normalized) {
+      case "speak":
+        return ListenMatchRole.speak;
+      case "listen":
+        return ListenMatchRole.listen;
+      default:
+        return null;
+    }
+  }
+
+  String _readPeerSettingString(NearbyDoc doc, List<List<String>> paths) {
+    for (final path in paths) {
+      dynamic node = doc.data;
+      for (final segment in path) {
+        if (node is! Map) {
+          node = null;
+          break;
+        }
+        node = node[segment];
+      }
+      if (node is String) {
+        final value = node.trim();
+        if (value.isNotEmpty) return value;
+      }
+    }
+    return "";
+  }
+
+  String _normalizePeerToken(String raw) {
+    return raw.trim().toLowerCase().replaceAll(RegExp(r"[^a-z0-9]"), "");
   }
 }
 

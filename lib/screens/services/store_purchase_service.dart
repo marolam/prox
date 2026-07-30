@@ -250,7 +250,8 @@ class StorePurchaseService {
       );
 
       if (!debited) {
-        return const StorePurchaseResult(StorePurchaseStatus.insufficientPoints);
+        return const StorePurchaseResult(
+            StorePurchaseStatus.insufficientPoints);
       }
 
       try {
@@ -284,6 +285,20 @@ class StorePurchaseService {
     } catch (_) {
       return const StorePurchaseResult(StorePurchaseStatus.unknownSku);
     }
+  }
+
+  Future<StorePurchaseResult> purchaseWithExternalCheckout({
+    required String uid,
+    required String sku,
+    required bool businessUnlocked,
+    required String sessionId,
+    required String paymentMethodId,
+  }) {
+    return purchase(
+      uid: uid,
+      sku: sku,
+      businessUnlocked: businessUnlocked,
+    );
   }
 
   Future<void> _applyEntitlementsForSku({

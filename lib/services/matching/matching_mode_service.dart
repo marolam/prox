@@ -40,12 +40,17 @@ class MatchingModeService extends ChangeNotifier {
 
   NormalMatchMode get normalMode => discovery.normalMode;
 
-  bool get isActiveLocked => discovery.isActiveLocked || ActiveModePolicyService.instance.isLockedByBackend;
+  ListenMatchRole get listenRole => discovery.listenRole;
+
+  bool get isActiveLocked =>
+      discovery.isActiveLocked ||
+      ActiveModePolicyService.instance.isLockedByBackend;
 
   void setMode(ProxMatchingMode next) {
     _settings.clearActiveLockIfExpired();
-    final desired =
-        (next == ProxMatchingMode.active) ? NormalMatchMode.active : NormalMatchMode.passive;
+    final desired = (next == ProxMatchingMode.active)
+        ? NormalMatchMode.active
+        : NormalMatchMode.passive;
     _settings.setMatchingMode(MatchingModeKind.normal);
     _settings.setNormalMatchMode(desired);
     _syncModeToServer();
@@ -54,6 +59,12 @@ class MatchingModeService extends ChangeNotifier {
 
   void setModeKind(MatchingModeKind next) {
     _settings.setMatchingMode(next);
+    _syncModeToServer();
+    notifyListeners();
+  }
+
+  void setListenRole(ListenMatchRole next) {
+    _settings.setListenRole(next);
     _syncModeToServer();
     notifyListeners();
   }
@@ -71,7 +82,8 @@ class MatchingModeService extends ChangeNotifier {
   }
 
   void registerActiveNoResponsePenalty() {
-    _settings.recordActiveModePenalty(lockDuration: const Duration(minutes: 10));
+    _settings.recordActiveModePenalty(
+        lockDuration: const Duration(minutes: 10));
     notifyListeners();
   }
 
@@ -85,21 +97,38 @@ class MatchingModeService extends ChangeNotifier {
 
     final d = _settings.current.matchDiscovery;
     unawaited(
-      _fs
-          .collection("users")
-          .doc(uid)
-          .collection("settings")
-          .doc("matching")
-          .set(
-        <String, Object?>{
-          "modeKind": d.modeKind.name,
-          "normalMode": d.normalMode.name,
-          "radiusMiles": d.radiusMiles,
-          "treasureRadiusMiles": d.treasureRadiusMiles,
-          "updatedAtClientMs": DateTime.now().millisecondsSinceEpoch,
-        },
-        SetOptions(merge: true),
-      ),
+      Future.wait<void>([
+        _fs
+            .collection("users")
+            .doc(uid)
+            .collection("settings")
+            .doc("matching")
+            .set(
+          <String, Object?>{
+            "modeKind": d.modeKind.name,
+            "normalMode": d.normalMode.name,
+            "listenRole": d.listenRole.name,
+            "radiusMiles": d.radiusMiles,
+            "treasureRadiusMiles": d.treasureRadiusMiles,
+            "updatedAtClientMs": DateTime.now().millisecondsSinceEpoch,
+          },
+          SetOptions(merge: true),
+        ),
+        _fs
+            .collection("users")
+            .doc(uid)
+            .collection("presence")
+            .doc("current")
+            .set(
+          <String, Object?>{
+            "modeKind": d.modeKind.name,
+            "normalMode": d.normalMode.name,
+            "listenRole": d.listenRole.name,
+            "matchingUpdatedAtClientMs": DateTime.now().millisecondsSinceEpoch,
+          },
+          SetOptions(merge: true),
+        ),
+      ]),
     );
   }
 }

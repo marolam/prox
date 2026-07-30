@@ -13,6 +13,7 @@ import "package:prox/screens/onboarding/onboarding_screen.dart";
 import "package:prox/screens/onboarding/presence_rehearsal_screen.dart";
 import "package:prox/services/local_flags.dart";
 import "package:prox/services/location_permissions.dart";
+import "package:prox/services/login_update_check_service.dart";
 import "package:prox/services/monetization_service.dart";
 import "package:prox/services/presence_writer.dart";
 import "package:prox/services/push_notifications.dart";
@@ -432,6 +433,15 @@ class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
           await PresenceWriter.instance
               .startLive(reason: "post_auth")
               .timeout(const Duration(seconds: 8), onTimeout: () => false);
+
+      if (mounted) {
+        // ignore: discarded_futures
+        LoginUpdateCheckService.instance.checkAndNotify(
+          context,
+          forceRefresh: true,
+          showUpToDateSnackBar: false,
+        );
+      }
 
       // Nearby bootstrap is now started on-demand when Nearby screen opens.
 

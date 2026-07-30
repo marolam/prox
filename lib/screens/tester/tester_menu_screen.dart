@@ -30,10 +30,20 @@ class _TesterMenuScreenState extends State<TesterMenuScreen> {
     Map<String, dynamic> stats = const <String, dynamic>{};
 
     if (uid.isNotEmpty) {
-      final pointsSnap = await _db.collection("users").doc(uid).collection("meta").doc("points").get();
+      final pointsSnap = await _db
+          .collection("users")
+          .doc(uid)
+          .collection("meta")
+          .doc("points")
+          .get();
       points = pointsSnap.data() ?? const <String, dynamic>{};
 
-      final statsSnap = await _db.collection("users").doc(uid).collection("stats").doc("current").get();
+      final statsSnap = await _db
+          .collection("users")
+          .doc(uid)
+          .collection("stats")
+          .doc("current")
+          .get();
       stats = statsSnap.data() ?? const <String, dynamic>{};
     }
 
@@ -60,7 +70,6 @@ class _TesterMenuScreenState extends State<TesterMenuScreen> {
       "SETTINGS",
       "uxMode: ${settings.uxMode.name}",
       "textScale: ${settings.textScaleFactor.toStringAsFixed(2)}",
-      "demoMode: ${settings.demoModeEnabled}",
       "trustPulse: ${settings.trustPulseEnabled}",
       "referralSignal: ${settings.referralSignalEnabled}",
       "matchModeKind: ${settings.matchDiscovery.modeKind.name}",
@@ -141,7 +150,8 @@ class _TesterMenuScreenState extends State<TesterMenuScreen> {
           OutlinedButton.icon(
             onPressed: () {
               Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const SupportFeedbackScreen()),
+                MaterialPageRoute<void>(
+                    builder: (_) => const SupportFeedbackScreen()),
               );
             },
             icon: const Icon(Icons.feedback_outlined),
@@ -160,7 +170,11 @@ class _TesterMenuScreenState extends State<TesterMenuScreen> {
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.25)),
+              border: Border.all(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .outline
+                      .withValues(alpha: 0.25)),
             ),
             child: SelectableText(
               _statusReport,

@@ -118,6 +118,22 @@ class MeetupService {
 
   Stream<DocumentSnapshot<Map<String, dynamic>>> watch(String meetupId) =>
       meetupRef(meetupId).snapshots();
+
+  Future<void> exitAndFlushDashboards({
+    required String chatId,
+    required String otherUid,
+    required String reason,
+  }) async {
+    final cleanChatId = chatId.trim();
+    if (cleanChatId.isEmpty) return;
+
+    await meetupRef(cleanChatId).set(<String, Object?>{
+      "status": "expired",
+      "exitReason": reason,
+      if (otherUid.trim().isNotEmpty) "exitOtherUid": otherUid.trim(),
+      "updatedAt": FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
   Stream<DocumentSnapshot<Map<String, dynamic>>> watchMeetup(String meetupId) =>
       meetupRef(meetupId).snapshots();
 

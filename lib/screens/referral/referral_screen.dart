@@ -6,6 +6,8 @@ import "package:qr_flutter/qr_flutter.dart";
 import "package:share_plus/share_plus.dart";
 
 import "package:prox/screens/monetization/business_paywall_screen.dart";
+import "package:prox/screens/referral/referral_demo_walkthrough_screen.dart";
+import "package:prox/services/device_storage_service.dart";
 import "package:prox/services/points_service.dart";
 import "package:prox/services/referral/referral_service.dart" as refsvc;
 
@@ -17,9 +19,14 @@ class ReferralScreen extends StatefulWidget {
 }
 
 class _ReferralScreenState extends State<ReferralScreen> {
+  static const String _kBig5WalkthroughStateKey =
+      "referral.big5_walkthrough.v1";
+
   bool _creating = false;
   bool _allowInPersonQrPartyJoin = false;
   bool _loadingPartyToggle = true;
+  bool _walkthroughReady = false;
+  bool _walkthroughCompleted = false;
 
   String _buildLink({required String code, required String uid}) {
     return "https://prox-us.com/?code=$code&ref=$uid";
@@ -33,6 +40,71 @@ class _ReferralScreenState extends State<ReferralScreen> {
   void initState() {
     super.initState();
     _loadReferralPartyToggle();
+    _loadWalkthroughState();
+  }
+
+  Future<void> _loadWalkthroughState() async {
+    await DeviceStorageService.instance.load();
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+    if (uid.trim().isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _walkthroughReady = true;
+        _walkthroughCompleted = true;
+      });
+      return;
+    }
+
+    final map =
+        DeviceStorageService.instance.getMap(_kBig5WalkthroughStateKey) ??
+            const <String, dynamic>{};
+    final completed = map[uid] == true;
+
+    if (!mounted) return;
+    setState(() {
+      _walkthroughReady = true;
+      _walkthroughCompleted = completed;
+    });
+
+    if (!completed) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _runMandatoryWalkthrough();
+      });
+    }
+  }
+
+  Future<void> _runMandatoryWalkthrough() async {
+    if (!mounted || _walkthroughCompleted) return;
+
+    final result = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => const ReferralDemoWalkthroughScreen(),
+        fullscreenDialog: true,
+      ),
+    );
+
+    if (!mounted) return;
+    if (result != true) {
+      // Keep this walkthrough required until it returns completion.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _runMandatoryWalkthrough();
+      });
+      return;
+    }
+
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+    if (uid.trim().isNotEmpty) {
+      await DeviceStorageService.instance.updateMapEntry(
+        key: _kBig5WalkthroughStateKey,
+        entryKey: uid,
+        value: true,
+      );
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _walkthroughCompleted = true;
+    });
   }
 
   Future<void> _loadReferralPartyToggle() async {
@@ -43,7 +115,8 @@ class _ReferralScreenState extends State<ReferralScreen> {
       return;
     }
 
-    final allowed = await refsvc.ReferralService.instance.getAllowInPersonQrPartyJoin(uid);
+    final allowed =
+        await refsvc.ReferralService.instance.getAllowInPersonQrPartyJoin(uid);
     if (!mounted) return;
     setState(() {
       _allowInPersonQrPartyJoin = allowed;
@@ -58,7 +131,8 @@ class _ReferralScreenState extends State<ReferralScreen> {
     });
 
     try {
-      await refsvc.ReferralService.instance.setAllowInPersonQrPartyJoin(uid, value);
+      await refsvc.ReferralService.instance
+          .setAllowInPersonQrPartyJoin(uid, value);
     } finally {
       if (!mounted) return;
       setState(() => _loadingPartyToggle = false);
@@ -118,16 +192,30 @@ class _ReferralScreenState extends State<ReferralScreen> {
       );
     }
 
+    if (!_walkthroughReady) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(title: const Text("Referrals")),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
         children: [
+          FilledButton.icon(
+            onPressed: _runMandatoryWalkthrough,
+            icon: const Icon(Icons.arrow_forward),
+            label: Text(
+                _walkthroughCompleted ? "Replay Big-5 walkthrough" : "Start required Big-5 walkthrough"),
+          ),
+          const SizedBox(height: 14),
           StreamBuilder<List<refsvc.ReferralCodeDoc>>(
             stream: refsvc.ReferralService.instance.streamMyCodes(uid),
             builder: (context, snapshot) {
               final codes = snapshot.data ?? const <refsvc.ReferralCodeDoc>[];
-              final active = codes.where((c) => c.active).toList(growable: false);
+              final active =
+                  codes.where((c) => c.active).toList(growable: false);
               final code = active.isNotEmpty ? active.first.code : null;
 
               return Card(
@@ -144,12 +232,14 @@ class _ReferralScreenState extends State<ReferralScreen> {
                     children: [
                       Text(
                         "Share your invite",
-                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800),
                       ),
                       const SizedBox(height: 8),
                       Text(
                         "Payout unlock: +5 points when invitee completes their first 5 meetups.",
-                        style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: cs.onSurfaceVariant),
                       ),
                       const SizedBox(height: 12),
                       SwitchListTile.adaptive(
@@ -158,12 +248,14 @@ class _ReferralScreenState extends State<ReferralScreen> {
                         onChanged: _loadingPartyToggle
                             ? null
                             : (v) => _setReferralPartyToggle(uid, v),
-                        title: const Text("Allow in-person QR referrals into my Party"),
+                        title: const Text(
+                            "Allow in-person QR referrals into my Party"),
                         subtitle: Text(
                           _allowInPersonQrPartyJoin
                               ? "ON: invitees who join via in-person QR can request direct Party pairing."
                               : "OFF: referrals will not trigger direct Party pairing.",
-                          style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: cs.onSurfaceVariant),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -171,15 +263,19 @@ class _ReferralScreenState extends State<ReferralScreen> {
                         SizedBox(
                           width: double.infinity,
                           child: FilledButton.icon(
-                            onPressed: _creating ? null : () => _createCode(uid),
+                            onPressed:
+                                _creating ? null : () => _createCode(uid),
                             icon: _creating
                                 ? const SizedBox(
                                     width: 16,
                                     height: 16,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
                                   )
                                 : const Icon(Icons.add),
-                            label: Text(_creating ? "Creating..." : "Create invite code"),
+                            label: Text(_creating
+                                ? "Creating..."
+                                : "Create invite code"),
                           ),
                         )
                       else ...[
@@ -193,12 +289,14 @@ class _ReferralScreenState extends State<ReferralScreen> {
                         const SizedBox(height: 8),
                         Text(
                           _buildLink(code: code, uid: uid),
-                          style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: cs.onSurfaceVariant),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           "QR (in-person): ${_allowInPersonQrPartyJoin ? "Party join request enabled" : "Party join request disabled"}",
-                          style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: cs.onSurfaceVariant),
                         ),
                         const SizedBox(height: 10),
                         Row(
@@ -255,7 +353,8 @@ class _ReferralScreenState extends State<ReferralScreen> {
             builder: (context, snap) {
               final meta = snap.data ?? PointsService.instance.peekMeta(uid);
               const int businessModeTarget = 50;
-              final int left = (businessModeTarget - meta.currentPoints).clamp(0, 999999);
+              final int left =
+                  (businessModeTarget - meta.currentPoints).clamp(0, 999999);
 
               return Card(
                 elevation: 0,
@@ -271,13 +370,15 @@ class _ReferralScreenState extends State<ReferralScreen> {
                     children: [
                       Text(
                         "Points snapshot",
-                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800),
                       ),
                       const SizedBox(height: 8),
                       Text("Current points: ${meta.currentPoints}"),
                       Text("Referral count: ${meta.referrals}"),
                       Text("Support sessions: ${meta.supportSessions}"),
-                      Text("Points needed for Business Mode target (50): $left"),
+                      Text(
+                          "Points needed for Business Mode target (50): $left"),
                     ],
                   ),
                 ),
@@ -299,7 +400,8 @@ class _ReferralScreenState extends State<ReferralScreen> {
                 children: [
                   Text(
                     "Quick actions",
-                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                    style: theme.textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w800),
                   ),
                   const SizedBox(height: 10),
                   Wrap(
@@ -307,12 +409,14 @@ class _ReferralScreenState extends State<ReferralScreen> {
                     runSpacing: 8,
                     children: [
                       FilledButton.icon(
-                        onPressed: () => Navigator.of(context).pushNamed("/store"),
+                        onPressed: () =>
+                            Navigator.of(context).pushNamed("/store"),
                         icon: const Icon(Icons.account_balance_wallet_outlined),
                         label: const Text("Wallet"),
                       ),
                       OutlinedButton.icon(
-                        onPressed: () => Navigator.of(context).pushNamed("/store"),
+                        onPressed: () =>
+                            Navigator.of(context).pushNamed("/store"),
                         icon: const Icon(Icons.shopping_bag_outlined),
                         label: const Text("Prox Store"),
                       ),
@@ -338,7 +442,8 @@ class _ReferralScreenState extends State<ReferralScreen> {
           StreamBuilder<List<refsvc.ReferralInviteDoc>>(
             stream: refsvc.ReferralService.instance.streamMyInvites(uid),
             builder: (context, snapshot) {
-              final invites = snapshot.data ?? const <refsvc.ReferralInviteDoc>[];
+              final invites =
+                  snapshot.data ?? const <refsvc.ReferralInviteDoc>[];
               int verified = 0;
               int pending = 0;
               int joined = 0;
@@ -377,33 +482,42 @@ class _ReferralScreenState extends State<ReferralScreen> {
                     children: [
                       Text(
                         "Referral dashboard",
-                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800),
                       ),
                       const SizedBox(height: 8),
                       Wrap(
                         spacing: 10,
                         runSpacing: 8,
                         children: [
-                          _StatChip(label: "Total", value: invites.length.toString()),
+                          _StatChip(
+                              label: "Total", value: invites.length.toString()),
                           _StatChip(label: "Joined", value: joined.toString()),
-                          _StatChip(label: "Pending", value: pending.toString()),
-                          _StatChip(label: "Verified", value: verified.toString()),
+                          _StatChip(
+                              label: "Pending", value: pending.toString()),
+                          _StatChip(
+                              label: "Verified", value: verified.toString()),
                         ],
                       ),
                       const SizedBox(height: 10),
                       Text(
                         "Private referral totals",
-                        style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+                        style: theme.textTheme.titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w800),
                       ),
                       const SizedBox(height: 6),
-                      Text("Meetups completed by referrals: $totalMeetupsByReferrals"),
-                      Text("Prox points generated (credited): $privatePointsGenerated"),
-                      Text("Potential points from current progress: $privatePointsPotential"),
+                      Text(
+                          "Meetups completed by referrals: $totalMeetupsByReferrals"),
+                      Text(
+                          "Prox points generated (credited): $privatePointsGenerated"),
+                      Text(
+                          "Potential points from current progress: $privatePointsPotential"),
                       const SizedBox(height: 12),
                       if (invites.isEmpty)
                         Text(
                           "No referrals yet. Share your code or QR to start.",
-                          style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: cs.onSurfaceVariant),
                         )
                       else
                         for (final invite in invites)
@@ -440,7 +554,8 @@ class _StatChip extends StatelessWidget {
       ),
       child: Text(
         "$label: $value",
-        style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w800),
+        style:
+            theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w800),
       ),
     );
   }
@@ -493,13 +608,14 @@ class _InviteTile extends StatelessWidget {
     if (left > Duration.zero) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Reminder cooldown active. ${_cooldownLabel(left)}")),
+        SnackBar(
+            content: Text("Reminder cooldown active. ${_cooldownLabel(left)}")),
       );
       return;
     }
 
     final text =
-      "Quick Prox boost from your referrer: you're doing great. Keep your momentum by finishing your next meetup, and if you need help, open Support Mode in the app and we'll help you get unstuck fast.";
+        "Quick Prox boost from your referrer: you're doing great. Keep your momentum by finishing your next meetup, and if you need help, open Support Mode in the app and we'll help you get unstuck fast.";
     try {
       await Share.share(text);
       await refsvc.ReferralService.instance.markReminderSent(
@@ -509,7 +625,8 @@ class _InviteTile extends StatelessWidget {
     } catch (_) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Could not open share options for nudge.")),
+        const SnackBar(
+            content: Text("Could not open share options for nudge.")),
       );
     }
   }
@@ -525,7 +642,10 @@ class _InviteTile extends StatelessWidget {
     final String status = invite.status.isEmpty ? "joined" : invite.status;
 
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance.collection("users").doc(invite.uid).snapshots(),
+      stream: FirebaseFirestore.instance
+          .collection("users")
+          .doc(invite.uid)
+          .snapshots(),
       builder: (context, userSnap) {
         final userData = userSnap.data?.data() ?? const <String, dynamic>{};
         final lastActive = _readLastActive(userData);
@@ -547,7 +667,8 @@ class _InviteTile extends StatelessWidget {
                   Expanded(
                     child: Text(
                       invite.uid,
-                      style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800),
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(fontWeight: FontWeight.w800),
                     ),
                   ),
                   Text(status, style: theme.textTheme.labelSmall),
@@ -556,7 +677,8 @@ class _InviteTile extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 "Meetup progress: $progress/5 (completed meetups: ${invite.meetupsCompleted})",
-                style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: cs.onSurfaceVariant),
               ),
               const SizedBox(height: 4),
               Text(
@@ -571,7 +693,9 @@ class _InviteTile extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 unlocked
-                    ? (invite.rewardCredited ? "Reward credited: +5 points" : "Reward unlocked, credit pending sync")
+                    ? (invite.rewardCredited
+                        ? "Reward credited: +5 points"
+                        : "Reward unlocked, credit pending sync")
                     : "$remaining more meetup${remaining == 1 ? "" : "s"} needed for +5 points",
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: unlocked ? cs.primary : cs.onSurfaceVariant,
@@ -604,7 +728,8 @@ class _InviteTile extends StatelessWidget {
                         children: [
                           Expanded(
                             child: OutlinedButton.icon(
-                              onPressed: coolingDown ? null : () => _nudge(context),
+                              onPressed:
+                                  coolingDown ? null : () => _nudge(context),
                               icon: const Icon(Icons.campaign_outlined),
                               label: const Text("Nudge"),
                             ),
@@ -612,7 +737,8 @@ class _InviteTile extends StatelessWidget {
                           const SizedBox(width: 8),
                           Expanded(
                             child: OutlinedButton.icon(
-                              onPressed: () => Navigator.of(context).pushNamed("/support"),
+                              onPressed: () =>
+                                  Navigator.of(context).pushNamed("/support"),
                               icon: const Icon(Icons.support_agent_outlined),
                               label: const Text("Contact support"),
                             ),
@@ -630,8 +756,3 @@ class _InviteTile extends StatelessWidget {
     );
   }
 }
-
-
-
-
-

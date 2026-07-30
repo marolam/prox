@@ -4,6 +4,7 @@ import "package:flutter/material.dart";
 
 import "package:prox/bootstrap/nearby_bootstrap.dart";
 import "package:prox/screens/chat/chat_thread_screen.dart";
+import "package:prox/services/app_build_info_service.dart";
 import "package:prox/services/help/context_help_service.dart";
 import "package:prox/services/chat_service.dart";
 import "package:prox/services/device_storage_service.dart";
@@ -11,6 +12,7 @@ import "package:prox/services/match_events_service.dart";
 import "package:prox/services/now_feed_cleanup_service.dart";
 import "package:prox/services/party_mode_service.dart";
 import "package:prox/services/party_service.dart";
+import "package:prox/services/presence_writer.dart";
 import "package:prox/services/stream_cache.dart";
 import "package:prox/services/user_profile_service.dart";
 import "package:prox/utils/presentation/prox_distance_format.dart";
@@ -46,6 +48,18 @@ class _MatchesScreenState extends State<MatchesScreen> {
     MatchEventsService.instance.ensureLoaded();
     _reload();
 
+    // Ensure nearby bootstrap debug metrics are live when this screen opens.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      try {
+        await PresenceWriter.instance.startLive(reason: "matches_open");
+        await PresenceWriter.instance.forceWrite(reason: "matches_open");
+        await proxBootstrapNearby();
+      } catch (_) {
+        // Keep screen usable even if bootstrap cannot start.
+      }
+    });
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Future<void>.delayed(const Duration(milliseconds: 600), () async {
         if (!mounted) return;
@@ -58,7 +72,13 @@ class _MatchesScreenState extends State<MatchesScreen> {
     });
   }
 
-  void _reload() {
+  @override
+  void dispose() {
+    NearbyBootstrap.instance.stop();
+    super.dispose();
+  }
+
+  Future<void> _reload() async {
     _events = MatchEventsService.instance.readEvents();
 
     final Map<String, dynamic>? raw = DeviceStorageService.instance.getMap(_kRecentKey);
@@ -68,13 +88,41 @@ class _MatchesScreenState extends State<MatchesScreen> {
     for (final e in list) {
       if (e is Map) out.add(Map<String, dynamic>.from(e));
     }
+
+    final meUid = FirebaseAuth.instance.currentUser?.uid ?? "";
+    if (meUid.trim().isNotEmpty) {
+      _fsMatchesCache.clear(meUid);
+      _historyCache.clear(meUid);
+    }
+
+    await PresenceWriter.instance.startLive(reason: "matches_refresh");
+    await PresenceWriter.instance.forceWrite(reason: "matches_refresh");
+    await proxRestartNearby();
+
+    if (!mounted) return;
     setState(() => _recent = out);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Matches refreshed"), duration: Duration(seconds: 1)),
+    );
   }
 
   Future<void> _clearAll() async {
     MatchEventsService.instance.clear();
     DeviceStorageService.instance.set(_kRecentKey, <String, Object?>{"list": <Object?>[]});
-    _reload();
+
+    final meUid = FirebaseAuth.instance.currentUser?.uid ?? "";
+    if (meUid.trim().isNotEmpty) {
+      _fsMatchesCache.clear(meUid);
+      _historyCache.clear(meUid);
+    }
+
+    await proxRestartNearby();
+    await _reload();
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Local match cache cleared"), duration: Duration(seconds: 1)),
+    );
   }
 
   Future<void> _openChat(String otherUid) async {
@@ -262,12 +310,12 @@ class _MatchesScreenState extends State<MatchesScreen> {
                           runSpacing: 8,
                           children: [
                             OutlinedButton.icon(
-                              onPressed: _reload,
+                              onPressed: () async => _reload(),
                               icon: const Icon(Icons.refresh),
                               label: const Text("Refresh"),
                             ),
                             OutlinedButton.icon(
-                              onPressed: _clearAll,
+                              onPressed: () async => _clearAll(),
                               icon: const Icon(Icons.delete_outline),
                               label: const Text("Clear local"),
                             ),
@@ -330,10 +378,26 @@ class _MatchesScreenState extends State<MatchesScreen> {
                         if (snap.hasError)
                           Padding(
                             padding: const EdgeInsets.all(16),
-                            child: Text(
-                              "Could not load Firestore matches right now.",
-                              style: theme.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
-                              textAlign: TextAlign.center,
+                            child: Column(
+                              children: [
+                                Text(
+                                  "Could not load Firestore matches right now.",
+                                  style: theme.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+                                  textAlign: TextAlign.center,
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  "${snap.error}",
+                                  style: theme.textTheme.bodySmall?.copyWith(color: cs.error),
+                                  textAlign: TextAlign.center,
+                                ),
+                                const SizedBox(height: 8),
+                                TextButton.icon(
+                                  onPressed: () async => _reload(),
+                                  icon: const Icon(Icons.refresh),
+                                  label: const Text("Retry"),
+                                ),
+                              ],
                             ),
                           )
                         else
@@ -846,14 +910,11 @@ class _UserRow extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
             children: [
-              FutureBuilder<UserProfile?>(
-                future: (() {
-                  final cached = UserProfileService.instance.peekCachedProfile(uid);
-                  if (cached != null) return Future<UserProfile?>.value(cached);
-                  return UserProfileService.instance.getProfileOnce(uid);
-                })(),
+              FutureBuilder<_UserRowVm>(
+                future: _loadViewModel(),
                 builder: (context, snap) {
-                  final p = snap.data ?? UserProfileService.instance.peekCachedProfile(uid);
+                  final vm = snap.data;
+                  final p = vm?.profile ?? UserProfileService.instance.peekCachedProfile(uid);
                   final name = ProxIdentityPolicy.displayName(
                     uid: uid,
                     profile: p,
@@ -864,6 +925,11 @@ class _UserRow extends StatelessWidget {
                   final subParts = <String>[];
                   if (distBucket != null && distBucket.isNotEmpty) subParts.add(distBucket);
                   if (trailing.trim().isNotEmpty) subParts.add(trailing.trim());
+                  final versionPart = _versionLabel(
+                    userVersion: vm?.userVersion ?? "",
+                    localVersion: vm?.localVersion ?? "",
+                  );
+                  if (versionPart.isNotEmpty) subParts.add(versionPart);
 
                   return Row(
                     children: [
@@ -896,5 +962,55 @@ class _UserRow extends StatelessWidget {
       ),
     );
   }
+
+  Future<_UserRowVm> _loadViewModel() async {
+    final cached = UserProfileService.instance.peekCachedProfile(uid);
+    final profileFuture = cached != null
+        ? Future<UserProfile?>.value(cached)
+        : UserProfileService.instance.getProfileOnce(uid);
+
+    final presenceFuture = FirebaseFirestore.instance.doc("users/$uid/presence/current").get();
+    final localVersionFuture = AppBuildInfoService.instance.fullVersion();
+
+    final results = await Future.wait<dynamic>(<Future<dynamic>>[
+      profileFuture,
+      presenceFuture,
+      localVersionFuture,
+    ]);
+
+    final UserProfile? profile = results[0] as UserProfile?;
+    final DocumentSnapshot<Map<String, dynamic>> presence =
+        results[1] as DocumentSnapshot<Map<String, dynamic>>;
+    final String localVersion = (results[2] as String?)?.trim() ?? "";
+
+    final data = presence.data() ?? const <String, dynamic>{};
+    final String userVersion = (data["appVersion"] as String? ?? "").trim();
+
+    return _UserRowVm(
+      profile: profile,
+      userVersion: userVersion,
+      localVersion: localVersion,
+    );
+  }
+
+  String _versionLabel({required String userVersion, required String localVersion}) {
+    final user = userVersion.trim();
+    final local = localVersion.trim();
+    if (user.isEmpty) return "v:unknown";
+    if (local.isNotEmpty && local != "unknown" && user == local) return "$user up-to-date";
+    return "$user needs update";
+  }
+}
+
+class _UserRowVm {
+  final UserProfile? profile;
+  final String userVersion;
+  final String localVersion;
+
+  const _UserRowVm({
+    required this.profile,
+    required this.userVersion,
+    required this.localVersion,
+  });
 }
 

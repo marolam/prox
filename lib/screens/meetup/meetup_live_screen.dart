@@ -5,8 +5,8 @@ import "package:firebase_auth/firebase_auth.dart";
 import "package:flutter/material.dart";
 import "package:url_launcher/url_launcher.dart";
 
-import "package:prox/screens/meetup/color_match_screen.dart";
 import "package:prox/services/meetup_service.dart";
+import "package:prox/widgets/color_match_button.dart";
 
 class MeetupLiveScreen extends StatefulWidget {
   final String chatId;
@@ -109,8 +109,11 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
       action: "tap_verify",
       task: () async {
         try {
-          final ok = await MeetupService.instance.tapToVerify(meetupId: widget.chatId);
-          _snack(ok ? "Tap-to-Verify: success" : "Tap-to-Verify: waiting for other tap");
+          final ok =
+              await MeetupService.instance.tapToVerify(meetupId: widget.chatId);
+          _snack(ok
+              ? "Tap-to-Verify: success"
+              : "Tap-to-Verify: waiting for other tap");
         } catch (_) {
           _snack("Tap-to-Verify failed.");
         }
@@ -123,7 +126,8 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
       action: "im_here",
       task: () async {
         try {
-          final res = await MeetupService.instance.confirmArrivalPrivacyFirst(meetupId: widget.chatId);
+          final res = await MeetupService.instance
+              .confirmArrivalPrivacyFirst(meetupId: widget.chatId);
           _snack(res.message);
           if (!res.isOk) {
             await _codeFallbackDialog();
@@ -152,8 +156,12 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text("Cancel")),
-            FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text("Confirm")),
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text("Cancel")),
+            FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text("Confirm")),
           ],
         );
       },
@@ -183,7 +191,9 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
           style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w900),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text("Close")),
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text("Close")),
         ],
       ),
     );
@@ -270,11 +280,17 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
           final bool completed = status == "completed";
 
           final String plannerUid = (d["plannerUid"] ?? "").toString().trim();
-          final bool iAmPlanner = plannerUid.isEmpty ? true : plannerUid == myUid;
+          final bool iAmPlanner =
+              plannerUid.isEmpty ? true : plannerUid == myUid;
 
-          final String locStatus = (d["locationStatus"] ?? "").toString().trim();
-          final double? lat = (d["lat"] is num) ? (d["lat"] as num).toDouble() : double.tryParse((d["lat"] ?? "").toString());
-          final double? lng = (d["lng"] is num) ? (d["lng"] as num).toDouble() : double.tryParse((d["lng"] ?? "").toString());
+          final String locStatus =
+              (d["locationStatus"] ?? "").toString().trim();
+          final double? lat = (d["lat"] is num)
+              ? (d["lat"] as num).toDouble()
+              : double.tryParse((d["lat"] ?? "").toString());
+          final double? lng = (d["lng"] is num)
+              ? (d["lng"] as num).toDouble()
+              : double.tryParse((d["lng"] ?? "").toString());
           final bool hasPin = lat != null && lng != null;
 
           final bool aArrived = (d["aArrived"] as bool?) ?? false;
@@ -285,12 +301,17 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
           final bool isA = myUid.isNotEmpty && myUid == aUid;
           final bool isB = myUid.isNotEmpty && myUid == bUid;
 
-          final String onMyWayField = isA ? "aOnMyWayAt" : (isB ? "bOnMyWayAt" : "");
-          final String otherOnMyWayField = isA ? "bOnMyWayAt" : (isB ? "aOnMyWayAt" : "");
-          final String onMyWayAt = (onMyWayField.isEmpty) ? "" : _fmtTs(d[onMyWayField]);
-          final String otherOnMyWayAt = (otherOnMyWayField.isEmpty) ? "" : _fmtTs(d[otherOnMyWayField]);
+          final String onMyWayField =
+              isA ? "aOnMyWayAt" : (isB ? "bOnMyWayAt" : "");
+          final String otherOnMyWayField =
+              isA ? "bOnMyWayAt" : (isB ? "aOnMyWayAt" : "");
+          final String onMyWayAt =
+              (onMyWayField.isEmpty) ? "" : _fmtTs(d[onMyWayField]);
+          final String otherOnMyWayAt =
+              (otherOnMyWayField.isEmpty) ? "" : _fmtTs(d[otherOnMyWayField]);
 
-          final bool needConfirm = (!iAmPlanner && locStatus != "confirmed" && hasPin);
+          final bool needConfirm =
+              (!iAmPlanner && locStatus != "confirmed" && hasPin);
           final bool confirmed = locStatus == "confirmed";
           final bool canRunLiveActions = hasPin && confirmed;
 
@@ -308,9 +329,11 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
                 lines: [
                   "Status: ${status.isEmpty ? "(unknown)" : status}",
                   "Location: ${locStatus.isEmpty ? "none" : locStatus}",
-                  if (hasPin) "Pin: ${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}",
+                  if (hasPin)
+                    "Pin: ${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}",
                   if (onMyWayAt.isNotEmpty) "You: on my way at $onMyWayAt",
-                  if (otherOnMyWayAt.isNotEmpty) "Them: on my way at $otherOnMyWayAt",
+                  if (otherOnMyWayAt.isNotEmpty)
+                    "Them: on my way at $otherOnMyWayAt",
                   "Arrived: you=${(isA ? aArrived : (isB ? bArrived : false))}  them=${(isA ? bArrived : (isB ? aArrived : false))}",
                 ],
                 trailing: hasPin
@@ -322,13 +345,15 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
                     : null,
               ),
               const SizedBox(height: 12),
-
               if (completed) ...[
                 FilledButton.icon(
                   onPressed: () {
                     Navigator.of(context).pushNamed(
                       "/rate",
-                      arguments: {"chatId": widget.chatId, "otherUid": widget.otherUid},
+                      arguments: {
+                        "chatId": widget.chatId,
+                        "otherUid": widget.otherUid
+                      },
                     );
                   },
                   icon: const Icon(Icons.star_rate),
@@ -356,7 +381,6 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
                       child: Text(_busy ? "Working..." : "Confirm location"),
                     ),
                   ),
-
                 if (!confirmed)
                   _infoCard(
                     context,
@@ -365,7 +389,6 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
                       "Confirming the pin prevents surprises. Once confirmed, proceed with On my way / Tap-to-Verify / I'm here."
                     ],
                   ),
-
                 if (canRunLiveActions) ...[
                   const SizedBox(height: 10),
                   FilledButton.icon(
@@ -373,7 +396,8 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
                     icon: const Icon(Icons.directions_walk),
                     label: Padding(
                       padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text(_isBusy("on_my_way") ? "Updating..." : "On my way"),
+                      child: Text(
+                          _isBusy("on_my_way") ? "Updating..." : "On my way"),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -382,7 +406,9 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
                     icon: const Icon(Icons.touch_app),
                     label: Padding(
                       padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text(_isBusy("tap_verify") ? "Verifying..." : "Tap-to-Verify"),
+                      child: Text(_isBusy("tap_verify")
+                          ? "Verifying..."
+                          : "Tap-to-Verify"),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -398,7 +424,8 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
                     icon: const Icon(Icons.flag_circle),
                     label: Padding(
                       padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text(_isBusy("im_here") ? "Confirming..." : "I'm here"),
+                      child: Text(
+                          _isBusy("im_here") ? "Confirming..." : "I'm here"),
                     ),
                   ),
                 ] else if (hasPin && !confirmed) ...[
@@ -417,7 +444,6 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
                     lines: const ["Go back and set a pin in the planner."],
                   ),
                 ],
-
                 const SizedBox(height: 14),
                 OutlinedButton.icon(
                   onPressed: () => Navigator.of(context).pop(),
@@ -454,16 +480,23 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
         children: [
           Expanded(
             child: DefaultTextStyle(
-              style: Theme.of(context).textTheme.bodyMedium ?? const TextStyle(),
+              style:
+                  Theme.of(context).textTheme.bodyMedium ?? const TextStyle(),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
+                  Text(title,
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w800)),
                   const SizedBox(height: 6),
                   for (final l in lines)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 2),
-                      child: Text(l, style: TextStyle(color: cs.onSurface.withValues(alpha: 0.80))),
+                      child: Text(l,
+                          style: TextStyle(
+                              color: cs.onSurface.withValues(alpha: 0.80))),
                     ),
                 ],
               ),

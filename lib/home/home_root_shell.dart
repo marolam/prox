@@ -8,6 +8,7 @@ import "package:prox/screens/policy/code_of_conduct_screen.dart";
 import "package:prox/services/business_mode/business_mode_state_service.dart";
 import "package:prox/services/points_service.dart";
 import "package:prox/services/policy_ack_service.dart";
+import "package:prox/services/pro_mode_preview_access.dart";
 import "package:prox/services/user_settings_service.dart";
 
 import "business_shell.dart";
@@ -23,10 +24,12 @@ class _HomeRootShellState extends State<HomeRootShell> {
   bool _checkingPrompt = false;
   DateTime? _lastPromptAt;
 
-  Future<void> _maybePromptForAgreements(BuildContext context, UserSettings settings) async {
+  Future<void> _maybePromptForAgreements(
+      BuildContext context, UserSettings settings) async {
     if (_checkingPrompt) return;
     final now = DateTime.now();
-    if (_lastPromptAt != null && now.difference(_lastPromptAt!) < const Duration(minutes: 5)) {
+    if (_lastPromptAt != null &&
+        now.difference(_lastPromptAt!) < const Duration(minutes: 5)) {
       return;
     }
 
@@ -40,13 +43,17 @@ class _HomeRootShellState extends State<HomeRootShell> {
       await PointsService.instance.refreshMeta(uid);
       final meta = PointsService.instance.peekMeta(uid);
 
-      final bool needsConduct =
-          meta.completedMeetups >= 5 && !PolicyAckService.instance.isAcked(PolicyAckService.conductVersion);
+      final bool needsConduct = meta.completedMeetups >= 5 &&
+          !PolicyAckService.instance.isAcked(PolicyAckService.conductVersion);
 
-      final bool businessActive = settings.uxMode == AppUxMode.business ||
-          await BusinessModeStateService.instance.isActive(uid);
-      final bool needsBusinessRules =
-          businessActive && !PolicyAckService.instance.isAcked(PolicyAckService.businessRulesVersion);
+      final bool canUseProMode =
+          ProModePreviewAccess.instance.isAllowedForCurrentUser();
+      final bool businessActive = canUseProMode &&
+          (settings.uxMode == AppUxMode.business ||
+              await BusinessModeStateService.instance.isActive(uid));
+      final bool needsBusinessRules = businessActive &&
+          !PolicyAckService.instance
+              .isAcked(PolicyAckService.businessRulesVersion);
 
       if (!mounted) return;
 
@@ -71,7 +78,8 @@ class _HomeRootShellState extends State<HomeRootShell> {
                   onPressed: () async {
                     Navigator.of(ctx).pop();
                     await Navigator.of(context).push(
-                      MaterialPageRoute<void>(builder: (_) => const CodeOfConductScreen()),
+                      MaterialPageRoute<void>(
+                          builder: (_) => const CodeOfConductScreen()),
                     );
                   },
                   child: const Text("Review now"),
@@ -105,7 +113,8 @@ class _HomeRootShellState extends State<HomeRootShell> {
                   onPressed: () async {
                     Navigator.of(ctx).pop();
                     await Navigator.of(context).push(
-                      MaterialPageRoute<void>(builder: (_) => const BusinessRulesScreen()),
+                      MaterialPageRoute<void>(
+                          builder: (_) => const BusinessRulesScreen()),
                     );
                   },
                   child: const Text("Review now"),
@@ -133,8 +142,15 @@ class _HomeRootShellState extends State<HomeRootShell> {
           _maybePromptForAgreements(context, settings);
         });
 
-        if (settings.uxMode == AppUxMode.business) {
+        final bool canUseProMode =
+            ProModePreviewAccess.instance.isAllowedForCurrentUser();
+        if (settings.uxMode == AppUxMode.business && canUseProMode) {
           return const BusinessShell();
+        }
+        if (settings.uxMode == AppUxMode.business && !canUseProMode) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            UserSettingsService.instance.setUxMode(AppUxMode.party);
+          });
         }
         return const HomeShell();
       },

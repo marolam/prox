@@ -48,6 +48,7 @@ import "package:prox/services/bug_reporting/bug_report_service.dart";
 import "package:prox/services/critical_ui_service.dart";
 import "package:prox/services/dev/cost_hud_service.dart";
 import "package:prox/services/ime_visibility_service.dart";
+import "package:prox/services/login_update_check_service.dart";
 import "package:prox/services/presence_pulse/presence_pulse_service.dart";
 import "package:prox/services/push_notifications.dart";
 import "package:prox/services/startup_watchdog.dart";
@@ -55,10 +56,8 @@ import "package:prox/services/user_settings_service.dart";
 import "package:prox/theme/prox_ux_theme_builder.dart";
 import "package:prox/services/navigation/route_tracker_observer.dart";
 import "package:prox/widgets/bug_reporting/bug_report_overlay.dart";
-import "package:prox/widgets/demo_mode_watermark_overlay.dart";
 import "package:prox/widgets/dev/cost_hud_overlay.dart";
 import "package:prox/widgets/global_top_actions_bar.dart";
-import "package:prox/widgets/tutorial/tutorial_overlay.dart";
 
 class ProxApp extends StatefulWidget {
   const ProxApp({super.key});
@@ -74,7 +73,8 @@ class _ProxAppState extends State<ProxApp> {
   final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
   final RouteTrackerObserver _routeTrackerObserver = RouteTrackerObserver();
 
-  static const bool _safeMode = bool.fromEnvironment("PROX_SAFE_MODE", defaultValue: false);
+  static const bool _safeMode =
+      bool.fromEnvironment("PROX_SAFE_MODE", defaultValue: false);
   static const bool _suspendGlobalOverlaysForImeRecovery = true;
 
   late final Future<void> _firebaseInit = _initFirebaseWithRecovery().timeout(
@@ -162,7 +162,8 @@ class _ProxAppState extends State<ProxApp> {
     ui.PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
       final err = error.toString();
       if (err.contains("[cloud_firestore/permission-denied]")) {
-        debugPrint("[AppInit] Firestore permission issue handled during startup.");
+        debugPrint(
+            "[AppInit] Firestore permission issue handled during startup.");
         return true;
       }
       debugPrint("[AppInit] Unhandled async error: $error");
@@ -239,6 +240,13 @@ class _ProxAppState extends State<ProxApp> {
       } catch (e) {
         debugPrint("[AppInit] push navigator key registration failed: $e");
       }
+
+      try {
+        LoginUpdateCheckService.instance.registerNavigatorKey(_navKey);
+        LoginUpdateCheckService.instance.startLiveWatcher();
+      } catch (e) {
+        debugPrint("[AppInit] live update watcher start failed: $e");
+      }
     }
 
     StartupWatchdog.instance.disarmAfterFirstFrame();
@@ -291,21 +299,12 @@ class _ProxAppState extends State<ProxApp> {
                   );
 
                   if (_suspendGlobalOverlaysForImeRecovery) {
-                    if (settings.demoModeEnabled) {
-                      return Stack(
-                        children: [
-                          scaledChild,
-                          const DemoModeWatermarkOverlay(),
-                        ],
-                      );
-                    }
                     return scaledChild;
                   }
 
                   final Widget base = Stack(
                     children: [
-                      TutorialOverlay(child: scaledChild),
-                      if (settings.demoModeEnabled) const DemoModeWatermarkOverlay(),
+                      scaledChild,
                       GlobalTopActionsBar(
                         routeTracker: _routeTrackerObserver,
                         navigatorKey: _navKey,
@@ -352,14 +351,14 @@ class _ProxAppState extends State<ProxApp> {
                   "/dev/user-simulator": (_) => const DevUserSimulatorScreen(),
 
                   // Core flows
-                  "/chat": (context) =>
-                      ChatThreadScreen.fromArgs(ModalRoute.of(context)?.settings.arguments),
-                  "/meetup_plan": (context) =>
-                      MeetupPlannerScreen.fromArgs(ModalRoute.of(context)?.settings.arguments),
-                  "/meetup_live": (context) =>
-                      MeetupLiveScreen.fromArgs(ModalRoute.of(context)?.settings.arguments),
-                  "/rate": (context) =>
-                      RatingScreen.fromArgs(ModalRoute.of(context)?.settings.arguments),
+                  "/chat": (context) => ChatThreadScreen.fromArgs(
+                      ModalRoute.of(context)?.settings.arguments),
+                  "/meetup_plan": (context) => MeetupPlannerScreen.fromArgs(
+                      ModalRoute.of(context)?.settings.arguments),
+                  "/meetup_live": (context) => MeetupLiveScreen.fromArgs(
+                      ModalRoute.of(context)?.settings.arguments),
+                  "/rate": (context) => RatingScreen.fromArgs(
+                      ModalRoute.of(context)?.settings.arguments),
 
                   // Hubs
                   "/dashboard": (_) => const DashboardScreen(),
@@ -372,7 +371,8 @@ class _ProxAppState extends State<ProxApp> {
                   "/settings": (_) => const SettingsScreen(),
 
                   // Review
-                  "/rc_checklist": (_) => const ReleaseCandidateChecklistScreen(),
+                  "/rc_checklist": (_) =>
+                      const ReleaseCandidateChecklistScreen(),
                   "/tester-mission": (_) => const TesterMissionScreen(),
                   "/tester-insight": (_) => const TesterInsightModeScreen(),
                   "/tester-menu": (_) => const TesterMenuScreen(),

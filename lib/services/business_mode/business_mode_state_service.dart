@@ -9,7 +9,11 @@ class BusinessModeStateService {
   static const String _testerUnlocksKey = "businessMode.testerUnlocks";
 
   DocumentReference<Map<String, dynamic>> _entitlementRef(String uid) {
-    return _fs.collection("users").doc(uid).collection("billing").doc("entitlements");
+    return _fs
+        .collection("users")
+        .doc(uid)
+        .collection("billing")
+        .doc("entitlements");
   }
 
   Future<bool> isActive(String uid) async {
@@ -43,9 +47,9 @@ class BusinessModeStateService {
     final u = uid.trim();
     if (u.isEmpty) return;
     await DeviceStorageService.instance.updateMapEntry(
-      _testerUnlocksKey,
-      u,
-      unlocked ? true : null,
+      key: _testerUnlocksKey,
+      entryKey: u,
+      value: unlocked ? true : null,
     );
   }
 }

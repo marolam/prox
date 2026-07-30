@@ -101,6 +101,15 @@ class PushNotifications {
     }
   }
 
+  Future<void> notifyBusinessHotLead({
+    required String leadId,
+    required int score,
+  }) async {
+    if (kDebugMode) {
+      debugPrint("[Push] business hot lead leadId=$leadId score=$score");
+    }
+  }
+
   Future<void> _requestPermission() async {
     try {
       final settings = await _fm.requestPermission(

@@ -19,7 +19,6 @@ import "package:prox/services/mode_unlock_service.dart";
 import "package:prox/services/monetization_service.dart";
 import "package:prox/services/presence_writer.dart";
 import "package:prox/services/referral_attribution_service.dart";
-import "package:prox/services/tutorial/welcome_tutorial_service.dart";
 import "package:prox/services/user_profile_service.dart";
 import "package:prox/shell/home_root_shell.dart";
 
@@ -27,16 +26,21 @@ class ProfileEditScreen extends StatefulWidget {
   const ProfileEditScreen({
     super.key,
     this.fromOnboarding = false,
+    this.inline = false,
+    this.onSaved,
   });
 
   final bool fromOnboarding;
+  final bool inline;
+  final VoidCallback? onSaved;
 
   @override
   State<ProfileEditScreen> createState() => _ProfileEditScreenState();
 }
 
 class _ProfileEditScreenState extends State<ProfileEditScreen> {
-  static const MethodChannel _systemHealthChannel = MethodChannel("prox/system_health");
+  static const MethodChannel _systemHealthChannel =
+      MethodChannel("prox/system_health");
   static const String _bucketSearchingFor = "searchingFor";
   static const String _bucketCanProvide = "canProvide";
   static const String _bucketPrivateSearchingFor = "privateSearchingFor";
@@ -148,7 +152,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     try {
       return await future.timeout(const Duration(seconds: 12));
     } on TimeoutException {
-      throw StateError("$operation timed out. Please check your network and try again.");
+      throw StateError(
+          "$operation timed out. Please check your network and try again.");
     }
   }
 
@@ -217,7 +222,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       _unlockState = unlock;
       _canUseBusinessTier = unlock?.canUseBusiness ?? false;
       _businessPaidUnlock = paid;
-      final bool shouldAllowBusinessToggle = _canUseBusinessTier && _businessPaidUnlock;
+      final bool shouldAllowBusinessToggle =
+          _canUseBusinessTier && _businessPaidUnlock;
       if (!shouldAllowBusinessToggle) {
         _businessEnabled = false;
       }
@@ -237,11 +243,13 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     _initializeKeywordWorkspace(profile);
     _syncPrimaryKeywordsFromBuckets();
 
-    final bool shouldAllowBusinessToggle = _canUseBusinessTier && _businessPaidUnlock;
+    final bool shouldAllowBusinessToggle =
+        _canUseBusinessTier && _businessPaidUnlock;
     _businessEnabled = shouldAllowBusinessToggle ? profile.isBusiness : false;
 
     final int? mins = profile.availabilityMinutes;
-    _availabilityMinutes = _availabilityOptions.keys.contains(mins) ? (mins ?? 0) : 0;
+    _availabilityMinutes =
+        _availabilityOptions.keys.contains(mins) ? (mins ?? 0) : 0;
     _hydratingForm = false;
   }
 
@@ -261,21 +269,25 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         final parsed = <_KeywordBucketItem>[];
         for (final raw in rawList) {
           if (raw is Map) {
-            final value = (raw["value"] ?? raw["keyword"] ?? "").toString().trim();
+            final value =
+                (raw["value"] ?? raw["keyword"] ?? "").toString().trim();
             if (value.isEmpty) continue;
-            final status = _keywordStatusFromName((raw["status"] ?? "clear").toString());
+            final status =
+                _keywordStatusFromName((raw["status"] ?? "clear").toString());
             parsed.add(_KeywordBucketItem(value: value, status: status));
           } else {
             final value = raw.toString().trim();
             if (value.isEmpty) continue;
-            parsed.add(_KeywordBucketItem(value: value, status: _KeywordStatus.clear));
+            parsed.add(
+                _KeywordBucketItem(value: value, status: _KeywordStatus.clear));
           }
         }
         buckets[key] = _dedupeKeywordItems(parsed);
       }
 
       final mergedPrivate = <_KeywordBucketItem>[
-        ...(buckets[_bucketPrivateSearchingFor] ?? const <_KeywordBucketItem>[]),
+        ...(buckets[_bucketPrivateSearchingFor] ??
+            const <_KeywordBucketItem>[]),
         ...(buckets[_bucketPrivateCanProvide] ?? const <_KeywordBucketItem>[]),
         ...(buckets[_bucketPrivateInventory] ?? const <_KeywordBucketItem>[]),
       ];
@@ -284,12 +296,14 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       buckets[_bucketPrivateInventory] = <_KeywordBucketItem>[];
     } else {
       buckets[_bucketSearchingFor] = _normalizeKeywords(profile.searchingFor)
-          .map((v) => _KeywordBucketItem(value: v, status: _KeywordStatus.clear))
+          .map(
+              (v) => _KeywordBucketItem(value: v, status: _KeywordStatus.clear))
           .toList(growable: false);
       buckets[_bucketCanProvide] = _normalizeKeywords(profile.canProvide)
-          .map((v) => _KeywordBucketItem(value: v, status: _KeywordStatus.clear))
+          .map(
+              (v) => _KeywordBucketItem(value: v, status: _KeywordStatus.clear))
           .toList(growable: false);
-        buckets[_bucketPrivateCanProvide] = <_KeywordBucketItem>[];
+      buckets[_bucketPrivateCanProvide] = <_KeywordBucketItem>[];
     }
 
     _keywordBuckets = buckets;
@@ -336,7 +350,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     return raw.trim().replaceAll(RegExp(r"\s+"), " ");
   }
 
-  ({int invalid, int duplicates, List<String> samples}) _workspaceQualitySnapshot() {
+  ({int invalid, int duplicates, List<String> samples})
+      _workspaceQualitySnapshot() {
     final all = <String>[];
     for (final key in _bucketOrder) {
       for (final item in _keywordBuckets[key] ?? const <_KeywordBucketItem>[]) {
@@ -382,13 +397,15 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text("$invalid invalid and $duplicates duplicate keywords will be removed."),
+            Text(
+                "$invalid invalid and $duplicates duplicate keywords will be removed."),
             if (samples.isNotEmpty) ...[
               const SizedBox(height: 10),
               Text("Examples: ${samples.join(", ")}"),
             ],
             const SizedBox(height: 10),
-            const Text("Repeated invalid keywords may lower trust score during periodic quality sweeps."),
+            const Text(
+                "Repeated invalid keywords may lower trust score during periodic quality sweeps."),
           ],
         ),
         actions: [
@@ -456,7 +473,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     return cs.primary;
   }
 
-  bool _bucketIsEditable(String bucketKey) => _editableBuckets.contains(bucketKey);
+  bool _bucketIsEditable(String bucketKey) =>
+      _editableBuckets.contains(bucketKey);
 
   _KeywordStatus _keywordStatusFromName(String raw) {
     switch (raw.trim().toLowerCase()) {
@@ -482,14 +500,16 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   }
 
   void _syncPrimaryKeywordsFromBuckets() {
-    final searching = (_keywordBuckets[_bucketSearchingFor] ?? const <_KeywordBucketItem>[])
-      .where((i) => i.status == _KeywordStatus.working)
-        .map((i) => i.value)
-        .toList(growable: false);
-    final provide = (_keywordBuckets[_bucketCanProvide] ?? const <_KeywordBucketItem>[])
-      .where((i) => i.status == _KeywordStatus.working)
-        .map((i) => i.value)
-        .toList(growable: false);
+    final searching =
+        (_keywordBuckets[_bucketSearchingFor] ?? const <_KeywordBucketItem>[])
+            .where((i) => i.status == _KeywordStatus.working)
+            .map((i) => i.value)
+            .toList(growable: false);
+    final provide =
+        (_keywordBuckets[_bucketCanProvide] ?? const <_KeywordBucketItem>[])
+            .where((i) => i.status == _KeywordStatus.working)
+            .map((i) => i.value)
+            .toList(growable: false);
 
     _searchingKeywords = _normalizeKeywords(searching);
     _canProvideKeywords = _normalizeKeywords(provide);
@@ -510,36 +530,48 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     final validation = KeywordQualityService.validate(normalized);
     if (!validation.isValid) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Use real words only (letters, apostrophe, hyphen).")),
+        const SnackBar(
+            content:
+                Text("Use real words only (letters, apostrophe, hyphen).")),
       );
       return;
     }
 
-    final items = <_KeywordBucketItem>[...(_keywordBuckets[bucketKey] ?? const <_KeywordBucketItem>[])];
+    final items = <_KeywordBucketItem>[
+      ...(_keywordBuckets[bucketKey] ?? const <_KeywordBucketItem>[])
+    ];
     final canonical = validation.normalized;
     final exists = items.any((i) => i.value.toLowerCase() == canonical);
     if (exists) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("That keyword is already in this section.")),
+        const SnackBar(
+            content: Text("That keyword is already in this section.")),
       );
       return;
     }
 
     setState(() {
       _formDirty = true;
-      items.add(_KeywordBucketItem(value: canonical, status: _KeywordStatus.clear));
+      items.add(
+          _KeywordBucketItem(value: canonical, status: _KeywordStatus.clear));
       _keywordBuckets[bucketKey] = _dedupeKeywordItems(items);
       _syncPrimaryKeywordsFromBuckets();
     });
   }
 
   void _archiveTerminalItems(String bucketKey) {
-    final source = <_KeywordBucketItem>[...(_keywordBuckets[bucketKey] ?? const <_KeywordBucketItem>[])];
+    final source = <_KeywordBucketItem>[
+      ...(_keywordBuckets[bucketKey] ?? const <_KeywordBucketItem>[])
+    ];
     if (source.isEmpty) return;
 
     final keep = <_KeywordBucketItem>[];
-    final toSatisfied = <_KeywordBucketItem>[...(_keywordBuckets[_bucketSatisfied] ?? const <_KeywordBucketItem>[])];
-    final toRemoved = <_KeywordBucketItem>[...(_keywordBuckets[_bucketRemoved] ?? const <_KeywordBucketItem>[])];
+    final toSatisfied = <_KeywordBucketItem>[
+      ...(_keywordBuckets[_bucketSatisfied] ?? const <_KeywordBucketItem>[])
+    ];
+    final toRemoved = <_KeywordBucketItem>[
+      ...(_keywordBuckets[_bucketRemoved] ?? const <_KeywordBucketItem>[])
+    ];
 
     for (final item in source) {
       if (item.status == _KeywordStatus.satisfied) {
@@ -557,8 +589,11 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   }
 
   void _cycleItemStatus(String bucketKey, int index) {
-    if (!_bucketIsEditable(bucketKey) || _bucketIsArchiveOnly(bucketKey)) return;
-    final list = <_KeywordBucketItem>[...(_keywordBuckets[bucketKey] ?? const <_KeywordBucketItem>[])];
+    if (!_bucketIsEditable(bucketKey) || _bucketIsArchiveOnly(bucketKey))
+      return;
+    final list = <_KeywordBucketItem>[
+      ...(_keywordBuckets[bucketKey] ?? const <_KeywordBucketItem>[])
+    ];
     if (index < 0 || index >= list.length) return;
 
     final current = list[index];
@@ -662,7 +697,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     }
   }
 
-  List<_KeywordBucketItem> _recentKeywordItems(String bucketKey, {int count = 5}) {
+  List<_KeywordBucketItem> _recentKeywordItems(String bucketKey,
+      {int count = 5}) {
     final all = _keywordBuckets[bucketKey] ?? const <_KeywordBucketItem>[];
     if (all.length <= count) {
       return List<_KeywordBucketItem>.from(all.reversed);
@@ -692,29 +728,35 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
               Expanded(
                 child: Text(
                   _bucketTitle(bucketKey),
-                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w800),
                 ),
               ),
               IconButton(
                 tooltip: "Add keyword",
-                onPressed: _saving ? null : () => _promptKeywordAndAddToBucket(bucketKey),
+                onPressed: _saving
+                    ? null
+                    : () => _promptKeywordAndAddToBucket(bucketKey),
                 icon: const Icon(Icons.add_circle_outline),
               ),
               TextButton(
-                onPressed: _saving ? null : () => _openKeywordListSheet(bucketKey),
+                onPressed:
+                    _saving ? null : () => _openKeywordListSheet(bucketKey),
                 child: const Text("View all"),
               ),
             ],
           ),
           Text(
             "Tap to activate keyword for matching.",
-            style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+            style:
+                theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
           ),
           SizedBox(height: compact ? 6 : 8),
           if (recent.isEmpty)
             Text(
               "No keywords yet. Tap + to add.",
-              style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: cs.onSurfaceVariant),
             )
           else
             Wrap(
@@ -724,7 +766,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                 for (final item in recent)
                   _keywordBubbleChip(
                     bucketKey: bucketKey,
-                    index: (_keywordBuckets[bucketKey] ?? const <_KeywordBucketItem>[])
+                    index: (_keywordBuckets[bucketKey] ??
+                            const <_KeywordBucketItem>[])
                         .lastIndexWhere((i) => i.value == item.value),
                     item: item,
                     enabled: true,
@@ -745,8 +788,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final compact = MediaQuery.of(context).size.width < 380;
-    final isActiveGlow =
-        _bucketAffectsMatching(bucketKey) && item.status == _KeywordStatus.working;
+    final isActiveGlow = _bucketAffectsMatching(bucketKey) &&
+        item.status == _KeywordStatus.working;
     final glowColor = _activeGlowColor(cs, bucketKey);
 
     return InkWell(
@@ -763,7 +806,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           border: Border.all(
             color: isActiveGlow
                 ? glowColor
-                : (enabled ? cs.primary.withValues(alpha: 0.55) : cs.outline.withValues(alpha: 0.40)),
+                : (enabled
+                    ? cs.primary.withValues(alpha: 0.55)
+                    : cs.outline.withValues(alpha: 0.40)),
             width: isActiveGlow ? 1.8 : 1.0,
           ),
           boxShadow: isActiveGlow
@@ -788,14 +833,18 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   }
 
   Map<String, dynamic> _keywordMetricsMap() {
-    final activeSearching = (_keywordBuckets[_bucketSearchingFor] ?? const <_KeywordBucketItem>[])
-        .where((i) => i.status == _KeywordStatus.working)
-        .length;
-    final activeProvide = (_keywordBuckets[_bucketCanProvide] ?? const <_KeywordBucketItem>[])
-        .where((i) => i.status == _KeywordStatus.working)
-        .length;
+    final activeSearching =
+        (_keywordBuckets[_bucketSearchingFor] ?? const <_KeywordBucketItem>[])
+            .where((i) => i.status == _KeywordStatus.working)
+            .length;
+    final activeProvide =
+        (_keywordBuckets[_bucketCanProvide] ?? const <_KeywordBucketItem>[])
+            .where((i) => i.status == _KeywordStatus.working)
+            .length;
     final activeTotal = activeSearching + activeProvide;
-    final satisfiedCount = (_keywordBuckets[_bucketSatisfied] ?? const <_KeywordBucketItem>[]).length;
+    final satisfiedCount =
+        (_keywordBuckets[_bucketSatisfied] ?? const <_KeywordBucketItem>[])
+            .length;
     final removedCount = 0;
 
     return <String, dynamic>{
@@ -818,10 +867,12 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       useSafeArea: true,
       builder: (ctx) {
         final bottomSafeInset = MediaQuery.of(ctx).viewPadding.bottom;
-        final sheetBottomPadding = bottomSafeInset > 0 ? bottomSafeInset + 12 : 16.0;
+        final sheetBottomPadding =
+            bottomSafeInset > 0 ? bottomSafeInset + 12 : 16.0;
         return StatefulBuilder(
           builder: (context, setSheetState) {
-            final all = _keywordBuckets[bucketKey] ?? const <_KeywordBucketItem>[];
+            final all =
+                _keywordBuckets[bucketKey] ?? const <_KeywordBucketItem>[];
             return FractionallySizedBox(
               heightFactor: 0.86,
               child: Padding(
@@ -831,13 +882,17 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                   children: [
                     Text(
                       _bucketTitle(bucketKey),
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w800),
                     ),
                     const SizedBox(height: 6),
                     Text(
                       "Select keywords, then use Found or Remove.",
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                     ),
                     const SizedBox(height: 8),
@@ -851,7 +906,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                             )
                           : ListView.separated(
                               itemCount: all.length,
-                              separatorBuilder: (_, __) => const SizedBox(height: 6),
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 6),
                               itemBuilder: (context, i) {
                                 final item = all[i];
                                 final isSelected = selected.contains(i);
@@ -867,16 +923,26 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                                   },
                                   borderRadius: BorderRadius.circular(10),
                                   child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 9),
                                     decoration: BoxDecoration(
                                       color: isSelected
-                                          ? Theme.of(context).colorScheme.secondaryContainer
-                                          : Theme.of(context).colorScheme.surfaceContainerHighest,
+                                          ? Theme.of(context)
+                                              .colorScheme
+                                              .secondaryContainer
+                                          : Theme.of(context)
+                                              .colorScheme
+                                              .surfaceContainerHighest,
                                       borderRadius: BorderRadius.circular(10),
                                       border: Border.all(
                                         color: isSelected
-                                            ? Theme.of(context).colorScheme.secondary
-                                            : Theme.of(context).colorScheme.outline.withValues(alpha: 0.25),
+                                            ? Theme.of(context)
+                                                .colorScheme
+                                                .secondary
+                                            : Theme.of(context)
+                                                .colorScheme
+                                                .outline
+                                                .withValues(alpha: 0.25),
                                       ),
                                     ),
                                     child: Row(
@@ -889,8 +955,10 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                                         ),
                                         const SizedBox(width: 8),
                                         Expanded(child: Text(item.value)),
-                                        if (item.status == _KeywordStatus.working)
-                                          const Icon(Icons.bolt_outlined, size: 16),
+                                        if (item.status ==
+                                            _KeywordStatus.working)
+                                          const Icon(Icons.bolt_outlined,
+                                              size: 16),
                                       ],
                                     ),
                                   ),
@@ -906,7 +974,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                             onPressed: selected.isEmpty
                                 ? null
                                 : () async {
-                                    final confirmed = await _confirmKeywordBulkAction(
+                                    final confirmed =
+                                        await _confirmKeywordBulkAction(
                                       selectedCount: selected.length,
                                       markFound: true,
                                     );
@@ -929,7 +998,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                             onPressed: selected.isEmpty
                                 ? null
                                 : () async {
-                                    final confirmed = await _confirmKeywordBulkAction(
+                                    final confirmed =
+                                        await _confirmKeywordBulkAction(
                                       selectedCount: selected.length,
                                       markFound: false,
                                     );
@@ -972,8 +1042,12 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           "Are you sure you want to permanantly mark $selectedCount keywords \"$action\" (with $icon icon)?",
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text("Cancel")),
-          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text("Confirm")),
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text("Cancel")),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text("Confirm")),
         ],
       ),
     );
@@ -985,7 +1059,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     required Set<int> selectedIndices,
     required bool markFound,
   }) {
-    final source = <_KeywordBucketItem>[...(_keywordBuckets[bucketKey] ?? const <_KeywordBucketItem>[])];
+    final source = <_KeywordBucketItem>[
+      ...(_keywordBuckets[bucketKey] ?? const <_KeywordBucketItem>[])
+    ];
     if (source.isEmpty || selectedIndices.isEmpty) return;
 
     final selectedItems = <_KeywordBucketItem>[];
@@ -1002,7 +1078,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       }
     }
 
-    final satisfied = <_KeywordBucketItem>[...(_keywordBuckets[_bucketSatisfied] ?? const <_KeywordBucketItem>[])];
+    final satisfied = <_KeywordBucketItem>[
+      ...(_keywordBuckets[_bucketSatisfied] ?? const <_KeywordBucketItem>[])
+    ];
     if (markFound) {
       for (final item in selectedItems) {
         satisfied.add(item.copyWith(status: _KeywordStatus.satisfied));
@@ -1064,7 +1142,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       }
     } catch (e, st) {
       final String msg = e.toString().toLowerCase();
-      if (msg.contains("already_active") || msg.contains("already being used")) {
+      if (msg.contains("already_active") ||
+          msg.contains("already being used")) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("Image picker is already open.")),
@@ -1106,21 +1185,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     });
 
     return true;
-  }
-
-  Future<bool> _ensureTutorialAction(String actionId) async {
-    final tutorial = WelcomeTutorialService.instance;
-    if (tutorial.isActionAllowedOnScreen(
-      screenId: "profile_edit",
-      actionId: actionId,
-    )) {
-      return true;
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Quick tutorial: use the highlighted control to continue.")),
-    );
-    return false;
   }
 
   bool _isPermanentUploadFailure(Object error) {
@@ -1208,7 +1272,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                     Expanded(
                       child: Text(
                         "Business Mode unlock",
-                        style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                        style: tt.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800),
                       ),
                     ),
                   ],
@@ -1224,19 +1289,26 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                   decoration: BoxDecoration(
                     color: cs.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: cs.outline.withValues(alpha: 0.3)),
+                    border:
+                        Border.all(color: cs.outline.withValues(alpha: 0.3)),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text("Progress snapshot", style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
+                      Text("Progress snapshot",
+                          style: tt.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w800)),
                       const SizedBox(height: 8),
-                      Text("Verified referrals: $referrals", style: tt.bodyMedium),
+                      Text("Verified referrals: $referrals",
+                          style: tt.bodyMedium),
                       Text("Completed meetups: $meetups", style: tt.bodyMedium),
                       const SizedBox(height: 8),
                       Text(
-                        needed <= 0 ? "You're close - refresh your profile in a moment." : "Steps remaining (combined): $needed",
-                        style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                        needed <= 0
+                            ? "You're close - refresh your profile in a moment."
+                            : "Steps remaining (combined): $needed",
+                        style:
+                            tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
                       ),
                     ],
                   ),
@@ -1339,8 +1411,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   Future<void> _save() async {
     if (_saving) return;
 
-    if (!(await _ensureTutorialAction("profile.save_profile"))) return;
-
     if (!_formKey.currentState!.validate()) return;
 
     if (!_hasAnyPhoto) {
@@ -1384,30 +1454,42 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       _syncPrimaryKeywordsFromBuckets();
 
       if (_searchingKeywords.isEmpty || _canProvideKeywords.isEmpty) {
-        throw StateError("Add at least 1 keyword in both Searching For and Can Provide.");
+        throw StateError(
+            "Add at least 1 keyword in both Searching For and Can Provide.");
       }
 
       final List<String> searchingFor = _normalizeKeywords(_searchingKeywords);
       final List<String> canProvide = _normalizeKeywords(_canProvideKeywords);
 
-      final bool allowBusinessToggle = _canUseBusinessTier && _businessPaidUnlock;
-      final bool finalBusinessEnabled = allowBusinessToggle ? _businessEnabled : false;
+      final bool allowBusinessToggle =
+          _canUseBusinessTier && _businessPaidUnlock;
+      final bool finalBusinessEnabled =
+          allowBusinessToggle ? _businessEnabled : false;
 
       await _withTimeoutOrThrow<void>(
         UserProfileService.instance.upsertProfile(
           uid: uid,
-          displayName: _nameController.text.trim().isEmpty ? null : _nameController.text.trim(),
+          displayName: _nameController.text.trim().isEmpty
+              ? null
+              : _nameController.text.trim(),
           photoUrl: finalPhotoUrl,
-          headline: _headlineController.text.trim().isEmpty ? null : _headlineController.text.trim(),
-          searchingText: _searchingController.text.trim().isEmpty ? null : _searchingController.text.trim(),
-          providingText: _providingController.text.trim().isEmpty ? null : _providingController.text.trim(),
+          headline: _headlineController.text.trim().isEmpty
+              ? null
+              : _headlineController.text.trim(),
+          searchingText: _searchingController.text.trim().isEmpty
+              ? null
+              : _searchingController.text.trim(),
+          providingText: _providingController.text.trim().isEmpty
+              ? null
+              : _providingController.text.trim(),
           searchingFor: searchingFor,
           canProvide: canProvide,
           keywordWorkspace: _serializeKeywordWorkspace(),
           keywordSectionLocks: _serializeBucketLocks(),
           keywordMetrics: _keywordMetricsMap(),
           isBusiness: finalBusinessEnabled,
-          availabilityMinutes: finalBusinessEnabled ? _availabilityMinutes : null,
+          availabilityMinutes:
+              finalBusinessEnabled ? _availabilityMinutes : null,
         ),
         "Profile save",
       );
@@ -1417,7 +1499,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         ReferralAttributionService.instance
             .applyIfPossible(explicitUid: uid)
             .catchError((e) {
-          if (kDebugMode) debugPrint("[ProfileEdit] referral apply after save failed: $e");
+          if (kDebugMode)
+            debugPrint("[ProfileEdit] referral apply after save failed: $e");
           return false;
         }),
       );
@@ -1433,12 +1516,22 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         );
       }
 
-      // Move the tutorial forward only after successful profile save.
-      // ignore: discarded_futures
-      WelcomeTutorialService.instance.consumeExpectedAction("profile.save_profile");
-
       if (widget.fromOnboarding) {
         await _finishToHomeShellRoot();
+        return;
+      }
+
+      if (widget.inline) {
+        _formDirty = false;
+        _localPhotoX = null;
+        _localPhotoBytes = null;
+        widget.onSaved?.call();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Profile saved.")),
+          );
+          setState(() {});
+        }
         return;
       }
 
@@ -1488,48 +1581,52 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     final cs = theme.colorScheme;
 
     if (_loading) {
-      return Scaffold(
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const CircularProgressIndicator(),
-                const SizedBox(height: 14),
+      final loadingChild = Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 14),
+              Text(
+                "Loading profile...",
+                style: theme.textTheme.bodyMedium,
+              ),
+              if (_loadTimedOut) ...[
+                const SizedBox(height: 8),
                 Text(
-                  "Loading profile...",
-                  style: theme.textTheme.bodyMedium,
+                  "This is taking longer than expected.",
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
-                if (_loadTimedOut) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    "This is taking longer than expected.",
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: cs.onSurfaceVariant,
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    OutlinedButton(
+                      onPressed: _retryLoad,
+                      child: const Text("Retry"),
                     ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      OutlinedButton(
-                        onPressed: _retryLoad,
-                        child: const Text("Retry"),
-                      ),
-                      FilledButton(
-                        onPressed: _continueWithoutWaiting,
-                        child: const Text("Continue"),
-                      ),
-                    ],
-                  ),
-                ],
+                    FilledButton(
+                      onPressed: _continueWithoutWaiting,
+                      child: const Text("Continue"),
+                    ),
+                  ],
+                ),
               ],
-            ),
+            ],
           ),
         ),
       );
+
+      if (widget.inline) {
+        return loadingChild;
+      }
+
+      return Scaffold(body: loadingChild);
     }
 
     ImageProvider? img;
@@ -1541,6 +1638,274 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
 
     final bool allowBusinessToggle = _canUseBusinessTier && _businessPaidUnlock;
 
+    final form = Form(
+      key: _formKey,
+      child: Column(
+        children: [
+          Center(
+            child: Column(
+              children: [
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    CircleAvatar(
+                      radius: 44,
+                      backgroundImage: img,
+                      child: img == null
+                          ? const Icon(Icons.person, size: 44)
+                          : null,
+                    ),
+                    if (kDebugMode)
+                      Positioned(
+                        right: -6,
+                        top: -6,
+                        child: IconButton.filledTonal(
+                          tooltip: "Upload debug",
+                          onPressed: _openUploadDebugScreen,
+                          icon: const Icon(Icons.bug_report_outlined, size: 18),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.camera_alt),
+                      label: const Text("Camera"),
+                      onPressed: (_saving || _pickingPhoto)
+                          ? null
+                          : () async {
+                              final didPick =
+                                  await _pickPhoto(ImageSource.camera);
+                              if (!didPick) return;
+                            },
+                    ),
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.photo),
+                      label: const Text("Gallery"),
+                      onPressed: (_saving || _pickingPhoto)
+                          ? null
+                          : () async {
+                              final didPick =
+                                  await _pickPhoto(ImageSource.gallery);
+                              if (!didPick) return;
+                            },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  "Selfie is required.",
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          TextFormField(
+            controller: _nameController,
+            readOnly: true,
+            onTap: () => _editFieldInDialog(
+              title: "Edit name",
+              controller: _nameController,
+            ),
+            decoration: InputDecoration(
+              labelText: "Name",
+              suffixIcon: IconButton(
+                tooltip: "Edit in dialog",
+                onPressed: () => _editFieldInDialog(
+                  title: "Edit name",
+                  controller: _nameController,
+                ),
+                icon: const Icon(Icons.open_in_new),
+              ),
+            ),
+            validator: (v) =>
+                (v == null || v.trim().isEmpty) ? "Please enter a name." : null,
+          ),
+          const SizedBox(height: 16),
+          TextFormField(
+            controller: _headlineController,
+            readOnly: true,
+            onTap: () => _editFieldInDialog(
+              title: "Edit headline",
+              controller: _headlineController,
+            ),
+            decoration: InputDecoration(
+              labelText: "Headline (optional)",
+              hintText: "Short line like \"Web dev in Boca\"",
+              suffixIcon: IconButton(
+                tooltip: "Edit in dialog",
+                onPressed: () => _editFieldInDialog(
+                  title: "Edit headline",
+                  controller: _headlineController,
+                ),
+                icon: const Icon(Icons.open_in_new),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            "Keywords",
+            style: theme.textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 10),
+          _keywordWorkspacePreview(_bucketSearchingFor),
+          const SizedBox(height: 10),
+          _keywordWorkspacePreview(_bucketCanProvide),
+          const SizedBox(height: 24),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text("Business Mode", style: theme.textTheme.titleMedium),
+          ),
+          const SizedBox(height: 6),
+          Card(
+            elevation: 0,
+            color: cs.surfaceContainerHighest,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: cs.outline.withValues(alpha: 0.25)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Party  Public  Business",
+                    style: theme.textTheme.labelLarge
+                        ?.copyWith(fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    "Business Mode is earned first (trust + activity), then activated with payment. "
+                    "Prox must always make the payment path reachable - no dead ends.",
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 10),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: allowBusinessToggle ? _businessEnabled : false,
+                    onChanged: (!_canUseBusinessTier ||
+                            !_businessPaidUnlock ||
+                            _saving)
+                        ? null
+                        : (v) => setState(() => _businessEnabled = v),
+                    title: const Text("Use Prox in Business Mode"),
+                    subtitle: Text(
+                      !_canUseBusinessTier
+                          ? "Locked: earn unlock first."
+                          : (!_businessPaidUnlock
+                              ? "Unlocked to buy: activate with payment."
+                              : "Optional: turn on when you're open for quick meetups/services."),
+                    ),
+                  ),
+                  if (!_canUseBusinessTier) ...[
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _saving ? null : _showBusinessRequirements,
+                        icon: const Icon(Icons.lock_outline),
+                        label: const Text("See unlock requirements"),
+                      ),
+                    ),
+                  ] else if (!_businessPaidUnlock) ...[
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _saving ? null : _openBusinessPaywall,
+                        icon: const Icon(Icons.payments_outlined),
+                        label: const Text("Activate Business Mode"),
+                      ),
+                    ),
+                  ],
+                  if (allowBusinessToggle && _businessEnabled) ...[
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<int>(
+                      initialValue: _availabilityMinutes,
+                      decoration: const InputDecoration(
+                          labelText: "Typical response time"),
+                      items: _availabilityOptions.entries
+                          .map((e) => DropdownMenuItem<int>(
+                              value: e.key, child: Text(e.value)))
+                          .toList(growable: false),
+                      onChanged: _saving
+                          ? null
+                          : (v) =>
+                              setState(() => _availabilityMinutes = v ?? 0),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            "These basics unlock matching and chats. You can refine the rest later.",
+            style:
+                theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+          ),
+          if (widget.inline) ...[
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _saving ? null : _save,
+                icon: _saving
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.save_outlined),
+                label: Text(_saving ? "Saving..." : "Save profile"),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+
+    final formContainer = widget.inline
+        ? Padding(
+            padding: const EdgeInsets.all(16),
+            child: form,
+          )
+        : SingleChildScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: const EdgeInsets.all(16),
+            child: form,
+          );
+
+    final content = Stack(
+      children: [
+        if (_saving)
+          const Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: LinearProgressIndicator(),
+          ),
+        SafeArea(
+          top: !widget.inline,
+          child: formContainer,
+        ),
+      ],
+    );
+
+    if (widget.inline) {
+      return content;
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.fromOnboarding ? "Create profile" : "Edit profile"),
@@ -1548,240 +1913,16 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           TextButton(
             onPressed: _saving ? null : _save,
             child: _saving
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                 : const Text("Save"),
           ),
         ],
       ),
-      body: Stack(children: [ if (_saving) const Positioned(top: 0, left: 0, right: 0, child: LinearProgressIndicator()),
-          SafeArea(
-            child: SingleChildScrollView(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: const EdgeInsets.all(16),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  children: [
-                    Center(
-                      child: Column(
-                        children: [
-                          Stack(
-                            clipBehavior: Clip.none,
-                            children: [
-                              CircleAvatar(
-                                radius: 44,
-                                backgroundImage: img,
-                                child: img == null ? const Icon(Icons.person, size: 44) : null,
-                              ),
-                              if (kDebugMode)
-                                Positioned(
-                                  right: -6,
-                                  top: -6,
-                                  child: IconButton.filledTonal(
-                                    tooltip: "Upload debug",
-                                    onPressed: _openUploadDebugScreen,
-                                    icon: const Icon(Icons.bug_report_outlined, size: 18),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            children: [
-                              OutlinedButton.icon(
-                                icon: const Icon(Icons.camera_alt),
-                                label: const Text("Camera"),
-                                onPressed: (_saving || _pickingPhoto)
-                                    ? null
-                                    : () async {
-                                        if (!(await _ensureTutorialAction("profile.add_photo"))) {
-                                          return;
-                                        }
-                                        final didPick = await _pickPhoto(ImageSource.camera);
-                                        if (didPick) {
-                                          // ignore: discarded_futures
-                                          WelcomeTutorialService.instance.consumeExpectedAction("profile.add_photo");
-                                        }
-                                      },
-                              ),
-                              OutlinedButton.icon(
-                                icon: const Icon(Icons.photo),
-                                label: const Text("Gallery"),
-                                onPressed: (_saving || _pickingPhoto)
-                                    ? null
-                                    : () async {
-                                        if (!(await _ensureTutorialAction("profile.add_photo"))) {
-                                          return;
-                                        }
-                                        final didPick = await _pickPhoto(ImageSource.gallery);
-                                        if (didPick) {
-                                          // ignore: discarded_futures
-                                          WelcomeTutorialService.instance.consumeExpectedAction("profile.add_photo");
-                                        }
-                                      },
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            "Selfie is required.",
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: cs.onSurfaceVariant,
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                const SizedBox(height: 24),
-                TextFormField(
-                  controller: _nameController,
-                  readOnly: true,
-                  onTap: () => _editFieldInDialog(
-                    title: "Edit name",
-                    controller: _nameController,
-                  ),
-                  decoration: InputDecoration(
-                    labelText: "Name",
-                    suffixIcon: IconButton(
-                      tooltip: "Edit in dialog",
-                      onPressed: () => _editFieldInDialog(
-                        title: "Edit name",
-                        controller: _nameController,
-                      ),
-                      icon: const Icon(Icons.open_in_new),
-                    ),
-                  ),
-                  validator: (v) => (v == null || v.trim().isEmpty) ? "Please enter a name." : null,
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _headlineController,
-                  readOnly: true,
-                  onTap: () => _editFieldInDialog(
-                    title: "Edit headline",
-                    controller: _headlineController,
-                  ),
-                  decoration: InputDecoration(
-                    labelText: "Headline (optional)",
-                    hintText: "Short line like \"Web dev in Boca\"",
-                    suffixIcon: IconButton(
-                      tooltip: "Edit in dialog",
-                      onPressed: () => _editFieldInDialog(
-                        title: "Edit headline",
-                        controller: _headlineController,
-                      ),
-                      icon: const Icon(Icons.open_in_new),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  "Keywords",
-                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 10),
-                _keywordWorkspacePreview(_bucketSearchingFor),
-                const SizedBox(height: 10),
-                _keywordWorkspacePreview(_bucketCanProvide),
-                const SizedBox(height: 24),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text("Business Mode", style: theme.textTheme.titleMedium),
-                ),
-                const SizedBox(height: 6),
-                Card(
-                  elevation: 0,
-                  color: cs.surfaceContainerHighest,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(color: cs.outline.withValues(alpha: 0.25)),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          "Party  Public  Business",
-                          style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          "Business Mode is earned first (trust + activity), then activated with payment. "
-                          "Prox must always make the payment path reachable - no dead ends.",
-                          style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                        ),
-                        const SizedBox(height: 10),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          value: allowBusinessToggle ? _businessEnabled : false,
-                          onChanged: (!_canUseBusinessTier || !_businessPaidUnlock || _saving)
-                              ? null
-                              : (v) => setState(() => _businessEnabled = v),
-                          title: const Text("Use Prox in Business Mode"),
-                          subtitle: Text(
-                            !_canUseBusinessTier
-                                ? "Locked: earn unlock first."
-                                : (!_businessPaidUnlock
-                                    ? "Unlocked to buy: activate with payment."
-                                    : "Optional: turn on when you're open for quick meetups/services."),
-                          ),
-                        ),
-                        if (!_canUseBusinessTier) ...[
-                          const SizedBox(height: 6),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              onPressed: _saving ? null : _showBusinessRequirements,
-                              icon: const Icon(Icons.lock_outline),
-                              label: const Text("See unlock requirements"),
-                            ),
-                          ),
-                        ] else if (!_businessPaidUnlock) ...[
-                          const SizedBox(height: 6),
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton.icon(
-                              onPressed: _saving ? null : _openBusinessPaywall,
-                              icon: const Icon(Icons.payments_outlined),
-                              label: const Text("Activate Business Mode"),
-                            ),
-                          ),
-                        ],
-                        if (allowBusinessToggle && _businessEnabled) ...[
-                          const SizedBox(height: 8),
-                          DropdownButtonFormField<int>(
-                            initialValue: _availabilityMinutes,
-                            decoration: const InputDecoration(labelText: "Typical response time"),
-                            items: _availabilityOptions.entries
-                                .map((e) => DropdownMenuItem<int>(value: e.key, child: Text(e.value)))
-                                .toList(growable: false),
-                            onChanged: _saving ? null : (v) => setState(() => _availabilityMinutes = v ?? 0),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                    Text(
-                      "These basics unlock matching and chats. You can refine the rest later.",
-                      style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          // Temporarily disabled here while resolving Android IME focus regressions.
-          // const WelcomeTutorialBubble(
-          //   screenId: "profile_edit",
-          //   targetKeys: <String, GlobalKey>{},
-          // ),
-        ],
-      ),
+      body: content,
     );
   }
 }
@@ -1808,8 +1949,10 @@ class _ProfileUploadDebugScreen extends StatelessWidget {
           child: ValueListenableBuilder<ProfileUploadDebugState>(
             valueListenable: UserProfileService.instance.uploadDebug,
             builder: (context, dbg, _) {
-              final status = trim(dbg.status).isEmpty ? "idle" : trim(dbg.status);
-              final bucket = trim(dbg.bucket).isEmpty ? "(unknown)" : trim(dbg.bucket);
+              final status =
+                  trim(dbg.status).isEmpty ? "idle" : trim(dbg.status);
+              final bucket =
+                  trim(dbg.bucket).isEmpty ? "(unknown)" : trim(dbg.bucket);
               final path = trim(dbg.path).isEmpty ? "-" : trim(dbg.path);
               final uid = trim(dbg.uid).isEmpty ? "-" : trim(dbg.uid);
               final error = trim(dbg.error);
@@ -1825,7 +1968,8 @@ class _ProfileUploadDebugScreen extends StatelessWidget {
                       context,
                       "Error",
                       short(error),
-                      valueStyle: theme.textTheme.bodyMedium?.copyWith(color: cs.error),
+                      valueStyle:
+                          theme.textTheme.bodyMedium?.copyWith(color: cs.error),
                     ),
                 ],
               );
@@ -1857,7 +2001,8 @@ class _ProfileUploadDebugScreen extends StatelessWidget {
         children: [
           Text(
             label,
-            style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+            style: theme.textTheme.labelLarge
+                ?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 4),
           Text(value, style: valueStyle ?? theme.textTheme.bodyMedium),
@@ -1908,7 +2053,8 @@ class _ProfileTextEditorScreen extends StatefulWidget {
   final int maxLines;
 
   @override
-  State<_ProfileTextEditorScreen> createState() => _ProfileTextEditorScreenState();
+  State<_ProfileTextEditorScreen> createState() =>
+      _ProfileTextEditorScreenState();
 }
 
 class _ProfileTextEditorSheet extends StatefulWidget {
@@ -1927,7 +2073,8 @@ class _ProfileTextEditorSheet extends StatefulWidget {
   final MethodChannel systemHealthChannel;
 
   @override
-  State<_ProfileTextEditorSheet> createState() => _ProfileTextEditorSheetState();
+  State<_ProfileTextEditorSheet> createState() =>
+      _ProfileTextEditorSheetState();
 }
 
 class _ProfileTextEditorSheetState extends State<_ProfileTextEditorSheet> {
@@ -2102,7 +2249,8 @@ class _ProfileTextEditorScreenState extends State<_ProfileTextEditorScreen> {
               maxLines: widget.maxLines,
               textInputAction: TextInputAction.done,
               onTap: _requestKeyboard,
-              onFieldSubmitted: (_) => Navigator.of(context).pop(_controller.text),
+              onFieldSubmitted: (_) =>
+                  Navigator.of(context).pop(_controller.text),
               decoration: const InputDecoration(
                 border: OutlineInputBorder(),
               ),
@@ -2113,10 +2261,3 @@ class _ProfileTextEditorScreenState extends State<_ProfileTextEditorScreen> {
     );
   }
 }
-
-
-
-
-
-
-

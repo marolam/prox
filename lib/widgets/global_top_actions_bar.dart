@@ -25,6 +25,7 @@ class GlobalTopActionsBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     const hiddenRoutes = <String>{"/", "/auth", "/onboarding", "/profile_setup"};
+    const hiddenContexts = <String>{"home:nearby"};
     const hiddenContextPrefixes = <String>{"auth:", "onboarding:", "splash:"};
 
     return ValueListenableBuilder<String>(
@@ -35,15 +36,16 @@ class GlobalTopActionsBar extends StatelessWidget {
           builder: (context, contextKey, __) {
             final normalizedContext = (contextKey ?? "").trim().toLowerCase();
             final bool hiddenByRoute = hiddenRoutes.contains(routeName);
-            final bool hiddenByContext = hiddenContextPrefixes.any(
-              (prefix) => normalizedContext.startsWith(prefix),
-            );
+            final bool hiddenByContext = hiddenContexts.contains(normalizedContext) ||
+                hiddenContextPrefixes.any(
+                  (prefix) => normalizedContext.startsWith(prefix),
+                );
             final bool visibleByRoute =
                 routeName.trim().isNotEmpty && !hiddenByRoute;
             final bool visibleByContext =
                 normalizedContext.isNotEmpty && !hiddenByContext;
 
-            if (!visibleByRoute && !visibleByContext) {
+            if (hiddenByContext || (!visibleByRoute && !visibleByContext)) {
               return const SizedBox.shrink();
             }
 
@@ -156,9 +158,20 @@ class _InboxIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    FirebaseAuth auth;
+    try {
+      auth = FirebaseAuth.instance;
+    } catch (_) {
+      return IconButton(
+        tooltip: "Inbox",
+        onPressed: _openInbox,
+        icon: const Icon(Icons.inbox_outlined),
+      );
+    }
+
     return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
-      initialData: FirebaseAuth.instance.currentUser,
+      stream: auth.authStateChanges(),
+      initialData: auth.currentUser,
       builder: (context, authSnap) {
         final uid = authSnap.data?.uid ?? "";
         if (uid.isEmpty) {

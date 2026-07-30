@@ -3,8 +3,8 @@
  *
  * Production-safe HomeShell (Material 3).
  * Swipe tabs (2 pages x 5):
- * - Page 1: Nearby / Matches / Meetups / Party / Modes
- * - Page 2: HQ / Profile / Referrals / Support / Settings
+ * - Page 1: Nearby / Matches / Meetups / Party / Profile
+ * - Page 2: HQ / Referrals / Support / Settings
  *
  * Triage add-on (tester build):
  * - Help Mode: long-press anywhere OR tap the ? button (top-left).
@@ -19,14 +19,12 @@ import "package:prox/screens/matches/matches_screen.dart";
 import "package:prox/screens/meetup/meetup_history_screen.dart";
 import "package:prox/screens/party/party_screen.dart";
 import "package:prox/screens/profile/profile_screen.dart";
-import "package:prox/screens/discovery/matching_mode_screen.dart";
 import "package:prox/screens/dashboard/dashboard_screen.dart";
 import "package:prox/screens/referral/referrals_hub_screen.dart";
 import "package:prox/screens/support/support_hub_screen.dart";
 import "package:prox/screens/settings/settings_screen.dart";
 import "package:prox/screens/settings/support_feedback_screen.dart";
 import "package:prox/services/help/context_help_service.dart";
-import "package:prox/services/simple_mode/simple_mode_service.dart";
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -39,11 +37,6 @@ class _HomeShellState extends State<HomeShell> {
   int _index = 0;
   bool _showSwipeHint = true;
   late final PageController _navPageController;
-  StreamSubscription<SimpleModeState>? _simpleModeSub;
-  Timer? _simpleModeRefreshTimer;
-  SimpleModeState _simpleMode = const SimpleModeState.initial();
-  bool _openedProfileSetup = false;
-  bool _shownActivePrompt = false;
   int _testerComboLongPressCount = 0;
   bool _suppressNextFeedbackTap = false;
   DateTime? _testerComboArmedUntil;
@@ -74,19 +67,14 @@ class _HomeShellState extends State<HomeShell> {
       child: PartyScreen(),
     ),
     _ShellTab(
-      label: "Modes",
-      icon: Icons.tune,
-      child: MatchingModeScreen(),
+      label: "Profile",
+      icon: Icons.person_outline,
+      child: ProfileScreen(),
     ),
     _ShellTab(
       label: "HQ",
       icon: Icons.dashboard_outlined,
       child: DashboardScreen(),
-    ),
-    _ShellTab(
-      label: "Profile",
-      icon: Icons.person_outline,
-      child: ProfileScreen(),
     ),
     _ShellTab(
       label: "Referrals",
@@ -113,142 +101,15 @@ class _HomeShellState extends State<HomeShell> {
   void initState() {
     super.initState();
     _navPageController = PageController(initialPage: _pageForIndex(_index));
-    _simpleModeSub = SimpleModeService.instance.watch().listen((state) {
-      if (!mounted) return;
-      setState(() {
-        _simpleMode = state;
-      });
-      _enforceSimpleModeSelection();
-      _runSimpleModePrompts(state);
-    });
-    _simpleModeRefreshTimer = Timer.periodic(const Duration(seconds: 12), (_) {
-      // ignore: discarded_futures
-      SimpleModeService.instance.refresh();
-    });
-    // ignore: discarded_futures
-    SimpleModeService.instance.refresh();
     _syncHelpContext();
   }
 
   @override
   void dispose() {
-    _simpleModeSub?.cancel();
-    _simpleModeRefreshTimer?.cancel();
     _testerComboResetTimer?.cancel();
     ContextHelpService.instance.setContext(null);
     _navPageController.dispose();
     super.dispose();
-  }
-
-  Set<int> _allowedIndexesForStage(SimpleModeStage stage) {
-    switch (stage) {
-      case SimpleModeStage.profile:
-        return const <int>{6};
-      case SimpleModeStage.match:
-        return const <int>{0, 6};
-      case SimpleModeStage.chat:
-        return const <int>{0, 1, 6};
-      case SimpleModeStage.meetup:
-        return const <int>{0, 1, 2, 6};
-      case SimpleModeStage.rate:
-        return const <int>{0, 1, 2, 6};
-      case SimpleModeStage.unlocked:
-        return Set<int>.from(List<int>.generate(_tabs.length, (i) => i));
-    }
-  }
-
-  bool _isSimpleModeLocked(int index) {
-    if (_simpleMode.isUnlocked) return false;
-    final allowed = _allowedIndexesForStage(_simpleMode.stage);
-    return !allowed.contains(index);
-  }
-
-  int _simpleModeStepNumber(SimpleModeStage stage) {
-    switch (stage) {
-      case SimpleModeStage.profile:
-        return 1;
-      case SimpleModeStage.match:
-        return 2;
-      case SimpleModeStage.chat:
-        return 3;
-      case SimpleModeStage.meetup:
-        return 4;
-      case SimpleModeStage.rate:
-        return 5;
-      case SimpleModeStage.unlocked:
-        return 5;
-    }
-  }
-
-  String _simpleModeStepLabel(SimpleModeStage stage) {
-    switch (stage) {
-      case SimpleModeStage.profile:
-        return "Profile";
-      case SimpleModeStage.match:
-        return "Match";
-      case SimpleModeStage.chat:
-        return "Chat";
-      case SimpleModeStage.meetup:
-        return "Meetup";
-      case SimpleModeStage.rate:
-        return "Rate";
-      case SimpleModeStage.unlocked:
-        return "Unlocked";
-    }
-  }
-
-  String _simpleModeHint(SimpleModeStage stage) {
-    switch (stage) {
-      case SimpleModeStage.profile:
-        return "Complete selfie, name, searching-for, and can-provide to continue.";
-      case SimpleModeStage.match:
-        return "Open Nearby and hold Prox Circle to go active when ready.";
-      case SimpleModeStage.chat:
-        return "Open Matches and start your first chat.";
-      case SimpleModeStage.meetup:
-        return "Use chat to request and complete your first meetup.";
-      case SimpleModeStage.rate:
-        return "Submit your first meetup rating to finish Big-5.";
-      case SimpleModeStage.unlocked:
-        return "All modes are now unlocked.";
-    }
-  }
-
-  void _enforceSimpleModeSelection() {
-    if (_simpleMode.isUnlocked) return;
-    if (!_isSimpleModeLocked(_index)) return;
-
-    final allowed = _allowedIndexesForStage(_simpleMode.stage).toList()..sort();
-    final int next = allowed.isNotEmpty ? allowed.first : 0;
-    setState(() {
-      _index = next;
-      _syncHelpContext();
-    });
-  }
-
-  void _runSimpleModePrompts(SimpleModeState state) {
-    if (state.isUnlocked) return;
-
-    if (state.stage == SimpleModeStage.profile && !_openedProfileSetup) {
-      _openedProfileSetup = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        Navigator.of(context).pushNamed("/profile_setup").then((_) {
-          // ignore: discarded_futures
-          SimpleModeService.instance.refresh();
-        });
-      });
-    }
-
-    if (state.stage == SimpleModeStage.match && !_shownActivePrompt) {
-      _shownActivePrompt = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Simple Mode: hold the Prox Circle to go active.")),
-        );
-      });
-    }
   }
 
   void _openFeedback() {
@@ -313,20 +174,10 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   void _selectTab(int index) {
-    if (_isSimpleModeLocked(index)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Finish the current Big-5 step to unlock this area.")),
-      );
-      return;
-    }
-
     setState(() {
       _index = index;
       _syncHelpContext();
     });
-
-    // ignore: discarded_futures
-    SimpleModeService.instance.refresh();
   }
 
   @override
@@ -370,15 +221,6 @@ class _HomeShellState extends State<HomeShell> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (!_simpleMode.isUnlocked)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 2, 4, 8),
-                  child: _SimpleModeProgressBanner(
-                    stepNumber: _simpleModeStepNumber(_simpleMode.stage),
-                    stepLabel: _simpleModeStepLabel(_simpleMode.stage),
-                    hint: _simpleModeHint(_simpleMode.stage),
-                  ),
-                ),
               SizedBox(
                 height: 76,
                 child: PageView.builder(
@@ -403,7 +245,6 @@ class _HomeShellState extends State<HomeShell> {
                             child: _NavButton(
                               tab: tabs[i],
                               selected: _index == (start + i),
-                              disabled: _isSimpleModeLocked(start + i),
                               onTap: () => _selectTab(start + i),
                             ),
                           ),
@@ -478,13 +319,11 @@ class _ShellTab {
 class _NavButton extends StatelessWidget {
   final _ShellTab tab;
   final bool selected;
-  final bool disabled;
   final VoidCallback onTap;
 
   const _NavButton({
     required this.tab,
     required this.selected,
-    required this.disabled,
     required this.onTap,
   });
 
@@ -499,7 +338,7 @@ class _NavButton extends StatelessWidget {
 
     return InkWell(
       borderRadius: BorderRadius.circular(12),
-      onTap: disabled ? null : onTap,
+      onTap: onTap,
       child: Padding(
         padding: EdgeInsets.symmetric(vertical: compact ? 7 : 6, horizontal: compact ? 1 : 2),
         child: Column(
@@ -508,9 +347,7 @@ class _NavButton extends StatelessWidget {
             Icon(
               tab.icon,
               size: iconSize,
-              color: disabled
-                  ? cs.onSurfaceVariant.withValues(alpha: 0.38)
-                  : (selected ? cs.primary : cs.onSurfaceVariant),
+              color: selected ? cs.primary : cs.onSurfaceVariant,
             ),
             SizedBox(height: compact ? 3 : 4),
             Text(
@@ -520,63 +357,13 @@ class _NavButton extends StatelessWidget {
               textAlign: TextAlign.center,
               style: theme.textTheme.labelSmall?.copyWith(
                 fontSize: labelSize,
-                color: disabled
-                    ? cs.onSurfaceVariant.withValues(alpha: 0.42)
-                    : (selected ? cs.primary : cs.onSurfaceVariant),
-                fontWeight: selected && !disabled ? FontWeight.w800 : FontWeight.w600,
+                color: selected ? cs.primary : cs.onSurfaceVariant,
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
                 letterSpacing: compact ? -0.1 : 0,
               ),
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _SimpleModeProgressBanner extends StatelessWidget {
-  final int stepNumber;
-  final String stepLabel;
-  final String hint;
-
-  const _SimpleModeProgressBanner({
-    required this.stepNumber,
-    required this.stepLabel,
-    required this.hint,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
-      decoration: BoxDecoration(
-        color: cs.secondaryContainer.withValues(alpha: 0.82),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.65)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            "Simple Mode: Step $stepNumber/5 - $stepLabel",
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: cs.onSecondaryContainer,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            hint,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: cs.onSecondaryContainer.withValues(alpha: 0.92),
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
       ),
     );
   }

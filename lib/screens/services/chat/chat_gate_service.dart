@@ -150,6 +150,14 @@ class ChatGateService {
     }
   }
 
+  Future<void> enforceChatLifecycleForUid({String? forUid}) async {
+    await enforceExpiredIncomingRequestsIfNeeded(forUid: forUid);
+  }
+
+  bool shouldSuppressIncomingCountdownForUid(String uid) {
+    return false;
+  }
+
   Future<void> ensureRequested({
     required String chatId,
     required String requestedBy,

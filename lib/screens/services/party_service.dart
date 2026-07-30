@@ -41,6 +41,55 @@ class PartyMemberEntry {
   }
 }
 
+class PartyAddRequest {
+  final String docId;
+  final String fromUid;
+  final String toUid;
+  final String status;
+  final DateTime? requestedAt;
+  final DateTime? updatedAt;
+
+  const PartyAddRequest({
+    required this.docId,
+    required this.fromUid,
+    required this.toUid,
+    required this.status,
+    required this.requestedAt,
+    required this.updatedAt,
+  });
+
+  bool get isRequested => status == "requested";
+
+  static DateTime? _parseDate(dynamic v) {
+    if (v is Timestamp) return v.toDate();
+    if (v is int) return DateTime.fromMillisecondsSinceEpoch(v);
+    if (v is num) return DateTime.fromMillisecondsSinceEpoch(v.toInt());
+    if (v is String) {
+      final asInt = int.tryParse(v);
+      if (asInt != null) return DateTime.fromMillisecondsSinceEpoch(asInt);
+      return DateTime.tryParse(v);
+    }
+    return null;
+  }
+
+  static PartyAddRequest fromDoc(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    final d = doc.data();
+    final requested =
+        _parseDate(d["requestedAt"]) ?? _parseDate(d["requestedAtClientMs"]);
+    final updated = _parseDate(d["updatedAt"]);
+    return PartyAddRequest(
+      docId: doc.id,
+      fromUid: (d["fromUid"] ?? "").toString().trim(),
+      toUid: (d["toUid"] ?? "").toString().trim(),
+      status: (d["status"] ?? "requested").toString().trim().toLowerCase(),
+      requestedAt: requested,
+      updatedAt: updated,
+    );
+  }
+}
+
 class PartyService {
   PartyService._();
   static final PartyService instance = PartyService._();
@@ -50,6 +99,7 @@ class PartyService {
   final Random _rng = Random.secure();
   static const double _inPersonMaxDistanceMeters = 120.0;
   static const Duration _presenceFreshness = Duration(minutes: 5);
+  static const Duration _partyAddRequestTtl = Duration(days: 30);
 
   CollectionReference<Map<String, dynamic>> _party(String uid) =>
       _db.collection("users").doc(uid).collection("party");
@@ -70,6 +120,24 @@ class PartyService {
   String _pairDocId(String a, String b) {
     final ids = <String>[a.trim(), b.trim()]..sort();
     return "party_handshake_${ids[0]}_${ids[1]}";
+  }
+
+  String _partyAddRequestDocId({
+    required String fromUid,
+    required String toUid,
+  }) {
+    final from = fromUid.trim();
+    final to = toUid.trim();
+    return "party_add_${from}_$to";
+  }
+
+  DocumentReference<Map<String, dynamic>> _partyAddRequestDoc({
+    required String fromUid,
+    required String toUid,
+  }) {
+    return _meetupRequests.doc(
+      _partyAddRequestDocId(fromUid: fromUid, toUid: toUid),
+    );
   }
 
   String _genInPersonCode() {
@@ -111,7 +179,8 @@ class PartyService {
     );
   }
 
-  Future<InPersonDirectInviteResult> confirmInPersonDirectInviteCode(String rawCode) async {
+  Future<InPersonDirectInviteResult> confirmInPersonDirectInviteCode(
+      String rawCode) async {
     final me = _me();
     final code = rawCode.trim();
     if (code.length < 4) {
@@ -149,11 +218,13 @@ class PartyService {
       return const InPersonDirectInviteResult(
         ok: false,
         paired: false,
-        message: "No active nearby Party code found. Ask them to reopen Direct Invite.",
+        message:
+            "No active nearby Party code found. Ask them to reopen Direct Invite.",
       );
     }
 
-    final proximity = await _validateInPersonProximity(me: me, peerUid: peerUid, now: now);
+    final proximity =
+        await _validateInPersonProximity(me: me, peerUid: peerUid, now: now);
     if (!proximity.ok) {
       return InPersonDirectInviteResult(
         ok: false,
@@ -174,7 +245,8 @@ class PartyService {
     await _db.runTransaction((tx) async {
       final pairSnap = await tx.get(pairRef);
       final cur = pairSnap.data() ?? <String, dynamic>{};
-      final Timestamp expiryTs = Timestamp.fromDate(now.add(const Duration(minutes: 4)));
+      final Timestamp expiryTs =
+          Timestamp.fromDate(now.add(const Duration(minutes: 4)));
 
       bool aConfirmed = cur["aConfirmed"] == true;
       bool bConfirmed = cur["bConfirmed"] == true;
@@ -244,7 +316,8 @@ class PartyService {
     if (myPresence == null || peerPresence == null) {
       return const InPersonProximityCheck(
         ok: false,
-        message: "Couldn't verify physical presence. Both users must have fresh location sharing.",
+        message:
+            "Couldn't verify physical presence. Both users must have fresh location sharing.",
       );
     }
 
@@ -253,7 +326,8 @@ class PartyService {
     if (myAge > _presenceFreshness || peerAge > _presenceFreshness) {
       return InPersonProximityCheck(
         ok: false,
-        message: "Location is stale. Both users should open Nearby/Party and retry.",
+        message:
+            "Location is stale. Both users should open Nearby/Party and retry.",
         mePresenceAgeSec: myAge.inSeconds,
         peerPresenceAgeSec: peerAge.inSeconds,
       );
@@ -285,7 +359,12 @@ class PartyService {
   }
 
   Future<_PresencePoint?> _readPresencePoint(String uid) async {
-    final snap = await _db.collection("users").doc(uid).collection("presence").doc("current").get();
+    final snap = await _db
+        .collection("users")
+        .doc(uid)
+        .collection("presence")
+        .doc("current")
+        .get();
     final data = snap.data();
     if (data == null) return null;
 
@@ -315,7 +394,8 @@ class PartyService {
     if (v is num) return DateTime.fromMillisecondsSinceEpoch(v.toInt());
     if (v is String) {
       final parsedInt = int.tryParse(v);
-      if (parsedInt != null) return DateTime.fromMillisecondsSinceEpoch(parsedInt);
+      if (parsedInt != null)
+        return DateTime.fromMillisecondsSinceEpoch(parsedInt);
       return DateTime.tryParse(v);
     }
     return null;
@@ -355,6 +435,127 @@ class PartyService {
         SetOptions(merge: true),
       );
     }
+  }
+
+  Future<void> requestPartyAdd(String otherUid) async {
+    final uid = _me();
+    final other = otherUid.trim();
+    if (other.isEmpty || other == uid) return;
+
+    final now = DateTime.now();
+    await _partyAddRequestDoc(fromUid: uid, toUid: other).set(
+      <String, Object?>{
+        "kind": "partyAddRequest",
+        "fromUid": uid,
+        "toUid": other,
+        "status": "requested",
+        "requestedAt": FieldValue.serverTimestamp(),
+        "requestedAtClientMs": now.millisecondsSinceEpoch,
+        "updatedAt": FieldValue.serverTimestamp(),
+        "expiresAt": Timestamp.fromDate(now.add(_partyAddRequestTtl)),
+      },
+      SetOptions(merge: true),
+    );
+  }
+
+  Stream<List<PartyAddRequest>> watchIncomingPartyAddRequests() async* {
+    yield const <PartyAddRequest>[];
+
+    yield* _auth.authStateChanges().asyncExpand((user) {
+      final uid = user?.uid ?? "";
+      if (uid.trim().isEmpty) {
+        return Stream<List<PartyAddRequest>>.value(const <PartyAddRequest>[]);
+      }
+
+      return _meetupRequests
+          .where("kind", isEqualTo: "partyAddRequest")
+          .where("toUid", isEqualTo: uid)
+          .where("status", isEqualTo: "requested")
+          .snapshots()
+          .map((qs) {
+        final out = qs.docs
+            .map(PartyAddRequest.fromDoc)
+            .where((r) => r.fromUid.isNotEmpty && r.toUid.isNotEmpty)
+            .toList(growable: false);
+
+        out.sort((a, b) {
+          final ad = a.requestedAt;
+          final bd = b.requestedAt;
+          if (ad == null && bd == null) return a.fromUid.compareTo(b.fromUid);
+          if (ad == null) return 1;
+          if (bd == null) return -1;
+          return bd.compareTo(ad);
+        });
+
+        return out;
+      });
+    });
+  }
+
+  Stream<List<PartyAddRequest>> watchOutgoingPartyAddRequests() async* {
+    yield const <PartyAddRequest>[];
+
+    yield* _auth.authStateChanges().asyncExpand((user) {
+      final uid = user?.uid ?? "";
+      if (uid.trim().isEmpty) {
+        return Stream<List<PartyAddRequest>>.value(const <PartyAddRequest>[]);
+      }
+
+      return _meetupRequests
+          .where("kind", isEqualTo: "partyAddRequest")
+          .where("fromUid", isEqualTo: uid)
+          .where("status", isEqualTo: "requested")
+          .snapshots()
+          .map((qs) {
+        final out = qs.docs
+            .map(PartyAddRequest.fromDoc)
+            .where((r) => r.fromUid.isNotEmpty && r.toUid.isNotEmpty)
+            .toList(growable: false);
+
+        out.sort((a, b) {
+          final ad = a.requestedAt;
+          final bd = b.requestedAt;
+          if (ad == null && bd == null) return a.toUid.compareTo(b.toUid);
+          if (ad == null) return 1;
+          if (bd == null) return -1;
+          return bd.compareTo(ad);
+        });
+
+        return out;
+      });
+    });
+  }
+
+  Future<void> acceptPartyAddRequestFrom(String requesterUid) async {
+    final uid = _me();
+    final requester = requesterUid.trim();
+    if (requester.isEmpty || requester == uid) return;
+
+    await addToParty(requester, source: "partyRequestAccepted");
+
+    await _partyAddRequestDoc(fromUid: requester, toUid: uid).set(
+      <String, Object?>{
+        "status": "accepted",
+        "acceptedAt": FieldValue.serverTimestamp(),
+        "updatedAt": FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+  }
+
+  Future<void> declinePartyAddRequestFrom(String requesterUid) async {
+    final uid = _me();
+    final requester = requesterUid.trim();
+    if (requester.isEmpty || requester == uid) return;
+
+    await _partyAddRequestDoc(fromUid: requester, toUid: uid).set(
+      <String, Object?>{
+        "status": "declined",
+        "declinedAt": FieldValue.serverTimestamp(),
+        "updatedAt": FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
   }
 
   String _me() {

@@ -2,6 +2,7 @@ import "dart:async";
 
 import "package:prox/models/user_settings.dart";
 import "package:prox/services/device_storage_service.dart";
+import "package:prox/services/pro_mode_preview_access.dart";
 
 class UserSettingsService {
   UserSettingsService._();
@@ -18,6 +19,9 @@ class UserSettingsService {
 
   UserSettings get current => _settings;
 
+  bool get canUseProModePreview =>
+      ProModePreviewAccess.instance.isAllowedForCurrentUser();
+
   Future<void> ensureLoaded() async {
     if (_loadedFromStorage) return;
     _loadedFromStorage = true;
@@ -27,7 +31,12 @@ class UserSettingsService {
     if (raw != null) {
       try {
         final loaded = UserSettings.fromJson(raw);
-        _settings = loaded;
+        final normalized = _normalizeProModeAccess(loaded);
+        _settings = normalized;
+        if (normalized != loaded) {
+          await DeviceStorageService.instance
+              .set(_storageKey, normalized.toJson());
+        }
       } catch (_) {
         _settings = const UserSettings.defaults();
       }
@@ -55,6 +64,7 @@ class UserSettingsService {
   }
 
   void _emit(UserSettings next, {bool persist = true}) {
+    next = _normalizeProModeAccess(next);
     if (identical(next, _settings)) return;
     _settings = next;
     if (!_controller.isClosed) {
@@ -67,6 +77,25 @@ class UserSettingsService {
         _settings.toJson(),
       );
     }
+  }
+
+  UserSettings _normalizeProModeAccess(UserSettings settings) {
+    if (canUseProModePreview) return settings;
+
+    final discovery = settings.matchDiscovery;
+    final sanitizedDiscovery = discovery.businessOnly
+        ? discovery.copyWith(businessOnly: false)
+        : discovery;
+
+    if (settings.uxMode == AppUxMode.party &&
+        identical(sanitizedDiscovery, discovery)) {
+      return settings;
+    }
+
+    return settings.copyWith(
+      uxMode: AppUxMode.party,
+      matchDiscovery: sanitizedDiscovery,
+    );
   }
 
   void updateMatchDiscovery(MatchDiscoverySettings discovery) {
@@ -85,13 +114,21 @@ class UserSettingsService {
     _emit(_settings.copyWith(matchDiscovery: cur.copyWith(normalMode: mode)));
   }
 
+  void setListenRole(ListenMatchRole role) {
+    final cur = _settings.matchDiscovery;
+    if (cur.listenRole == role) return;
+    _emit(_settings.copyWith(matchDiscovery: cur.copyWith(listenRole: role)));
+  }
+
   void setTreasureRadiusMiles(double miles) {
     final safe = miles
-        .clamp(MatchDiscoverySettings.minRadiusMiles, MatchDiscoverySettings.maxRadiusMiles)
+        .clamp(MatchDiscoverySettings.minRadiusMiles,
+            MatchDiscoverySettings.maxRadiusMiles)
         .toDouble();
     final cur = _settings.matchDiscovery;
     if (cur.treasureRadiusMiles == safe) return;
-    _emit(_settings.copyWith(matchDiscovery: cur.copyWith(treasureRadiusMiles: safe)));
+    _emit(_settings.copyWith(
+        matchDiscovery: cur.copyWith(treasureRadiusMiles: safe)));
   }
 
   void setRadiusMiles(double miles) {
@@ -204,6 +241,9 @@ class UserSettingsService {
 
   // Persona mode (Party  Business)
   void setUxMode(AppUxMode mode) {
+    if (mode == AppUxMode.business && !canUseProModePreview) {
+      mode = AppUxMode.party;
+    }
     if (_settings.uxMode == mode) return;
     _emit(_settings.copyWith(uxMode: mode));
   }
@@ -239,13 +279,15 @@ class UserSettingsService {
   }
 
   void setDemoModeEnabled(bool enabled) {
-    if (_settings.demoModeEnabled == enabled) return;
-    _emit(_settings.copyWith(demoModeEnabled: enabled));
+    if (!enabled && _settings.demoModeEnabled) {
+      _emit(_settings.copyWith(demoModeEnabled: false));
+    }
   }
 
   void setDemoSimulatedNearbyLocationEnabled(bool enabled) {
-    if (_settings.demoSimulatedNearbyLocationEnabled == enabled) return;
-    _emit(_settings.copyWith(demoSimulatedNearbyLocationEnabled: enabled));
+    if (!enabled && _settings.demoSimulatedNearbyLocationEnabled) {
+      _emit(_settings.copyWith(demoSimulatedNearbyLocationEnabled: false));
+    }
   }
 
   void setDemoSimulatedNearbyOffsetMiles(double miles) {
@@ -255,19 +297,36 @@ class UserSettingsService {
   }
 
   void setDemoForceMatchAllWithinRadius(bool enabled) {
-    if (_settings.demoForceMatchAllWithinRadius == enabled) return;
-    _emit(_settings.copyWith(demoForceMatchAllWithinRadius: enabled));
+    if (!enabled && _settings.demoForceMatchAllWithinRadius) {
+      _emit(_settings.copyWith(demoForceMatchAllWithinRadius: false));
+    }
   }
 
   void setDemoFastPresenceRefreshEnabled(bool enabled) {
-    if (_settings.demoFastPresenceRefreshEnabled == enabled) return;
-    _emit(_settings.copyWith(demoFastPresenceRefreshEnabled: enabled));
+    if (!enabled && _settings.demoFastPresenceRefreshEnabled) {
+      _emit(_settings.copyWith(demoFastPresenceRefreshEnabled: false));
+    }
   }
 
   void setTextScaleFactor(double value) {
     final safe = value.clamp(0.9, 1.6).toDouble();
     if (_settings.textScaleFactor == safe) return;
     _emit(_settings.copyWith(textScaleFactor: safe));
+  }
+
+  void setMatchNotificationsEnabled(bool enabled) {
+    if (_settings.matchNotificationsEnabled == enabled) return;
+    _emit(_settings.copyWith(matchNotificationsEnabled: enabled));
+  }
+
+  void setMatchSoundEnabled(bool enabled) {
+    if (_settings.matchSoundEnabled == enabled) return;
+    _emit(_settings.copyWith(matchSoundEnabled: enabled));
+  }
+
+  void setRareMatchSoundEnabled(bool enabled) {
+    if (_settings.rareMatchSoundEnabled == enabled) return;
+    _emit(_settings.copyWith(rareMatchSoundEnabled: enabled));
   }
 
   void setSimpleModeEnabled(bool enabled) {
