@@ -67,7 +67,7 @@ jobs:
       - name: Compile iOS (no codesign)
         working-directory: ${{ env.PROJECT_DIR }}
         run: >-
-          flutter build ios --release --no-codesign
+          flutter build ios --simulator --debug
           --dart-define=PROX_TESTER=true
           --dart-define=PROX_TESTER_BUILD=true
           --dart-define=BUILD_FLAVOR=${{ github.event.inputs.build_flavor || 'ios_cloud' }}
@@ -75,12 +75,19 @@ jobs:
       - name: Package iOS app bundle artifact
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          cd build/ios/iphoneos
+          if [ -d build/ios/iphonesimulator/Runner.app ]; then
+            cd build/ios/iphonesimulator
+          elif [ -d build/ios/iphoneos/Runner.app ]; then
+            cd build/ios/iphoneos
+          else
+            echo "Runner.app not found in iphonesimulator or iphoneos outputs"
+            exit 1
+          fi
           ditto -c -k --sequesterRsrc --keepParent Runner.app Runner-no-codesign.zip
 
       - name: Upload iOS bundle artifact
         uses: actions/upload-artifact@v4
         with:
           name: Runner-no-codesign
-          path: ${{ env.PROJECT_DIR }}/build/ios/iphoneos/Runner-no-codesign.zip
+          path: ${{ env.PROJECT_DIR }}/build/ios/**/Runner-no-codesign.zip
           if-no-files-found: error
