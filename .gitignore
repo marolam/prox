@@ -1,0 +1,5 @@
+# Local environment files can contain payment and Firebase deployment secrets.
+.env
+.env.*
+functions/.env.*
+tools/.env/

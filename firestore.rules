@@ -1,0 +1,315 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function authed() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return authed() && request.auth.token.admin == true;
+    }
+
+    function isOwner(uid) {
+      return authed() && request.auth.uid == uid;
+    }
+
+    function hasParticipants(data) {
+      return data.participants is list;
+    }
+
+    function inParticipants(data) {
+      return hasParticipants(data) && request.auth.uid in data.participants;
+    }
+
+    function inPair(data) {
+      return authed() && (
+        (data.aUid is string && request.auth.uid == data.aUid) ||
+        (data.bUid is string && request.auth.uid == data.bUid) ||
+        (data.requesterUid is string && request.auth.uid == data.requesterUid) ||
+        (data.recipientUid is string && request.auth.uid == data.recipientUid)
+      );
+    }
+
+    function ownerUid(data) {
+      return data.ownerUid is string
+        ? data.ownerUid
+        : data.userId is string
+          ? data.userId
+          : data.uid is string
+            ? data.uid
+            : data.createdBy is string
+              ? data.createdBy
+              : data.reporterUid is string
+                ? data.reporterUid
+                : "";
+    }
+
+    function isDocOwner(data) {
+      return authed() && ownerUid(data) != "" && request.auth.uid == ownerUid(data);
+    }
+
+    function supportCanRead(data) {
+      return isDocOwner(data) ||
+        (data.technicianId is string && request.auth.uid == data.technicianId) ||
+        (data.managerId is string && request.auth.uid == data.managerId) ||
+        isAdmin();
+    }
+
+    function meetupParticipant(data) {
+      return inParticipants(data) || inPair(data);
+    }
+
+    // --- USER ROOT + NESTED OWNER DATA ---
+    match /users/{uid} {
+      allow read: if authed();
+      allow write: if isOwner(uid);
+
+      match /presence/{docId} {
+        allow read: if authed();
+        allow write: if isOwner(uid);
+      }
+
+      match /deviceTokens/{tokenId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /settings/{docId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /meta/{docId} {
+        allow read: if authed();
+        allow write: if isOwner(uid);
+
+        match /events/{eventId} {
+          allow read: if isOwner(uid);
+          allow write: if isOwner(uid);
+        }
+      }
+
+      match /party/{partyUid} {
+        allow read: if authed();
+        allow write: if isOwner(uid);
+      }
+
+      match /notes/{otherUid} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /partyPrivateNotes/{otherUid} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /blocks/{blockedUid} {
+        allow read: if isOwner(uid);
+        allow write: if isOwner(uid);
+      }
+
+      match /referrals/{inviteeUid} {
+        allow read: if isOwner(uid);
+        allow write: if isOwner(uid);
+      }
+
+      match /stats/{docId} {
+        allow read: if authed();
+        allow write: if isOwner(uid);
+      }
+
+      match /billing/{docId} {
+        allow read, write: if isOwner(uid);
+
+        match /items/{itemId} {
+          allow read, write: if isOwner(uid);
+        }
+      }
+
+      match /business/{docId} {
+        allow read, write: if isOwner(uid);
+
+        match /{subPath=**} {
+          allow read, write: if isOwner(uid);
+        }
+      }
+
+      match /store/{docId} {
+        allow read, write: if isOwner(uid);
+
+        match /items/{itemId} {
+          allow read, write: if isOwner(uid);
+        }
+      }
+    }
+
+    // --- PROFILE MIRROR ---
+    match /profiles/{uid} {
+      allow read: if authed();
+      allow write: if isOwner(uid);
+    }
+
+    // --- CHATS + THREADS ---
+    match /chats/{chatId} {
+      allow create: if authed() && inParticipants(request.resource.data);
+      // Keep this predicate direct (no helper indirection) so query analysis
+      // can validate `where('participants', arrayContains: uid)` listeners.
+      // Important for transaction preflight: allow reads when doc is missing,
+      // otherwise tx.get(chats/{id}) can fail before create on brand-new pairs.
+      allow read: if authed() && (resource == null || request.auth.uid in resource.data.participants);
+      allow update, delete: if authed() && request.auth.uid in resource.data.participants;
+
+      match /messages/{messageId} {
+        allow read, write: if authed() && inParticipants(get(/databases/$(database)/documents/chats/$(chatId)).data);
+      }
+
+      match /typing/{uid} {
+        allow read: if authed() && inParticipants(get(/databases/$(database)/documents/chats/$(chatId)).data);
+        allow write: if authed() && request.auth.uid == uid && inParticipants(get(/databases/$(database)/documents/chats/$(chatId)).data);
+      }
+
+      match /members/{uid} {
+        allow read: if authed() && inParticipants(get(/databases/$(database)/documents/chats/$(chatId)).data);
+        allow write: if authed() && request.auth.uid == uid && inParticipants(get(/databases/$(database)/documents/chats/$(chatId)).data);
+      }
+    }
+
+    match /threads/{threadId} {
+      allow read, write: if authed();
+      match /messages/{messageId} {
+        allow read, write: if authed();
+      }
+    }
+
+    // --- MATCHES + MEETUPS ---
+    match /matches/{matchId} {
+      allow create: if authed() && inParticipants(request.resource.data);
+      allow read: if authed() && inParticipants(resource.data);
+      allow update, delete: if authed() && inParticipants(resource.data);
+    }
+
+    // Collection-group presence listeners need an explicit recursive match.
+    // Writes still flow through /users/{uid}/presence/{docId} owner rules above.
+    match /{path=**}/presence/{docId} {
+      allow read: if authed();
+      allow write: if false;
+    }
+
+    match /meetups/{meetupId} {
+      allow create: if authed() && meetupParticipant(request.resource.data);
+      allow read, update, delete: if authed() && meetupParticipant(resource.data);
+
+      match /beacon/{docId} {
+        allow read, write: if authed() && meetupParticipant(get(/databases/$(database)/documents/meetups/$(meetupId)).data);
+      }
+    }
+
+    match /meetupRequests/{requestId} {
+      allow create: if authed() && meetupParticipant(request.resource.data);
+      allow read, update, delete: if authed() && meetupParticipant(resource.data);
+    }
+
+    // --- SUPPORT / REFERRALS / INCIDENTS / REPORTING ---
+    match /support_tickets/{ticketId} {
+      allow create: if authed() && isDocOwner(request.resource.data);
+      allow read: if authed() && supportCanRead(resource.data);
+      allow update: if authed() && (supportCanRead(resource.data) || supportCanRead(request.resource.data));
+      allow delete: if isAdmin();
+    }
+
+    match /referralCodes/{code} {
+      allow read: if authed();
+      allow create: if authed() && isDocOwner(request.resource.data);
+      allow update, delete: if authed() && (isDocOwner(resource.data) || isAdmin());
+    }
+
+    match /ratings/{ratingId} {
+      allow create: if authed() && (isDocOwner(request.resource.data) || meetupParticipant(request.resource.data));
+      allow read: if authed() && (isDocOwner(resource.data) || meetupParticipant(resource.data) || isAdmin());
+      allow update, delete: if authed() && (isDocOwner(resource.data) || isAdmin());
+
+      match /entries/{entryId} {
+        allow read, write: if authed() && (
+          isDocOwner(get(/databases/$(database)/documents/ratings/$(ratingId)).data) ||
+          meetupParticipant(get(/databases/$(database)/documents/ratings/$(ratingId)).data) ||
+          isAdmin()
+        );
+      }
+    }
+
+    match /ratings_meetups/{meetupId} {
+      allow create: if authed() && (isDocOwner(request.resource.data) || meetupParticipant(request.resource.data));
+      allow read: if authed() && (isDocOwner(resource.data) || meetupParticipant(resource.data) || isAdmin());
+      allow update, delete: if authed() && (isDocOwner(resource.data) || isAdmin());
+
+      match /entries/{entryId} {
+        allow read, write: if authed() && (
+          isDocOwner(get(/databases/$(database)/documents/ratings_meetups/$(meetupId)).data) ||
+          meetupParticipant(get(/databases/$(database)/documents/ratings_meetups/$(meetupId)).data) ||
+          isAdmin()
+        );
+      }
+    }
+
+    match /incidents/{incidentId} {
+      allow create: if authed() && isDocOwner(request.resource.data);
+      allow read: if authed() && (isDocOwner(resource.data) || isAdmin());
+      allow update, delete: if authed() && (isDocOwner(resource.data) || isAdmin());
+    }
+
+    match /bugReports/{reportId} {
+      allow create: if authed() && isDocOwner(request.resource.data);
+      allow read: if authed() && (isDocOwner(resource.data) || isAdmin());
+      allow update, delete: if authed() && (isDocOwner(resource.data) || isAdmin());
+    }
+
+    match /feedback/{feedbackId} {
+      allow create: if authed() && isDocOwner(request.resource.data);
+      allow read: if authed() && (isDocOwner(resource.data) || isAdmin());
+      allow update, delete: if authed() && (isDocOwner(resource.data) || isAdmin());
+    }
+
+    // --- APP METRICS / UTIL ---
+    match /metricsEvents/{eventId} {
+      allow read, write: if authed();
+    }
+
+    match /dashboard/{docId} {
+      allow read: if authed();
+      allow write: if false;
+    }
+
+    match /dashboard/announcements/items/{announcementId} {
+      allow read: if authed();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /nearbyCandidates/{docId} {
+      allow read: if authed();
+      allow write: if false;
+    }
+
+    match /healthcheck/{docId} {
+      allow read: if authed();
+      allow write: if false;
+    }
+
+    match /devPush/{docId} {
+      allow read, write: if authed();
+    }
+
+    match /cells/{cellId} {
+      allow read: if authed();
+      allow write: if false;
+    }
+
+    match /_bridges/{docId} {
+      allow read: if authed();
+      allow write: if false;
+    }
+
+    // Deny unknown paths by default.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

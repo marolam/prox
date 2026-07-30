@@ -1,0 +1,9 @@
+﻿{
+    "version":  "0.18.0",
+    "build":  "8",
+    "releaseDate":  "2026-07-08",
+    "commit":  "5f0cc0b",
+    "publicApkUrl":  "https://github.com/marolam/prox/releases/latest/download/app-release.apk",
+    "testerGuideUrl":  "https://prox-us.com/tester-guide",
+    "testerSupportUrl":  "https://prox-us.com/tester-support"
+}

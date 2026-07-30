@@ -28,6 +28,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Locate Flutter project root
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f pubspec.yaml ]]; then
+            echo "PROJECT_DIR=." >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          project_dir="$(git ls-files '**/pubspec.yaml' | grep -vE '(^|/)(build|.dart_tool|node_modules)/' | head -n 1 | xargs -I{} dirname {})"
+          if [[ -z "${project_dir:-}" ]]; then
+            echo "No pubspec.yaml found in repository checkout." >&2
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$project_dir" >> "$GITHUB_ENV"
+          echo "Detected Flutter project directory: $project_dir"
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -35,12 +53,15 @@ jobs:
           cache: true
 
       - name: Flutter pub get
+        working-directory: ${{ env.PROJECT_DIR }}
         run: flutter pub get
 
       - name: Analyze
+        working-directory: ${{ env.PROJECT_DIR }}
         run: flutter analyze
 
       - name: Compile iOS (no codesign)
+        working-directory: ${{ env.PROJECT_DIR }}
         run: >-
           flutter build ios --release --no-codesign
           --dart-define=PROX_TESTER=true
@@ -48,6 +69,7 @@ jobs:
           --dart-define=BUILD_FLAVOR=${{ github.event.inputs.build_flavor || 'ios_cloud' }}
 
       - name: Package iOS app bundle artifact
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
           cd build/ios/iphoneos
           ditto -c -k --sequesterRsrc --keepParent Runner.app Runner-no-codesign.zip
@@ -56,5 +78,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Runner-no-codesign
-          path: build/ios/iphoneos/Runner-no-codesign.zip
+          path: ${{ env.PROJECT_DIR }}/build/ios/iphoneos/Runner-no-codesign.zip
           if-no-files-found: error
