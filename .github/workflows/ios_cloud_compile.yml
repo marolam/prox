@@ -1,0 +1,93 @@
+name: iOS Cloud Compile
+
+on:
+  workflow_dispatch:
+    inputs:
+      flutter_channel:
+        description: Flutter channel to use
+        required: false
+        default: stable
+      build_flavor:
+        description: Build flavor dart define
+        required: false
+        default: ios_cloud
+  pull_request:
+    paths:
+      - 'ios/**'
+      - 'lib/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - '.github/workflows/ios_cloud_compile.yml'
+
+jobs:
+  compile-ios:
+    runs-on: macos-15
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Locate Flutter project root
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f pubspec.yaml ]]; then
+            echo "PROJECT_DIR=." >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          project_dir="$(git ls-files '**/pubspec.yaml' | grep -vE '(^|/)(build|.dart_tool|node_modules)/' | head -n 1 | xargs -I{} dirname {})"
+          if [[ -z "${project_dir:-}" ]]; then
+            echo "No pubspec.yaml found in repository checkout." >&2
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$project_dir" >> "$GITHUB_ENV"
+          echo "Detected Flutter project directory: $project_dir"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ github.event.inputs.flutter_channel || 'stable' }}
+          cache: true
+
+      - name: Flutter pub get
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: ${{ env.PROJECT_DIR }}
+        continue-on-error: true
+        run: flutter analyze
+
+      - name: Use CocoaPods (disable SwiftPM integration)
+        run: flutter config --no-enable-swift-package-manager
+
+      - name: Compile iOS (no codesign)
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: >-
+          flutter build ios --simulator --debug
+          --dart-define=PROX_TESTER=true
+          --dart-define=PROX_TESTER_BUILD=true
+          --dart-define=BUILD_FLAVOR=${{ github.event.inputs.build_flavor || 'ios_cloud' }}
+
+      - name: Package iOS app bundle artifact
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          if [ -d build/ios/iphonesimulator/Runner.app ]; then
+            cd build/ios/iphonesimulator
+          elif [ -d build/ios/iphoneos/Runner.app ]; then
+            cd build/ios/iphoneos
+          else
+            echo "Runner.app not found in iphonesimulator or iphoneos outputs"
+            exit 1
+          fi
+          ditto -c -k --sequesterRsrc --keepParent Runner.app Runner-no-codesign.zip
+
+      - name: Upload iOS bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Runner-no-codesign
+          path: ${{ env.PROJECT_DIR }}/build/ios/**/Runner-no-codesign.zip
+          if-no-files-found: error

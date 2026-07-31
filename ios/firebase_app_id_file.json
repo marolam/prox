@@ -1,0 +1,7 @@
+{
+  "file_generated_by": "firebase apps:create / apps:sdkconfig",
+  "purpose": "FirebaseAppID & ProjectID for this Firebase app in this directory",
+  "GOOGLE_APP_ID": "1:12575732319:ios:c647ed1f20cde1f45561ea",
+  "FIREBASE_PROJECT_ID": "prox-42bef",
+  "GCM_SENDER_ID": "12575732319"
+}

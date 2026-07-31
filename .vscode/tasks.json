@@ -1,0 +1,243 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Flutter Build APK",
+			"type": "shell",
+			"command": "flutter",
+			"args": [
+				"build",
+				"apk",
+				"--release"
+			],
+			"problemMatcher": [
+				"$dart"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Flutter Build iOS",
+			"type": "shell",
+			"command": "flutter",
+			"args": [
+				"build",
+				"ipa",
+				"--release"
+			],
+			"problemMatcher": [
+				"$dart"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Flutter Build Release APK",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\tools\\scripts\\build_release_apk.ps1"
+			],
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Backend Smoke: Admin Observability Endpoints",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\tools\\scripts\\check_admin_observability_endpoints.ps1"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "Backend Smoke (Strict Auth): Admin Observability Endpoints",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\tools\\scripts\\check_admin_observability_endpoints.ps1",
+				"-FailIfNoAuthToken"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "Android Virtual Test Env (Tester Build)",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\tools\\scripts\\setup_virtual_test_env.ps1",
+				"-AvdName",
+				"prox_api35",
+				"-BuildMode",
+				"debug"
+			],
+			"problemMatcher": [
+				"$dart"
+			]
+		},
+		{
+			"label": "Flutter Test: Tutorial + Referral Guards",
+			"type": "shell",
+			"command": "flutter",
+			"args": [
+				"test",
+				"test/welcome_tutorial_gating_test.dart",
+				"test/referral_link_capture_parse_test.dart"
+			],
+			"problemMatcher": [
+				"$dart"
+			]
+		},
+		{
+			"label": "Release Gate: APK Endpoint (Public)",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\tools\\scripts\\check_apk_download_endpoint.ps1",
+				"-Url",
+				"https://example.com/path/app-release.apk",
+				"-ExpectedAccess",
+				"public"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "Release Gate: APK Endpoint (Restricted)",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\tools\\scripts\\check_apk_download_endpoint.ps1",
+				"-Url",
+				"https://example.com/path/app-release.apk",
+				"-ExpectedAccess",
+				"restricted"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "Release Signoff: Build + Endpoint + Report",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\tools\\scripts\\run_release_signoff.ps1",
+				"-PublicApkUrl",
+				"https://example.com/public/app-release.apk",
+				"-RestrictedApkUrl",
+				"https://example.com/tester/app-release.apk",
+				"-PreviousApkUrl",
+				"https://example.com/public/previous-app-release.apk",
+				"-FatalLogGate",
+				"PASS"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "Release Signoff: Payment-Aware (Strict Env Gate)",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\tools\\scripts\\run_release_signoff.ps1",
+				"-PublicApkUrl",
+				"https://example.com/public/app-release.apk",
+				"-RestrictedApkUrl",
+				"https://example.com/tester/app-release.apk",
+				"-PreviousApkUrl",
+				"https://example.com/public/previous-app-release.apk",
+				"-FatalLogGate",
+				"PASS",
+				"-RequireSquareSecrets",
+				"-RequireStableWebhookDomain"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "Android Emulator Smoke: Boot + Install + Crash Scan",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\tools\\scripts\\run_emulator_smoke.ps1",
+				"-AvdName",
+				"prox_api35",
+				"-BuildMode",
+				"debug"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "Dev Release Build: Real External Checkout",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\tools\\scripts\\build_dev_release_apk.ps1",
+				"-ExternalCheckoutSessionUrl",
+				"https://<region>-<project>.cloudfunctions.net/createExternalCheckoutSession"
+			],
+			"problemMatcher": [
+				"$dart"
+			]
+		},
+		{
+			"label": "Payment Prep: Real In-App Transaction",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\tools\\scripts\\prep_real_payment_test.ps1",
+				"-RunHttpPreflight"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "Payment Chain: Preflight + Build + Strict Signoff",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\tools\\scripts\\run_real_payment_readiness.ps1",
+				"-ExternalCheckoutSessionUrl",
+				"https://<region>-<project>.cloudfunctions.net/createExternalCheckoutSession",
+				"-PublicApkUrl",
+				"https://example.com/public/app-release.apk",
+				"-RestrictedApkUrl",
+				"https://example.com/tester/app-release.apk",
+				"-PreviousApkUrl",
+				"https://example.com/public/previous-app-release.apk"
+			],
+			"problemMatcher": []
+		}
+	]
+}

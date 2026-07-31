@@ -1,0 +1,154 @@
+name: iOS Signed Device IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      flutter_channel:
+        description: Flutter channel to use
+        required: false
+        default: stable
+      build_flavor:
+        description: Build flavor dart define
+        required: false
+        default: ios_device
+      export_method:
+        description: Xcode export method (ad-hoc, development, app-store)
+        required: false
+        default: ad-hoc
+
+jobs:
+  signed-ipa:
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    env:
+      BUNDLE_ID: com.prox.app
+      TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Locate Flutter project root
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f pubspec.yaml ]]; then
+            echo "PROJECT_DIR=." >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          project_dir="$(git ls-files '**/pubspec.yaml' | grep -vE '(^|/)(build|.dart_tool|node_modules)/' | head -n 1 | xargs -I{} dirname {})"
+          if [[ -z "${project_dir:-}" ]]; then
+            echo "No pubspec.yaml found in repository checkout." >&2
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$project_dir" >> "$GITHUB_ENV"
+          echo "Detected Flutter project directory: $project_dir"
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${{ secrets.IOS_CERT_P12_BASE64 }}" ]] || { echo "Missing required secret: IOS_CERT_P12_BASE64" >&2; exit 1; }
+          [[ -n "${{ secrets.IOS_CERT_PASSWORD }}" ]] || { echo "Missing required secret: IOS_CERT_PASSWORD" >&2; exit 1; }
+          [[ -n "${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}" ]] || { echo "Missing required secret: IOS_PROVISION_PROFILE_BASE64" >&2; exit 1; }
+          [[ -n "${{ secrets.IOS_TEAM_ID }}" ]] || { echo "Missing required secret: IOS_TEAM_ID" >&2; exit 1; }
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ github.event.inputs.flutter_channel || 'stable' }}
+          cache: true
+
+      - name: Flutter pub get
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter pub get
+
+      - name: Use CocoaPods (disable SwiftPM integration)
+        run: flutter config --no-enable-swift-package-manager
+
+      - name: Install signing certificate and provisioning profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          CERT_DIR="$RUNNER_TEMP/signing"
+          mkdir -p "$CERT_DIR"
+
+          echo -n "${{ secrets.IOS_CERT_P12_BASE64 }}" | base64 --decode > "$CERT_DIR/cert.p12"
+          echo -n "${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}" | base64 --decode > "$CERT_DIR/profile.mobileprovision"
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+          security create-keychain -p "$RUNNER_TEMP" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$RUNNER_TEMP" "$KEYCHAIN_PATH"
+          security import "$CERT_DIR/cert.p12" -P "${{ secrets.IOS_CERT_PASSWORD }}" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          security default-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$RUNNER_TEMP" "$KEYCHAIN_PATH"
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$CERT_DIR/profile.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/"
+
+          PROFILE_PLIST="$RUNNER_TEMP/profile.plist"
+          security cms -D -i "$CERT_DIR/profile.mobileprovision" > "$PROFILE_PLIST"
+          PROFILE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$PROFILE_PLIST")"
+          PROFILE_UUID="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$PROFILE_PLIST")"
+
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
+
+      - name: Build signed IPA
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPORT_METHOD="${{ github.event.inputs.export_method || 'ad-hoc' }}"
+
+          cat > ios/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>${EXPORT_METHOD}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>teamID</key>
+            <string>${TEAM_ID}</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${BUNDLE_ID}</key>
+              <string>${PROFILE_NAME}</string>
+            </dict>
+            <key>compileBitcode</key>
+            <false/>
+          </dict>
+          </plist>
+          EOF
+
+          flutter build ipa --release \
+            --export-options-plist=ios/ExportOptions.plist \
+            --dart-define=PROX_TESTER=true \
+            --dart-define=PROX_TESTER_BUILD=true \
+            --dart-define=BUILD_FLAVOR=${{ github.event.inputs.build_flavor || 'ios_device' }}
+
+      - name: Upload signed IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Runner-signed-ipa
+          path: |
+            ${{ env.PROJECT_DIR }}/build/ios/ipa/*.ipa
+            ${{ env.PROJECT_DIR }}/build/ios/archive/*.xcarchive
+          if-no-files-found: error
+
+      - name: Cleanup keychain
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${KEYCHAIN_PATH:-}" && -f "$KEYCHAIN_PATH" ]]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi
