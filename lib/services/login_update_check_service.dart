@@ -51,9 +51,9 @@ class LoginUpdateCheckService with WidgetsBindingObserver {
   static const String _configuredPublicApkUrl =
       String.fromEnvironment("PROX_PUBLIC_APK_URL", defaultValue: "");
   static const String _latestReleasePageUrl =
-      "https://github.com/marolam/prox-us/releases/latest";
+      "https://github.com/marolam/prox/releases/latest";
   static const String _latestReleaseApiUrl =
-      "https://api.github.com/repos/marolam/prox-us/releases/latest";
+      "https://api.github.com/repos/marolam/prox/releases/latest";
   static const int _defaultPollMinutes = 20;
 
   GlobalKey<NavigatorState>? _navigatorKey;
@@ -151,10 +151,14 @@ class LoginUpdateCheckService with WidgetsBindingObserver {
     try {
       final gh = await _fetchLatestFromGitHub();
       if (gh != null) {
-        if (gh.version.isNotEmpty) {
+        // Never let a fallback source reduce the currently known latest version.
+        // Keep the greater semantic version between RC and GitHub values.
+        if (gh.version.isNotEmpty &&
+            _compareVersions(gh.version, latestVersion) > 0) {
           latestVersion = gh.version;
         }
-        if (gh.downloadUrl.isNotEmpty) {
+        if (gh.downloadUrl.isNotEmpty &&
+            _compareVersions(gh.version, latestVersion) >= 0) {
           downloadUrl = gh.downloadUrl;
         }
       }
