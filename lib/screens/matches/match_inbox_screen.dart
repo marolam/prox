@@ -63,6 +63,7 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
   Timer? _startupWindowTick;
   double _holdProgress01 = 0.0;
   bool _holdTriggeredActivation = false;
+  bool _skipNextCircleTap = false;
   bool _cycleUnlocked = false;
   bool _startupOffPromptActive = true;
   late final DateTime _startupOffTapUntil;
@@ -504,6 +505,11 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
   }
 
   void _onCircleTap(MatchDiscoverySettings discovery) {
+    if (_skipNextCircleTap) {
+      _skipNextCircleTap = false;
+      return;
+    }
+
     final bool isNormalPassive =
         discovery.modeKind == MatchingModeKind.normal &&
             discovery.normalMode == NormalMatchMode.passive;
@@ -561,6 +567,7 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
 
     MatchingModeService.instance.setMode(ProxMatchingMode.active);
     _cycleUnlocked = true;
+    _skipNextCircleTap = true;
     _snack("Active mode enabled.");
     if (mounted) setState(() {});
   }
@@ -1259,46 +1266,52 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
             ),
             if (isNormalMode && _cycleUnlocked) ...[
               const SizedBox(height: 10),
-              SegmentedButton<NormalMatchMode>(
-                segments: const [
-                  ButtonSegment(
-                    value: NormalMatchMode.passive,
-                    icon: Icon(Icons.spa_outlined),
-                    label: Text("Passive"),
-                  ),
-                  ButtonSegment(
-                    value: NormalMatchMode.active,
-                    icon: Icon(Icons.flash_on_outlined),
-                    label: Text("Active"),
-                  ),
-                ],
-                selected: <NormalMatchMode>{discovery.normalMode},
-                onSelectionChanged: (next) {
-                  if (next.isEmpty) return;
-                  _setNormalMode(next.first);
-                },
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SegmentedButton<NormalMatchMode>(
+                  segments: const [
+                    ButtonSegment(
+                      value: NormalMatchMode.passive,
+                      icon: Icon(Icons.spa_outlined),
+                      label: Text("Passive"),
+                    ),
+                    ButtonSegment(
+                      value: NormalMatchMode.active,
+                      icon: Icon(Icons.flash_on_outlined),
+                      label: Text("Active"),
+                    ),
+                  ],
+                  selected: <NormalMatchMode>{discovery.normalMode},
+                  onSelectionChanged: (next) {
+                    if (next.isEmpty) return;
+                    _setNormalMode(next.first);
+                  },
+                ),
               ),
             ],
             if (isListenMode) ...[
               const SizedBox(height: 10),
-              SegmentedButton<ListenMatchRole>(
-                segments: const [
-                  ButtonSegment(
-                    value: ListenMatchRole.speak,
-                    icon: Icon(Icons.mic_none),
-                    label: Text("Speak"),
-                  ),
-                  ButtonSegment(
-                    value: ListenMatchRole.listen,
-                    icon: Icon(Icons.hearing),
-                    label: Text("Listen"),
-                  ),
-                ],
-                selected: <ListenMatchRole>{discovery.listenRole},
-                onSelectionChanged: (next) {
-                  if (next.isEmpty) return;
-                  _setListenRole(next.first);
-                },
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SegmentedButton<ListenMatchRole>(
+                  segments: const [
+                    ButtonSegment(
+                      value: ListenMatchRole.speak,
+                      icon: Icon(Icons.mic_none),
+                      label: Text("Speak"),
+                    ),
+                    ButtonSegment(
+                      value: ListenMatchRole.listen,
+                      icon: Icon(Icons.hearing),
+                      label: Text("Listen"),
+                    ),
+                  ],
+                  selected: <ListenMatchRole>{discovery.listenRole},
+                  onSelectionChanged: (next) {
+                    if (next.isEmpty) return;
+                    _setListenRole(next.first);
+                  },
+                ),
               ),
               const SizedBox(height: 8),
               Text(

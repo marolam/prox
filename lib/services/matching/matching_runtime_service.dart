@@ -16,6 +16,7 @@ class MatchingRuntimeService {
   final UserSettingsService _settings = UserSettingsService.instance;
   static const Duration _profileFetchTimeout = Duration(seconds: 4);
   static const Duration _sharedKeywordsTimeout = Duration(seconds: 5);
+  static const Duration _travelRecentMovementWindow = Duration(minutes: 30);
   static const int _maxTreasureCandidates = 24;
 
   List<String> _myKeywords = const <String>[];
@@ -63,7 +64,7 @@ class MatchingRuntimeService {
         final ts = d.presenceTs;
         if (ts == null) return false;
         final bool recentlyMoving =
-            now.difference(ts) <= const Duration(minutes: 3);
+            now.difference(ts) <= _travelRecentMovementWindow;
         return recentlyMoving;
       }).toList(growable: false);
     }

@@ -471,7 +471,7 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                             crossAxisCount: 2,
                             crossAxisSpacing: 12,
                             mainAxisSpacing: 12,
-                            childAspectRatio: 1.2,
+                            childAspectRatio: 0.95,
                             physics: const NeverScrollableScrollPhysics(),
                             children: [
                               ProxGlassCard(
@@ -560,24 +560,27 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                                         ?.copyWith(fontWeight: FontWeight.w800),
                                   ),
                                   const SizedBox(height: 8),
-                                  SegmentedButton<ListenMatchRole>(
-                                    segments: const [
-                                      ButtonSegment(
-                                        value: ListenMatchRole.speak,
-                                        icon: Icon(Icons.mic_none),
-                                        label: Text("Speak"),
-                                      ),
-                                      ButtonSegment(
-                                        value: ListenMatchRole.listen,
-                                        icon: Icon(Icons.hearing),
-                                        label: Text("Listen"),
-                                      ),
-                                    ],
-                                    selected: <ListenMatchRole>{_listenRole},
-                                    onSelectionChanged: (next) {
-                                      if (next.isNotEmpty)
-                                        _setListenRole(next.first);
-                                    },
+                                  SingleChildScrollView(
+                                    scrollDirection: Axis.horizontal,
+                                    child: SegmentedButton<ListenMatchRole>(
+                                      segments: const [
+                                        ButtonSegment(
+                                          value: ListenMatchRole.speak,
+                                          icon: Icon(Icons.mic_none),
+                                          label: Text("Speak"),
+                                        ),
+                                        ButtonSegment(
+                                          value: ListenMatchRole.listen,
+                                          icon: Icon(Icons.hearing),
+                                          label: Text("Listen"),
+                                        ),
+                                      ],
+                                      selected: <ListenMatchRole>{_listenRole},
+                                      onSelectionChanged: (next) {
+                                        if (next.isNotEmpty)
+                                          _setListenRole(next.first);
+                                      },
+                                    ),
                                   ),
                                   const SizedBox(height: 8),
                                   Text(
@@ -610,22 +613,25 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                                         ?.copyWith(fontWeight: FontWeight.w800),
                                   ),
                                   const SizedBox(height: 8),
-                                  SegmentedButton<NormalMatchMode>(
-                                    segments: const [
-                                      ButtonSegment(
-                                          value: NormalMatchMode.passive,
-                                          label: Text("Passive")),
-                                      ButtonSegment(
-                                          value: NormalMatchMode.active,
-                                          label: Text("Active")),
-                                    ],
-                                    selected: <NormalMatchMode>{_normalMode},
-                                    onSelectionChanged: _activeLocked
-                                        ? null
-                                        : (next) {
-                                            if (next.isNotEmpty)
-                                              _setNormalMode(next.first);
-                                          },
+                                  SingleChildScrollView(
+                                    scrollDirection: Axis.horizontal,
+                                    child: SegmentedButton<NormalMatchMode>(
+                                      segments: const [
+                                        ButtonSegment(
+                                            value: NormalMatchMode.passive,
+                                            label: Text("Passive")),
+                                        ButtonSegment(
+                                            value: NormalMatchMode.active,
+                                            label: Text("Active")),
+                                      ],
+                                      selected: <NormalMatchMode>{_normalMode},
+                                      onSelectionChanged: _activeLocked
+                                          ? null
+                                          : (next) {
+                                              if (next.isNotEmpty)
+                                                _setNormalMode(next.first);
+                                            },
+                                    ),
                                   ),
                                   const SizedBox(height: 8),
                                   Text(
