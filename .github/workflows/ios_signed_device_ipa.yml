@@ -72,6 +72,44 @@ jobs:
           channel: ${{ github.event.inputs.flutter_channel || 'stable' }}
           cache: true
 
+      - name: Select Xcode with iOS 26+ SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          shopt -s nullglob
+          xcode_apps=(/Applications/Xcode*.app)
+          shopt -u nullglob
+
+          if [[ ${#xcode_apps[@]} -eq 0 ]]; then
+            echo "No Xcode app installations found under /Applications." >&2
+            exit 1
+          fi
+
+          # Prefer an explicit Xcode 26+ install if available.
+          selected=""
+          for app in /Applications/Xcode_26*.app /Applications/Xcode_27*.app /Applications/Xcode_28*.app; do
+            if [[ -d "$app" ]]; then
+              selected="$app"
+            fi
+          done
+
+          # Fall back to the newest installed Xcode if no 26+ naming match exists.
+          if [[ -z "$selected" ]]; then
+            selected="$(ls -1d /Applications/Xcode*.app | sort -V | tail -n 1)"
+          fi
+
+          echo "Using Xcode: $selected"
+          sudo xcode-select -s "$selected/Contents/Developer"
+
+          xcodebuild -version
+          xcodebuild -showsdks
+
+          if ! xcodebuild -showsdks | grep -Eq 'iphoneos(26|[3-9][0-9])'; then
+            echo "iOS 26+ SDK is required for App Store Connect/TestFlight uploads." >&2
+            exit 1
+          fi
+
       - name: Flutter pub get
         working-directory: ${{ env.PROJECT_DIR }}
         run: flutter pub get
