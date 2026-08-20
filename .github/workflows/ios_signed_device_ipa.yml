@@ -15,6 +15,10 @@ on:
         description: Xcode export method (ad-hoc, development, app-store)
         required: false
         default: ad-hoc
+      upload_to_testflight:
+        description: Upload resulting IPA to TestFlight (true/false)
+        required: false
+        default: "false"
 
 jobs:
   signed-ipa:
@@ -22,7 +26,7 @@ jobs:
     timeout-minutes: 60
 
     env:
-      BUNDLE_ID: com.prox.app
+      BUNDLE_ID: com.prox-us.prox
       TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
 
     steps:
@@ -55,6 +59,12 @@ jobs:
           [[ -n "${{ secrets.IOS_CERT_PASSWORD }}" ]] || { echo "Missing required secret: IOS_CERT_PASSWORD" >&2; exit 1; }
           [[ -n "${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}" ]] || { echo "Missing required secret: IOS_PROVISION_PROFILE_BASE64" >&2; exit 1; }
           [[ -n "${{ secrets.IOS_TEAM_ID }}" ]] || { echo "Missing required secret: IOS_TEAM_ID" >&2; exit 1; }
+
+          if [[ "${{ github.event.inputs.upload_to_testflight || 'false' }}" == "true" ]]; then
+            [[ -n "${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}" ]] || { echo "Missing required secret for TestFlight upload: APP_STORE_CONNECT_API_KEY_ID" >&2; exit 1; }
+            [[ -n "${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}" ]] || { echo "Missing required secret for TestFlight upload: APP_STORE_CONNECT_ISSUER_ID" >&2; exit 1; }
+            [[ -n "${{ secrets.APP_STORE_CONNECT_API_KEY_P8_BASE64 }}" ]] || { echo "Missing required secret for TestFlight upload: APP_STORE_CONNECT_API_KEY_P8_BASE64" >&2; exit 1; }
+          fi
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -144,6 +154,41 @@ jobs:
             ${{ env.PROJECT_DIR }}/build/ios/ipa/*.ipa
             ${{ env.PROJECT_DIR }}/build/ios/archive/*.xcarchive
           if-no-files-found: error
+
+      - name: Upload to TestFlight
+        if: ${{ github.event.inputs.upload_to_testflight == 'true' }}
+        shell: bash
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event.inputs.export_method || 'ad-hoc' }}" != "app-store" ]]; then
+            echo "TestFlight upload requires export_method=app-store." >&2
+            exit 1
+          fi
+
+          API_KEY_DIR="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$API_KEY_DIR"
+
+          API_KEY_ID="${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}"
+          ISSUER_ID="${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}"
+          API_KEY_PATH="$API_KEY_DIR/AuthKey_${API_KEY_ID}.p8"
+
+          echo -n "${{ secrets.APP_STORE_CONNECT_API_KEY_P8_BASE64 }}" | base64 --decode > "$API_KEY_PATH"
+          chmod 600 "$API_KEY_PATH"
+
+          IPA_PATH="$(ls -1 build/ios/ipa/*.ipa | head -n 1)"
+          if [[ -z "${IPA_PATH:-}" ]]; then
+            echo "No IPA found at build/ios/ipa/*.ipa" >&2
+            exit 1
+          fi
+
+          xcrun altool \
+            --upload-app \
+            -f "$IPA_PATH" \
+            -t ios \
+            --apiKey "$API_KEY_ID" \
+            --apiIssuer "$ISSUER_ID"
 
       - name: Cleanup keychain
         if: always()
