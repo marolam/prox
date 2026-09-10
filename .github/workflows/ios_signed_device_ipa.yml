@@ -3,6 +3,10 @@ name: iOS Signed Device IPA
 on:
   workflow_dispatch:
     inputs:
+      inspect_testflight:
+        description: Read TestFlight group links only (no build or upload)
+        type: boolean
+        default: false
       build_flavor:
         description: Build flavor dart define
         required: false
@@ -17,7 +21,27 @@ on:
         default: "false"
 
 jobs:
+  inspect-testflight:
+    if: ${{ inputs.inspect_testflight }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify read-only lookup tooling
+        run: node --test tools/scripts/tests/test_testflight_inspection.mjs
+      - name: Read TestFlight group links
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_P8_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8_BASE64 }}
+        run: node tools/scripts/inspect_testflight.mjs
+
   backend-safety:
+    if: ${{ !inputs.inspect_testflight }}
     uses: ./.github/workflows/backend_safety_checks.yml
 
   signed-ipa:

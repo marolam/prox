@@ -210,3 +210,4 @@ foreach ($invalid in @(
 }
 
 Write-Host 'Release policy regression checks passed: default Android isolation, paired parity, legacy Android enforcement, preserved iOS/defaults/conditions/groups, idempotent merges, conflict rejection, and pinned version URLs. All checks used PrepareOnly; no Firebase command ran.'
+exit 0
