@@ -1,12 +1,32 @@
 import "dart:async";
+import "package:flutter/foundation.dart";
 
 import "package:prox/models/user_settings.dart";
 import "package:prox/services/device_storage_service.dart";
 import "package:prox/services/pro_mode_preview_access.dart";
+import "package:prox/services/runtime_diagnostics_service.dart";
 
 class UserSettingsService {
-  UserSettingsService._();
+  UserSettingsService._({
+    Future<void> Function(UserSettings)? persistSettings,
+    bool Function()? proPreviewAllowed,
+  }) : _persistSettings = persistSettings,
+       _proPreviewAllowed = proPreviewAllowed;
+  @visibleForTesting
+  factory UserSettingsService.forTesting({
+    UserSettings initial = const UserSettings.defaults(),
+    Future<void> Function(UserSettings)? persistSettings,
+    bool Function()? proPreviewAllowed,
+  }) =>
+      UserSettingsService._(
+          persistSettings: persistSettings ?? (_) async {},
+          proPreviewAllowed: proPreviewAllowed,
+        )
+        .._settings = initial
+        .._loadedFromStorage = true;
   static final UserSettingsService instance = UserSettingsService._();
+  final Future<void> Function(UserSettings)? _persistSettings;
+  final bool Function()? _proPreviewAllowed;
 
   static const String _storageKey = "user_settings";
 
@@ -16,32 +36,145 @@ class UserSettingsService {
 
   bool _loadedFromStorage = false;
   bool _ensureLoadQueued = false;
+  Future<void>? _loading;
+  int _revision = 0;
+  Future<void> _persisting = Future<void>.value();
+  String? _settingsOwnerUid;
+  bool _entitlementsManaged = false;
+  Map<String, dynamic> _paidEntitlements = const {};
 
   UserSettings get current => _settings;
 
+  Future<void> _persist(UserSettings settings) {
+    final snapshot = {...settings.toJson(), '_accountUid': _settingsOwnerUid};
+    return _persisting = _persisting
+        .catchError((Object _) {})
+        .then(
+          (_) => _persistSettings != null
+              ? _persistSettings(settings)
+              : DeviceStorageService.instance.set(_storageKey, snapshot),
+        );
+  }
+
+  /// Starts an account-scoped entitlement session. Device appearance preferences
+  /// survive a switch; private notes, peer prompt history and paid access do not.
+  Future<void> bindAccountSession(String? uid) {
+    _revision++;
+    final clearPrivate = uid == null || _settingsOwnerUid != uid;
+    _settingsOwnerUid = uid;
+    _entitlementsManaged = true;
+    _paidEntitlements = const {};
+    _loadedFromStorage = true;
+    var next = _settings;
+    if (clearPrivate) {
+      next = UserSettings.fromJson({
+        ...next.toJson(),
+        'businessAvatarNote': null,
+        'businessAvatarEnabled': false,
+        'seenBusinessPrompts': <String, bool>{},
+        'uxMode': AppUxMode.party.name,
+      });
+    }
+    _emit(next.copyWith(), persist: false);
+    return _persist(_settings);
+  }
+
+  /// A single snapshot updates every paid matching flag and clamps currently
+  /// selected controls. Legacy setters cannot overwrite this server snapshot.
+  void applyBillingEntitlements(String uid, Map<String, dynamic>? data) {
+    if (!_entitlementsManaged || _settingsOwnerUid != uid) return;
+    _paidEntitlements = Map.unmodifiable(data ?? const <String, dynamic>{});
+    final next = _withBillingEntitlements(_settings, _paidEntitlements);
+    if (next == _settings) return;
+    _emit(next);
+  }
+
+  UserSettings _withBillingEntitlements(
+    UserSettings settings,
+    Map<String, dynamic> data,
+  ) {
+    final cur = settings.matchDiscovery;
+    final highRadius = data['highRadiusUnlocked'] == true;
+    final single = data['singleKeywordMatchModeUnlocked'] == true;
+    final reciprocal = data['reciprocalKeywordMatchModeUnlocked'] == true;
+    final chain = data['keywordChainMatchModeUnlocked'] == true;
+    final keywordAllowed = switch (cur.keywordMode) {
+      KeywordMatchMode.singleKeyword => single,
+      KeywordMatchMode.reciprocalOpposite => reciprocal,
+      KeywordMatchMode.keywordChain => chain,
+      _ => true,
+    };
+    final maxRadius = MatchDiscoverySettings.allowedMaxRadiusMiles(
+      highRadiusUnlocked: highRadius,
+      businessOnly: cur.businessOnly,
+      modeKind: cur.modeKind,
+      normalMode: cur.normalMode,
+    );
+    return settings.copyWith(
+      matchDiscovery: cur.copyWith(
+        highRadiusUnlocked: highRadius,
+        singleKeywordMatchUnlocked: single,
+        reciprocalMatchUnlocked: reciprocal,
+        keywordChainUnlocked: chain,
+        keywordMode: keywordAllowed
+            ? cur.keywordMode
+            : KeywordMatchMode.similar,
+        radiusMiles: cur.radiusMiles
+            .clamp(MatchDiscoverySettings.minRadiusMiles, maxRadius)
+            .toDouble(),
+      ),
+    );
+  }
+
+  /// Clears device-local account notes and settings once deletion is confirmed.
+  Future<void> resetAfterAccountDeletion() {
+    _revision++;
+    _loadedFromStorage = true;
+    _settings = const UserSettings.defaults();
+    _settingsOwnerUid = null;
+    _paidEntitlements = const {};
+    if (!_controller.isClosed) _controller.add(_settings);
+    return _persist(_settings);
+  }
+
   bool get canUseProModePreview =>
+      _proPreviewAllowed?.call() ??
       ProModePreviewAccess.instance.isAllowedForCurrentUser();
 
-  Future<void> ensureLoaded() async {
-    if (_loadedFromStorage) return;
-    _loadedFromStorage = true;
+  Future<void> ensureLoaded() {
+    if (_loadedFromStorage) return Future<void>.value();
+    return _loading ??= _loadSettings();
+  }
 
-    await DeviceStorageService.instance.load();
-    final raw = DeviceStorageService.instance.get(_storageKey);
-    if (raw != null) {
-      try {
-        final loaded = UserSettings.fromJson(raw);
-        final normalized = _normalizeProModeAccess(loaded);
-        _settings = normalized;
-        if (normalized != loaded) {
-          await DeviceStorageService.instance
-              .set(_storageKey, normalized.toJson());
+  Future<void> _loadSettings() async {
+    final revisionAtStart = _revision;
+    try {
+      await DeviceStorageService.instance.load();
+      final raw = DeviceStorageService.instance.get(_storageKey);
+      if (raw != null && revisionAtStart == _revision) {
+        try {
+          final loaded = UserSettings.fromJson(raw);
+          _settingsOwnerUid = raw is Map ? raw['_accountUid'] as String? : null;
+          // Persisted paid flags are never evidence of current server access.
+          final normalized = _withBillingEntitlements(
+            _normalizeProModeAccess(loaded),
+            const {},
+          );
+          _settings = normalized;
+          if (normalized != loaded) {
+            await _persist(normalized);
+          }
+        } catch (_) {
+          _settings = const UserSettings.defaults();
         }
-      } catch (_) {
-        _settings = const UserSettings.defaults();
       }
+      _loadedFromStorage = true;
+      // Loading previously emitted the identical object, which _emit suppressed.
+      if (!_controller.isClosed) _controller.add(_settings);
+    } finally {
+      _loading = null;
+      _ensureLoadQueued = false;
     }
-    _emit(_settings, persist: false);
   }
 
   Stream<UserSettings> watch() {
@@ -59,22 +192,32 @@ class UserSettingsService {
   }
 
   void _ensureLoadedAsync() {
-    // ignore: discarded_futures
-    ensureLoaded();
+    unawaited(
+      ensureLoaded().catchError((Object _) {
+        _ensureLoadQueued = false;
+      }),
+    );
   }
 
   void _emit(UserSettings next, {bool persist = true}) {
     next = _normalizeProModeAccess(next);
-    if (identical(next, _settings)) return;
+    if (_entitlementsManaged)
+      next = _withBillingEntitlements(next, _paidEntitlements);
+    if (next == _settings) return;
+    _revision++;
     _settings = next;
     if (!_controller.isClosed) {
       _controller.add(_settings);
     }
     if (persist) {
-      // ignore: discarded_futures
-      DeviceStorageService.instance.set(
-        _storageKey,
-        _settings.toJson(),
+      unawaited(
+        _persist(_settings).catchError((Object error, StackTrace stack) {
+          RuntimeDiagnosticsService.instance.record(
+            error,
+            stack,
+            operation: "Save preferences",
+          );
+        }),
       );
     }
   }
@@ -122,13 +265,18 @@ class UserSettingsService {
 
   void setTreasureRadiusMiles(double miles) {
     final safe = miles
-        .clamp(MatchDiscoverySettings.minRadiusMiles,
-            MatchDiscoverySettings.maxRadiusMiles)
+        .clamp(
+          MatchDiscoverySettings.minRadiusMiles,
+          MatchDiscoverySettings.maxRadiusMiles,
+        )
         .toDouble();
     final cur = _settings.matchDiscovery;
     if (cur.treasureRadiusMiles == safe) return;
-    _emit(_settings.copyWith(
-        matchDiscovery: cur.copyWith(treasureRadiusMiles: safe)));
+    _emit(
+      _settings.copyWith(
+        matchDiscovery: cur.copyWith(treasureRadiusMiles: safe),
+      ),
+    );
   }
 
   void setRadiusMiles(double miles) {
@@ -199,9 +347,7 @@ class UserSettingsService {
     );
   }
 
-  void recordActiveModePenalty({
-    required Duration lockDuration,
-  }) {
+  void recordActiveModePenalty({required Duration lockDuration}) {
     final cur = _settings.matchDiscovery;
     final lockUntil = DateTime.now().add(lockDuration).millisecondsSinceEpoch;
     final next = cur.copyWith(
@@ -329,9 +475,20 @@ class UserSettingsService {
     _emit(_settings.copyWith(rareMatchSoundEnabled: enabled));
   }
 
+  void setMatchSoundVolume(double volume) {
+    final safe = volume.clamp(0.0, 1.0).toDouble();
+    if (_settings.matchSoundVolume == safe) return;
+    _emit(_settings.copyWith(matchSoundVolume: safe));
+  }
+
   void setSimpleModeEnabled(bool enabled) {
     if (_settings.simpleModeEnabled == enabled) return;
     _emit(_settings.copyWith(simpleModeEnabled: enabled));
+  }
+
+  void setAlwaysUseNormalMode(bool enabled) {
+    if (_settings.alwaysUseNormalMode == enabled) return;
+    _emit(_settings.copyWith(alwaysUseNormalMode: enabled));
   }
 
   void setSimpleModeCompleted(bool completed) {
@@ -343,6 +500,22 @@ class UserSettingsService {
     final safe = stageIndex < 0 ? 0 : stageIndex;
     if (_settings.simpleModeStageIndex == safe) return;
     _emit(_settings.copyWith(simpleModeStageIndex: safe));
+  }
+
+  void setPartyUnlockHighlightPending(bool pending) {
+    if (_settings.partyUnlockHighlightPending == pending) return;
+    _emit(_settings.copyWith(partyUnlockHighlightPending: pending));
+  }
+
+  void unlockPartyFromSimpleMode() {
+    _emit(
+      _settings.copyWith(
+        simpleModeEnabled: false,
+        simpleModeCompleted: true,
+        simpleModeStageIndex: 5,
+        partyUnlockHighlightPending: true,
+      ),
+    );
   }
 
   void markBusinessIntroSeen() {

@@ -3,6 +3,7 @@ import "package:cloud_firestore/cloud_firestore.dart";
 import "package:flutter/material.dart";
 
 import "package:prox/screens/business/business_mode_screen.dart";
+import "package:prox/screens/policy/business_rules_screen.dart";
 import "package:prox/services/business_mode/business_mode_eligibility.dart";
 import "package:prox/services/business_mode/business_mode_state_service.dart";
 import "package:prox/services/help/context_help_service.dart";
@@ -20,15 +21,16 @@ class AccountBillingScreen extends StatefulWidget {
 }
 
 class _AccountBillingScreenState extends State<AccountBillingScreen> {
+  bool _changingActive = false;
   Future<void> _pushWithHelpContext({
     required String contextKey,
     required Widget page,
   }) async {
     final previous = ContextHelpService.instance.contextKey.value;
     ContextHelpService.instance.setContext(contextKey);
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => page),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => page));
     ContextHelpService.instance.setContext(previous);
   }
 
@@ -41,28 +43,44 @@ class _AccountBillingScreenState extends State<AccountBillingScreen> {
     );
   }
 
-  Future<void> _setActive(
-    BuildContext context,
-    String uid,
-    bool active,
-  ) async {
-    if (active) {
-      final paid = await MonetizationService.instance.isBusinessUnlocked(uid);
-      if (!paid) {
-        if (context.mounted) {
-          await MonetizationEntryService.instance.openBusinessPaywall(context);
+  Future<void> _setActive(BuildContext context, String uid, bool active) async {
+    if (_changingActive) return;
+    _changingActive = true;
+    try {
+      if (active) {
+        if (!await ensureBusinessRulesAccepted(context)) return;
+        if (!context.mounted) return;
+        final paid = await MonetizationService.instance.isBusinessUnlocked(uid);
+        if (!paid) {
+          if (context.mounted) {
+            await MonetizationEntryService.instance.openBusinessPaywall(
+              context,
+            );
+          }
+          return;
         }
-        return;
       }
-    }
 
-    await BusinessModeStateService.instance.setActive(uid, active);
-    UiTelemetryService.instance.log(
-      active ? "business_mode_activated" : "business_mode_deactivated",
-      meta: {"source": "account"},
-    );
-    if (!mounted) return;
-    setState(() {});
+      await BusinessModeStateService.instance.setActive(uid, active);
+      UiTelemetryService.instance.log(
+        active ? "business_mode_activated" : "business_mode_deactivated",
+        meta: {"source": "account"},
+      );
+      if (!mounted) return;
+      setState(() {});
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "Pro Mode could not be changed. Check your connection and try again.",
+            ),
+          ),
+        );
+      }
+    } finally {
+      _changingActive = false;
+    }
   }
 
   Future<void> _openBillingHistory(BuildContext context, String uid) async {
@@ -94,7 +112,9 @@ class _AccountBillingScreenState extends State<AccountBillingScreen> {
               children: [
                 Text(
                   "Billing history",
-                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 SizedBox(
@@ -106,7 +126,8 @@ class _AccountBillingScreenState extends State<AccountBillingScreen> {
                         return const Center(child: CircularProgressIndicator());
                       }
 
-                      final docs = snap.data?.docs ??
+                      final docs =
+                          snap.data?.docs ??
                           const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
                       if (docs.isEmpty) {
                         return Center(
@@ -123,28 +144,37 @@ class _AccountBillingScreenState extends State<AccountBillingScreen> {
                         itemBuilder: (context, index) {
                           final data = docs[index].data();
                           final sku = (data["sku"] ?? "unknown_sku").toString();
-                          final amountPoints = (data["amountPoints"] as num?)?.toInt() ?? 0;
-                          final paymentMethod = (data["paymentMethod"] ?? "unknown").toString();
-                          final status = (data["status"] ?? "unknown").toString();
+                          final amountPoints =
+                              (data["amountPoints"] as num?)?.toInt() ?? 0;
+                          final paymentMethod =
+                              (data["paymentMethod"] ?? "unknown").toString();
+                          final status = (data["status"] ?? "unknown")
+                              .toString();
 
                           return Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
                               color: cs.surfaceContainerHighest,
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: cs.outline.withValues(alpha: 0.22)),
+                              border: Border.all(
+                                color: cs.outline.withValues(alpha: 0.22),
+                              ),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
                                   sku,
-                                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
                                   "${amountPoints} points  |  $paymentMethod  |  $status",
-                                  style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: cs.onSurfaceVariant,
+                                  ),
                                 ),
                               ],
                             ),
@@ -185,10 +215,12 @@ class _AccountBillingScreenState extends State<AccountBillingScreen> {
               return FutureBuilder<BusinessGateState>(
                 future: BusinessModeEligibility.gateForUser(uid: uid, meta: m),
                 builder: (context, gsnap) {
-                  final gateState = gsnap.data ?? BusinessModeEligibility.gateFromMeta(m);
+                  final gateState =
+                      gsnap.data ?? BusinessModeEligibility.gateFromMeta(m);
 
                   final bool eligibleOrActive =
-                      gateState == BusinessGateState.eligible || gateState == BusinessGateState.active;
+                      gateState == BusinessGateState.eligible ||
+                      gateState == BusinessGateState.active;
 
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -203,7 +235,6 @@ class _AccountBillingScreenState extends State<AccountBillingScreen> {
                           );
                         },
                       ),
-
                       if (eligibleOrActive) ...[
                         const SizedBox(height: 12),
                         Container(
@@ -211,7 +242,9 @@ class _AccountBillingScreenState extends State<AccountBillingScreen> {
                           decoration: BoxDecoration(
                             color: cs.surfaceContainerHighest,
                             borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: cs.outline.withValues(alpha: 0.22)),
+                            border: Border.all(
+                              color: cs.outline.withValues(alpha: 0.22),
+                            ),
                           ),
                           child: Row(
                             children: [
@@ -222,7 +255,9 @@ class _AccountBillingScreenState extends State<AccountBillingScreen> {
                                   gateState == BusinessGateState.active
                                       ? "Business Mode is active on this account."
                                       : "You're eligible. Activate Business Mode.",
-                                  style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: cs.onSurfaceVariant,
+                                  ),
                                 ),
                               ),
                               Switch(
@@ -256,27 +291,34 @@ class _AccountBillingScreenState extends State<AccountBillingScreen> {
                   children: [
                     Text(
                       "Payments",
-                      style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                     const SizedBox(height: 6),
                     Text(
                       paid
                           ? "Business entitlement is active on this account."
                           : "Activate Business entitlement with points from the paywall.",
-                      style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       "Pricing:\n"
-                      " Monthly: ${MonetizationService.monthlySubscriptionPoints} points\n"
+                      " 30-day access (no auto-renewal): ${MonetizationService.monthlySubscriptionPoints} points\n"
                       " One-time unlock: ${MonetizationService.oneTimeUnlockPoints} points",
-                      style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
                     ),
                     const SizedBox(height: 10),
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
-                        onPressed: () => MonetizationEntryService.instance.openBusinessPaywall(context),
+                        onPressed: () => MonetizationEntryService.instance
+                            .openBusinessPaywall(context),
                         icon: const Icon(Icons.payments_outlined),
                         label: Text(paid ? "Manage billing" : "Open billing"),
                       ),

@@ -43,8 +43,10 @@ class MeetupFocusLockService extends ChangeNotifier {
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _aSub;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _bSub;
 
-  final Map<String, Map<String, dynamic>> _aDocs = <String, Map<String, dynamic>>{};
-  final Map<String, Map<String, dynamic>> _bDocs = <String, Map<String, dynamic>>{};
+  final Map<String, Map<String, dynamic>> _aDocs =
+      <String, Map<String, dynamic>>{};
+  final Map<String, Map<String, dynamic>> _bDocs =
+      <String, Map<String, dynamic>>{};
 
   String _uid = "";
   MeetupFocusLockState _state = MeetupFocusLockState.inactive;
@@ -76,10 +78,9 @@ class MeetupFocusLockService extends ChangeNotifier {
     final safeUid = uid.trim();
     if (safeUid.isEmpty) return false;
     try {
-      final snap = await _db.collection("users").doc(safeUid).get();
+      final snap = await _db.collection("publicProfiles").doc(safeUid).get();
       final data = snap.data() ?? <String, dynamic>{};
-      final lock = data["interactionLock"];
-      if (lock is Map && lock["busyInMeetup"] == true) {
+      if (data["busyInMeetup"] == true) {
         return true;
       }
     } catch (_) {}
@@ -108,40 +109,46 @@ class MeetupFocusLockService extends ChangeNotifier {
         .where("aUid", isEqualTo: _uid)
         .limit(100)
         .snapshots()
-        .listen((snap) {
-      _aDocs
-        ..clear()
-        ..addEntries(
-          snap.docs.map(
-            (d) => MapEntry<String, Map<String, dynamic>>(d.id, d.data()),
-          ),
+        .listen(
+          (snap) {
+            _aDocs
+              ..clear()
+              ..addEntries(
+                snap.docs.map(
+                  (d) => MapEntry<String, Map<String, dynamic>>(d.id, d.data()),
+                ),
+              );
+            _recompute();
+          },
+          onError: (Object _) {
+            // Fail open on listener auth/rules errors so stale local lock state
+            // never traps users outside the normal tabs.
+            _aDocs.clear();
+            _recompute();
+          },
         );
-      _recompute();
-    }, onError: (Object _) {
-      // Fail open on listener auth/rules errors so stale local lock state
-      // never traps users outside the normal tabs.
-      _aDocs.clear();
-      _recompute();
-    });
 
     _bSub = _db
         .collection("meetups")
         .where("bUid", isEqualTo: _uid)
         .limit(100)
         .snapshots()
-        .listen((snap) {
-      _bDocs
-        ..clear()
-        ..addEntries(
-          snap.docs.map(
-            (d) => MapEntry<String, Map<String, dynamic>>(d.id, d.data()),
-          ),
+        .listen(
+          (snap) {
+            _bDocs
+              ..clear()
+              ..addEntries(
+                snap.docs.map(
+                  (d) => MapEntry<String, Map<String, dynamic>>(d.id, d.data()),
+                ),
+              );
+            _recompute();
+          },
+          onError: (Object _) {
+            _bDocs.clear();
+            _recompute();
+          },
         );
-      _recompute();
-    }, onError: (Object _) {
-      _bDocs.clear();
-      _recompute();
-    });
   }
 
   bool _isTerminalStatus(String status) {
@@ -168,8 +175,9 @@ class MeetupFocusLockService extends ChangeNotifier {
     if (status == "requested") {
       final requestedAt = d["requestedAt"];
       if (requestedAt is Timestamp) {
-        final DateTime deadline =
-            requestedAt.toDate().add(_fallbackRequestWindow);
+        final DateTime deadline = requestedAt.toDate().add(
+          _fallbackRequestWindow,
+        );
         return deadline.isBefore(DateTime.now());
       }
     }
@@ -248,11 +256,9 @@ class MeetupFocusLockService extends ChangeNotifier {
       return;
     }
 
-    _updateState(MeetupFocusLockState(
-      active: true,
-      meetupId: bestId,
-      otherUid: bestOther,
-    ));
+    _updateState(
+      MeetupFocusLockState(active: true, meetupId: bestId, otherUid: bestOther),
+    );
   }
 
   void _updateState(MeetupFocusLockState next) {
@@ -288,10 +294,10 @@ class MeetupFocusLockService extends ChangeNotifier {
           .collection("presence")
           .doc("current")
           .set(<String, Object?>{
-        "busyInMeetup": active,
-        "interactionStatusTag": tag,
-        "updatedAt": FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+            "busyInMeetup": active,
+            "interactionStatusTag": tag,
+            "updatedAt": FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
     } catch (_) {}
   }
 }

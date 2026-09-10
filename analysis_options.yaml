@@ -1,0 +1,18 @@
+analyzer:
+  errors:
+    dead_null_aware_expression: ignore
+    deprecated_member_use: ignore
+    unnecessary_null_comparison: ignore
+  exclude:
+    - .backups/**
+    - .backup-*/**
+    - artifacts/**
+    - build/**
+    - android/**
+    - ios/**
+    - linux/**
+    - macos/**
+    - windows/**
+    - functions/node_modules/**
+    - functions/lib/**
+    - functions_notifications/node_modules/**

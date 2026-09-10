@@ -42,6 +42,68 @@ enum KeywordMatchMode {
   keywordChain,
 }
 
+enum MatchAgeBracket {
+  any,
+  age18To24,
+  age25To34,
+  age35To44,
+  age45To54,
+  age55Plus,
+}
+
+extension MatchAgeBracketX on MatchAgeBracket {
+  int? get minAge {
+    switch (this) {
+      case MatchAgeBracket.any:
+        return null;
+      case MatchAgeBracket.age18To24:
+        return 18;
+      case MatchAgeBracket.age25To34:
+        return 25;
+      case MatchAgeBracket.age35To44:
+        return 35;
+      case MatchAgeBracket.age45To54:
+        return 45;
+      case MatchAgeBracket.age55Plus:
+        return 55;
+    }
+  }
+
+  int? get maxAge {
+    switch (this) {
+      case MatchAgeBracket.any:
+        return null;
+      case MatchAgeBracket.age18To24:
+        return 24;
+      case MatchAgeBracket.age25To34:
+        return 34;
+      case MatchAgeBracket.age35To44:
+        return 44;
+      case MatchAgeBracket.age45To54:
+        return 54;
+      case MatchAgeBracket.age55Plus:
+        return null;
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case MatchAgeBracket.any:
+        return "Any age";
+      case MatchAgeBracket.age18To24:
+        return "18-24";
+      case MatchAgeBracket.age25To34:
+        return "25-34";
+      case MatchAgeBracket.age35To44:
+        return "35-44";
+      case MatchAgeBracket.age45To54:
+        return "45-54";
+      case MatchAgeBracket.age55Plus:
+        return "55+";
+    }
+  }
+}
+
 class MatchDiscoverySettings {
   final double radiusMiles;
   final bool highRadiusUnlocked;
@@ -57,6 +119,7 @@ class MatchDiscoverySettings {
   final bool singleKeywordMatchUnlocked;
   final bool reciprocalMatchUnlocked;
   final bool keywordChainUnlocked;
+  final MatchAgeBracket ageBracket;
 
   final MatchPartyScope partyScope;
   final int? partyDepth;
@@ -77,6 +140,7 @@ class MatchDiscoverySettings {
     this.singleKeywordMatchUnlocked = false,
     this.reciprocalMatchUnlocked = false,
     this.keywordChainUnlocked = false,
+    this.ageBracket = MatchAgeBracket.any,
     MatchPartyScope partyScope = MatchPartyScope.public,
     this.partyDepth,
     this.precisionIndex,
@@ -123,6 +187,7 @@ class MatchDiscoverySettings {
         singleKeywordMatchUnlocked = false,
         reciprocalMatchUnlocked = false,
         keywordChainUnlocked = false,
+        ageBracket = MatchAgeBracket.any,
         partyScope = MatchPartyScope.public,
         partyDepth = 1,
         precisionIndex = 1;
@@ -142,6 +207,7 @@ class MatchDiscoverySettings {
     bool? singleKeywordMatchUnlocked,
     bool? reciprocalMatchUnlocked,
     bool? keywordChainUnlocked,
+    MatchAgeBracket? ageBracket,
     MatchPartyScope? partyScope,
     int? partyDepth,
     int? precisionIndex,
@@ -164,6 +230,7 @@ class MatchDiscoverySettings {
       reciprocalMatchUnlocked:
           reciprocalMatchUnlocked ?? this.reciprocalMatchUnlocked,
       keywordChainUnlocked: keywordChainUnlocked ?? this.keywordChainUnlocked,
+      ageBracket: ageBracket ?? this.ageBracket,
       partyScope: partyScope ?? this.partyScope,
       partyDepth: partyDepth ?? this.partyDepth,
       precisionIndex: precisionIndex ?? this.precisionIndex,
@@ -198,6 +265,7 @@ class MatchDiscoverySettings {
       "singleKeywordMatchUnlocked": singleKeywordMatchUnlocked,
       "reciprocalMatchUnlocked": reciprocalMatchUnlocked,
       "keywordChainUnlocked": keywordChainUnlocked,
+      "ageBracket": ageBracket.name,
       "partyScope": partyScope.name,
       "partyDepth": partyDepth,
       "precisionIndex": precisionIndex,
@@ -246,6 +314,8 @@ class MatchDiscoverySettings {
         (raw["reciprocalMatchUnlocked"] as bool?) ?? false;
     final bool keywordChainUnlocked =
         (raw["keywordChainUnlocked"] as bool?) ?? false;
+    final MatchAgeBracket ageBracket =
+        _ageBracketFromName((raw["ageBracket"] as String?) ?? "any");
 
     final String scopeName = (raw["partyScope"] as String?) ?? "public";
     final MatchPartyScope scope = _scopeFromName(scopeName);
@@ -268,6 +338,7 @@ class MatchDiscoverySettings {
       singleKeywordMatchUnlocked: singleKeywordMatchUnlocked,
       reciprocalMatchUnlocked: reciprocalMatchUnlocked,
       keywordChainUnlocked: keywordChainUnlocked,
+      ageBracket: ageBracket,
       partyScope: scope,
       partyDepth: depth ?? 1,
       precisionIndex: precision ?? 1,
@@ -347,6 +418,24 @@ class MatchDiscoverySettings {
     }
   }
 
+  static MatchAgeBracket _ageBracketFromName(String name) {
+    switch (name) {
+      case "age18To24":
+        return MatchAgeBracket.age18To24;
+      case "age25To34":
+        return MatchAgeBracket.age25To34;
+      case "age35To44":
+        return MatchAgeBracket.age35To44;
+      case "age45To54":
+        return MatchAgeBracket.age45To54;
+      case "age55Plus":
+        return MatchAgeBracket.age55Plus;
+      case "any":
+      default:
+        return MatchAgeBracket.any;
+    }
+  }
+
   @override
   String toString() {
     return "MatchDiscoverySettings("
@@ -361,6 +450,7 @@ class MatchDiscoverySettings {
         "activeLockUntilEpochMs=$activeLockUntilEpochMs, "
         "activePenaltyCount=$activePenaltyCount, "
         "keywordMode=$keywordMode, "
+        "ageBracket=$ageBracket, "
         "partyScope=$partyScope, "
         "partyDepth=$partyDepth, "
         "precisionIndex=$precisionIndex"
@@ -384,6 +474,7 @@ class MatchDiscoverySettings {
         other.singleKeywordMatchUnlocked == singleKeywordMatchUnlocked &&
         other.reciprocalMatchUnlocked == reciprocalMatchUnlocked &&
         other.keywordChainUnlocked == keywordChainUnlocked &&
+        other.ageBracket == ageBracket &&
         other.partyScope == partyScope &&
         other.partyDepth == partyDepth &&
         other.precisionIndex == precisionIndex;
@@ -405,6 +496,7 @@ class MatchDiscoverySettings {
         singleKeywordMatchUnlocked,
         reciprocalMatchUnlocked,
         keywordChainUnlocked,
+        ageBracket,
         partyScope,
         partyDepth,
         precisionIndex,
@@ -429,6 +521,7 @@ class UserSettings {
   final bool matchNotificationsEnabled;
   final bool matchSoundEnabled;
   final bool rareMatchSoundEnabled;
+  final double matchSoundVolume;
 
   final MatchDiscoverySettings matchDiscovery;
   final bool hasSeenBusinessIntro;
@@ -442,8 +535,10 @@ class UserSettings {
 
   final bool hasSeenTreePublicEligibleNudge;
   final bool simpleModeEnabled;
+  final bool alwaysUseNormalMode;
   final bool simpleModeCompleted;
   final int simpleModeStageIndex;
+  final bool partyUnlockHighlightPending;
 
   const UserSettings({
     required this.uxMode,
@@ -461,6 +556,7 @@ class UserSettings {
     required this.matchNotificationsEnabled,
     required this.matchSoundEnabled,
     required this.rareMatchSoundEnabled,
+    required this.matchSoundVolume,
     required this.matchDiscovery,
     required this.hasSeenBusinessIntro,
     required this.hasSeenBusinessFilterHint,
@@ -470,8 +566,10 @@ class UserSettings {
     required this.seenBusinessPrompts,
     required this.hasSeenTreePublicEligibleNudge,
     required this.simpleModeEnabled,
+    required this.alwaysUseNormalMode,
     required this.simpleModeCompleted,
     required this.simpleModeStageIndex,
+    required this.partyUnlockHighlightPending,
   });
 
   const UserSettings.defaults()
@@ -490,6 +588,7 @@ class UserSettings {
         matchNotificationsEnabled = true,
         matchSoundEnabled = true,
         rareMatchSoundEnabled = true,
+        matchSoundVolume = 0.72,
         matchDiscovery = const MatchDiscoverySettings.defaults(),
         hasSeenBusinessIntro = false,
         hasSeenBusinessFilterHint = false,
@@ -499,8 +598,10 @@ class UserSettings {
         seenBusinessPrompts = const <String, bool>{},
         hasSeenTreePublicEligibleNudge = false,
         simpleModeEnabled = true,
+        alwaysUseNormalMode = false,
         simpleModeCompleted = false,
-        simpleModeStageIndex = 0;
+        simpleModeStageIndex = 0,
+        partyUnlockHighlightPending = false;
 
   UserSettings copyWith({
     AppUxMode? uxMode,
@@ -518,6 +619,7 @@ class UserSettings {
     bool? matchNotificationsEnabled,
     bool? matchSoundEnabled,
     bool? rareMatchSoundEnabled,
+    double? matchSoundVolume,
     MatchDiscoverySettings? matchDiscovery,
     bool? hasSeenBusinessIntro,
     bool? hasSeenBusinessFilterHint,
@@ -527,8 +629,10 @@ class UserSettings {
     Map<String, bool>? seenBusinessPrompts,
     bool? hasSeenTreePublicEligibleNudge,
     bool? simpleModeEnabled,
+    bool? alwaysUseNormalMode,
     bool? simpleModeCompleted,
     int? simpleModeStageIndex,
+    bool? partyUnlockHighlightPending,
   }) {
     return UserSettings(
       uxMode: uxMode ?? this.uxMode,
@@ -549,11 +653,12 @@ class UserSettings {
       demoFastPresenceRefreshEnabled:
           demoFastPresenceRefreshEnabled ?? this.demoFastPresenceRefreshEnabled,
       textScaleFactor: textScaleFactor ?? this.textScaleFactor,
-        matchNotificationsEnabled:
+      matchNotificationsEnabled:
           matchNotificationsEnabled ?? this.matchNotificationsEnabled,
-        matchSoundEnabled: matchSoundEnabled ?? this.matchSoundEnabled,
-        rareMatchSoundEnabled:
+      matchSoundEnabled: matchSoundEnabled ?? this.matchSoundEnabled,
+      rareMatchSoundEnabled:
           rareMatchSoundEnabled ?? this.rareMatchSoundEnabled,
+      matchSoundVolume: matchSoundVolume ?? this.matchSoundVolume,
       matchDiscovery: matchDiscovery ?? this.matchDiscovery,
       hasSeenBusinessIntro: hasSeenBusinessIntro ?? this.hasSeenBusinessIntro,
       hasSeenBusinessFilterHint:
@@ -567,8 +672,11 @@ class UserSettings {
       hasSeenTreePublicEligibleNudge:
           hasSeenTreePublicEligibleNudge ?? this.hasSeenTreePublicEligibleNudge,
       simpleModeEnabled: simpleModeEnabled ?? this.simpleModeEnabled,
+      alwaysUseNormalMode: alwaysUseNormalMode ?? this.alwaysUseNormalMode,
       simpleModeCompleted: simpleModeCompleted ?? this.simpleModeCompleted,
       simpleModeStageIndex: simpleModeStageIndex ?? this.simpleModeStageIndex,
+      partyUnlockHighlightPending:
+          partyUnlockHighlightPending ?? this.partyUnlockHighlightPending,
     );
   }
 
@@ -589,6 +697,7 @@ class UserSettings {
       "matchNotificationsEnabled": matchNotificationsEnabled,
       "matchSoundEnabled": matchSoundEnabled,
       "rareMatchSoundEnabled": rareMatchSoundEnabled,
+      "matchSoundVolume": matchSoundVolume,
       "matchDiscovery": matchDiscovery.toJson(),
       "hasSeenBusinessIntro": hasSeenBusinessIntro,
       "hasSeenBusinessFilterHint": hasSeenBusinessFilterHint,
@@ -598,8 +707,10 @@ class UserSettings {
       "seenBusinessPrompts": seenBusinessPrompts,
       "hasSeenTreePublicEligibleNudge": hasSeenTreePublicEligibleNudge,
       "simpleModeEnabled": simpleModeEnabled,
+      "alwaysUseNormalMode": alwaysUseNormalMode,
       "simpleModeCompleted": simpleModeCompleted,
       "simpleModeStageIndex": simpleModeStageIndex,
+      "partyUnlockHighlightPending": partyUnlockHighlightPending,
     };
   }
 
@@ -634,10 +745,12 @@ class UserSettings {
     final double textScaleFactor =
         ((raw["textScaleFactor"] as num?)?.toDouble() ?? 1.0).clamp(0.9, 1.6);
     final bool matchNotificationsEnabled =
-      (raw["matchNotificationsEnabled"] as bool?) ?? true;
+        (raw["matchNotificationsEnabled"] as bool?) ?? true;
     final bool matchSoundEnabled = (raw["matchSoundEnabled"] as bool?) ?? true;
     final bool rareMatchSoundEnabled =
-      (raw["rareMatchSoundEnabled"] as bool?) ?? true;
+        (raw["rareMatchSoundEnabled"] as bool?) ?? true;
+    final double matchSoundVolume =
+        ((raw["matchSoundVolume"] as num?)?.toDouble() ?? 0.72).clamp(0.0, 1.0);
 
     final mdRaw = raw["matchDiscovery"];
     final matchDiscovery = MatchDiscoverySettings.fromJson(mdRaw);
@@ -664,10 +777,14 @@ class UserSettings {
     final bool seenTreeNudge =
         (raw["hasSeenTreePublicEligibleNudge"] as bool?) ?? false;
     final bool simpleModeEnabled = (raw["simpleModeEnabled"] as bool?) ?? true;
+    final bool alwaysUseNormalMode =
+        (raw["alwaysUseNormalMode"] as bool?) ?? false;
     final bool simpleModeCompleted =
         (raw["simpleModeCompleted"] as bool?) ?? false;
     final int simpleModeStageIndex =
         (raw["simpleModeStageIndex"] as num?)?.toInt() ?? 0;
+    final bool partyUnlockHighlightPending =
+        (raw["partyUnlockHighlightPending"] as bool?) ?? false;
 
     return UserSettings(
       uxMode: uxMode,
@@ -685,6 +802,7 @@ class UserSettings {
       matchNotificationsEnabled: matchNotificationsEnabled,
       matchSoundEnabled: matchSoundEnabled,
       rareMatchSoundEnabled: rareMatchSoundEnabled,
+      matchSoundVolume: matchSoundVolume,
       matchDiscovery: matchDiscovery,
       hasSeenBusinessIntro: hasIntro,
       hasSeenBusinessFilterHint: hasFilterHint,
@@ -694,8 +812,10 @@ class UserSettings {
       seenBusinessPrompts: prompts,
       hasSeenTreePublicEligibleNudge: seenTreeNudge,
       simpleModeEnabled: simpleModeEnabled,
+      alwaysUseNormalMode: alwaysUseNormalMode,
       simpleModeCompleted: simpleModeCompleted,
       simpleModeStageIndex: simpleModeStageIndex,
+      partyUnlockHighlightPending: partyUnlockHighlightPending,
     );
   }
 
@@ -730,6 +850,7 @@ class UserSettings {
         other.matchNotificationsEnabled == matchNotificationsEnabled &&
         other.matchSoundEnabled == matchSoundEnabled &&
         other.rareMatchSoundEnabled == rareMatchSoundEnabled &&
+        other.matchSoundVolume == matchSoundVolume &&
         other.matchDiscovery == matchDiscovery &&
         other.hasSeenBusinessIntro == hasSeenBusinessIntro &&
         other.hasSeenBusinessFilterHint == hasSeenBusinessFilterHint &&
@@ -740,8 +861,10 @@ class UserSettings {
         other.hasSeenTreePublicEligibleNudge ==
             hasSeenTreePublicEligibleNudge &&
         other.simpleModeEnabled == simpleModeEnabled &&
+        other.alwaysUseNormalMode == alwaysUseNormalMode &&
         other.simpleModeCompleted == simpleModeCompleted &&
-        other.simpleModeStageIndex == simpleModeStageIndex;
+        other.simpleModeStageIndex == simpleModeStageIndex &&
+        other.partyUnlockHighlightPending == partyUnlockHighlightPending;
   }
 
   @override
@@ -761,6 +884,7 @@ class UserSettings {
         matchNotificationsEnabled,
         matchSoundEnabled,
         rareMatchSoundEnabled,
+        matchSoundVolume,
         matchDiscovery,
         hasSeenBusinessIntro,
         hasSeenBusinessFilterHint,
@@ -771,7 +895,9 @@ class UserSettings {
             .map((e) => Object.hash(e.key, e.value))),
         hasSeenTreePublicEligibleNudge,
         simpleModeEnabled,
+        alwaysUseNormalMode,
         simpleModeCompleted,
         simpleModeStageIndex,
+        partyUnlockHighlightPending,
       ]);
 }

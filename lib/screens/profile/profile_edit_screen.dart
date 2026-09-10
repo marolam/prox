@@ -19,6 +19,7 @@ import "package:prox/services/mode_unlock_service.dart";
 import "package:prox/services/monetization_service.dart";
 import "package:prox/services/presence_writer.dart";
 import "package:prox/services/referral_attribution_service.dart";
+import "package:prox/services/simple_mode/simple_mode_policy.dart";
 import "package:prox/services/user_profile_service.dart";
 import "package:prox/shell/home_root_shell.dart";
 
@@ -70,6 +71,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
 
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _headlineController = TextEditingController();
+  final TextEditingController _ageController = TextEditingController();
   final TextEditingController _searchingController = TextEditingController();
   final TextEditingController _providingController = TextEditingController();
 
@@ -119,6 +121,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     NearbyBootstrap.instance.dispose();
     _nameController.addListener(_onFormFieldChanged);
     _headlineController.addListener(_onFormFieldChanged);
+    _ageController.addListener(_onFormFieldChanged);
     _searchingController.addListener(_onFormFieldChanged);
     _providingController.addListener(_onFormFieldChanged);
     _startLoadWatchdog();
@@ -236,6 +239,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     _hydratingForm = true;
     _nameController.text = profile.displayName ?? "";
     _headlineController.text = profile.headline ?? "";
+    _ageController.text = profile.ageYears?.toString() ?? "";
     _searchingController.text = profile.searching ?? "";
     _providingController.text = profile.providing ?? "";
     _photoUrl = profile.photoUrl;
@@ -1460,6 +1464,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
 
       final List<String> searchingFor = _normalizeKeywords(_searchingKeywords);
       final List<String> canProvide = _normalizeKeywords(_canProvideKeywords);
+      final int? ageYears = _parseAgeYearsInput(_ageController.text);
 
       final bool allowBusinessToggle =
           _canUseBusinessTier && _businessPaidUnlock;
@@ -1490,6 +1495,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           isBusiness: finalBusinessEnabled,
           availabilityMinutes:
               finalBusinessEnabled ? _availabilityMinutes : null,
+          ageYears: ageYears,
         ),
         "Profile save",
       );
@@ -1570,15 +1576,27 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     proxBootstrapNearby();
     _nameController.dispose();
     _headlineController.dispose();
+    _ageController.dispose();
     _searchingController.dispose();
     _providingController.dispose();
     super.dispose();
+  }
+
+  int? _parseAgeYearsInput(String raw) {
+    final String value = raw.trim();
+    if (value.isEmpty) return null;
+    final int? parsed = int.tryParse(value);
+    if (parsed == null || parsed < 13 || parsed > 120) {
+      throw StateError("Age must be a whole number between 13 and 120.");
+    }
+    return parsed;
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final bool simpleMode = SimpleModePolicy.isActive;
 
     if (_loading) {
       final loadingChild = Center(
@@ -1655,7 +1673,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                           ? const Icon(Icons.person, size: 44)
                           : null,
                     ),
-                    if (kDebugMode)
+                    if (kDebugMode && !simpleMode)
                       Positioned(
                         right: -6,
                         top: -6,
@@ -1728,8 +1746,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
             validator: (v) =>
                 (v == null || v.trim().isEmpty) ? "Please enter a name." : null,
           ),
-          const SizedBox(height: 16),
-          TextFormField(
+          if (!simpleMode) ...[
+            const SizedBox(height: 16),
+            TextFormField(
             controller: _headlineController,
             readOnly: true,
             onTap: () => _editFieldInDialog(
@@ -1748,7 +1767,29 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                 icon: const Icon(Icons.open_in_new),
               ),
             ),
-          ),
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+            controller: _ageController,
+            decoration: const InputDecoration(
+              labelText: "Age (optional)",
+              hintText: "Example: 29",
+            ),
+            keyboardType: TextInputType.number,
+            inputFormatters: <TextInputFormatter>[
+              FilteringTextInputFormatter.digitsOnly,
+            ],
+            validator: (v) {
+              final String value = (v ?? "").trim();
+              if (value.isEmpty) return null;
+              final int? parsed = int.tryParse(value);
+              if (parsed == null || parsed < 13 || parsed > 120) {
+                return "Enter an age between 13 and 120.";
+              }
+              return null;
+            },
+            ),
+          ],
           const SizedBox(height: 16),
           Text(
             "Keywords",
@@ -1759,6 +1800,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           _keywordWorkspacePreview(_bucketSearchingFor),
           const SizedBox(height: 10),
           _keywordWorkspacePreview(_bucketCanProvide),
+          if (!simpleMode) ...[
           const SizedBox(height: 24),
           Align(
             alignment: Alignment.centerLeft,
@@ -1848,6 +1890,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
               ),
             ),
           ),
+          ],
           const SizedBox(height: 16),
           Text(
             "These basics unlock matching and chats. You can refine the rest later.",

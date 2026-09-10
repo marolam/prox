@@ -1,6 +1,8 @@
 import "dart:async";
 
 import "package:flutter/material.dart";
+import "package:prox/screens/settings/account_privacy_screen.dart";
+import "package:prox/services/runtime_diagnostics_service.dart";
 import "package:firebase_auth/firebase_auth.dart";
 import "package:geolocator/geolocator.dart";
 import "package:permission_handler/permission_handler.dart";
@@ -21,6 +23,8 @@ import "package:prox/screens/settings/discovery_settings_screen.dart";
 import "package:prox/screens/settings/match_scope_settings_screen.dart";
 import "package:prox/screens/settings/privacy/blocked_users_screen.dart";
 import "package:prox/screens/settings/support_feedback_screen.dart";
+import "package:prox/screens/settings/sound_alert_settings_screen.dart";
+import "package:prox/screens/settings/party_profile_sharing_screen.dart";
 import "package:prox/screens/settings/user_guide_screen.dart";
 import "package:prox/screens/settings/account/account_screen.dart";
 
@@ -57,9 +61,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required Widget page,
   }) async {
     ContextHelpService.instance.setContext(contextKey);
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => page),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => page));
     ContextHelpService.instance.setContext("home:settings");
   }
 
@@ -136,8 +140,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     "- Nearby discovery uses low-power location to show who's actually nearby.\n"
                     "- Meetups can use precise location briefly to help navigate and confirm arrival.\n"
                     "- You can turn location off in Prox anytime.",
-                    style: textTheme.bodyMedium
-                        ?.copyWith(color: cs.onSurfaceVariant),
+                    style: textTheme.bodyMedium?.copyWith(
+                      color: cs.onSurfaceVariant,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 14),
@@ -152,28 +157,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         color: cs.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(
-                            color: cs.outline.withValues(alpha: 0.20)),
+                          color: cs.outline.withValues(alpha: 0.20),
+                        ),
                       ),
                       child: Row(
                         children: [
-                          Icon(enabled ? Icons.toggle_on : Icons.toggle_off,
-                              color: cs.primary),
+                          Icon(
+                            enabled ? Icons.toggle_on : Icons.toggle_off,
+                            color: cs.primary,
+                          ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               enabled
                                   ? "Location enabled in Prox"
                                   : "Location disabled in Prox",
-                              style: textTheme.bodyMedium
-                                  ?.copyWith(fontWeight: FontWeight.w700),
+                              style: textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ),
                           Switch(
                             value: enabled,
-                            onChanged: (v) {
-                              // ignore: discarded_futures
-                              LocationPrivacyService.instance
-                                  .setLocationEnabled(v);
+                            onChanged: (v) async {
+                              try {
+                                await LocationPrivacyService.instance
+                                    .setLocationEnabled(v);
+                              } catch (error, stack) {
+                                RuntimeDiagnosticsService.instance.record(
+                                  error,
+                                  stack,
+                                  operation: "Save location preference",
+                                );
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        "Your location choice applies now, but could not be saved. Try again before restarting Prox.",
+                                      ),
+                                    ),
+                                  );
+                                }
+                              }
                             },
                           ),
                         ],
@@ -204,8 +229,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   alignment: Alignment.centerLeft,
                   child: Text(
                     "What Prox does NOT do:",
-                    style: textTheme.bodyMedium
-                        ?.copyWith(fontWeight: FontWeight.w800),
+                    style: textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -215,8 +241,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     "- We do not share your exact GPS coordinates with other users\n"
                     "- We do not sell your location data\n"
                     "- We do not continuously track you when you are inactive",
-                    style: textTheme.bodyMedium
-                        ?.copyWith(color: cs.onSurfaceVariant),
+                    style: textTheme.bodyMedium?.copyWith(
+                      color: cs.onSurfaceVariant,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 18),
@@ -266,8 +293,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Expanded(
                       child: Text(
                         "Build & changelog",
-                        style: tt.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w700),
+                        style: tt.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ],
@@ -275,9 +303,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 16),
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: Text("Build",
-                      style:
-                          tt.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+                  child: Text(
+                    "Build",
+                    style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                  ),
                 ),
                 const SizedBox(height: 6),
                 const Align(
@@ -295,9 +324,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 16),
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: Text("What changed",
-                      style:
-                          tt.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+                  child: Text(
+                    "What changed",
+                    style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                  ),
                 ),
                 const SizedBox(height: 8),
                 for (final e in entries) ...[
@@ -305,8 +335,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     alignment: Alignment.centerLeft,
                     child: Text(
                       e.title,
-                      style:
-                          tt.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+                      style: tt.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -323,12 +354,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   width: double.infinity,
                   child: OutlinedButton.icon(
                     onPressed: () async {
-                      final result = await LoginUpdateCheckService.instance.check(forceRefresh: true);
+                      final result = await LoginUpdateCheckService.instance
+                          .check(forceRefresh: true);
                       if (!ctx.mounted) return;
+
+                      if (result.checkFailed && !result.updateAvailable) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              "Couldn't check for updates. Check your connection and try again.",
+                            ),
+                          ),
+                        );
+                        return;
+                      }
+
+                      final upToDate =
+                          LoginUpdateCheckService.instance.compareVersions(
+                            result.latestVersion,
+                            result.currentVersion,
+                          ) <=
+                          0;
+                      if (upToDate) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          SnackBar(
+                            duration: const Duration(seconds: 4),
+                            content: Text(
+                              "You are already on the latest version "
+                              "(installed: v${result.currentVersion}, "
+                              "release: v${result.latestVersion}). "
+                              "If you expected an update, check the release artifact.",
+                            ),
+                          ),
+                        );
+                        return;
+                      }
+
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        SnackBar(
+                          duration: const Duration(seconds: 3),
+                          content: Text(
+                            "Installed: v${result.currentVersion} • "
+                            "Latest: v${result.latestVersion}",
+                          ),
+                        ),
+                      );
 
                       await LoginUpdateCheckService.instance.openLatestUpdate(
                         ctx,
                         preferredUrl: result.downloadUrl,
+                        targetVersion: result.latestVersion,
                       );
 
                       if (!ctx.mounted) return;
@@ -366,7 +441,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text("Signing out..."), duration: Duration(seconds: 1)),
+          content: Text("Signing out..."),
+          duration: Duration(seconds: 1),
+        ),
       );
     }
 
@@ -374,16 +451,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final String uidBefore = FirebaseAuth.instance.currentUser?.uid ?? "";
 
-      // Sign out first so logout is never blocked by cleanup side effects.
-      await FirebaseAuth.instance.signOut().timeout(
-            const Duration(seconds: 8),
-            onTimeout: () => throw TimeoutException("auth sign-out timed out"),
-          );
-
       try {
-        await AuthBootstrap.instance
-            .prepareForManualSignOut()
-            .timeout(const Duration(seconds: 3), onTimeout: () {});
+        await AuthBootstrap.instance.prepareForManualSignOut().timeout(
+          const Duration(seconds: 3),
+          onTimeout: () {},
+        );
       } catch (_) {
         warnings.add("auth bootstrap cleanup");
       }
@@ -399,6 +471,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
       }
 
+      // Revoke the device token while Firestore still recognizes this account.
+      // Cleanup is bounded above, so an offline network cannot prevent logout.
+      await FirebaseAuth.instance.signOut().timeout(
+        const Duration(seconds: 8),
+        onTimeout: () => throw TimeoutException("auth sign-out timed out"),
+      );
+
       try {
         await SecureCredentialStore.instance
             .setEnabled(false)
@@ -408,9 +487,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
 
       try {
-        await SecureCredentialStore.instance
-            .clearCredentials()
-            .timeout(const Duration(seconds: 3), onTimeout: () {});
+        await SecureCredentialStore.instance.clearCredentials().timeout(
+          const Duration(seconds: 3),
+          onTimeout: () {},
+        );
       } catch (_) {
         warnings.add("credential cleanup");
       }
@@ -420,9 +500,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Log out failed: $e")),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Log out failed: $e")));
       }
     } finally {
       if (mounted) {
@@ -433,7 +513,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (warnings.isNotEmpty && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text("Logged out with warnings: ${warnings.join(", ")}")),
+          content: Text("Logged out with warnings: ${warnings.join(", ")}"),
+        ),
       );
     }
   }
@@ -447,11 +528,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         content: const Text("You will be signed out on this device."),
         actions: [
           TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text("Cancel")),
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text("Cancel"),
+          ),
           FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text("Log out")),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text("Log out"),
+          ),
         ],
       ),
     );
@@ -489,14 +572,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title,
-                    style: theme.textTheme.titleSmall
-                        ?.copyWith(fontWeight: FontWeight.w800)),
+                Text(
+                  title,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
                 const SizedBox(height: 4),
                 Text(
                   subtitle,
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: cs.onSurfaceVariant, height: 1.2),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                    height: 1.2,
+                  ),
                 ),
               ],
             ),
@@ -574,10 +662,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .outline
-                        .withValues(alpha: 0.25),
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.outline.withValues(alpha: 0.25),
                   ),
                 ),
                 child: Column(
@@ -585,21 +672,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.text_fields,
-                            color:
-                                Theme.of(context).colorScheme.onSurfaceVariant),
+                        Icon(
+                          Icons.text_fields,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
                             "Text size",
-                            style: textTheme.titleSmall
-                                ?.copyWith(fontWeight: FontWeight.w800),
+                            style: textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                         ),
                         Text(
                           "${settings.textScaleFactor.toStringAsFixed(2)}x",
-                          style: textTheme.labelLarge
-                              ?.copyWith(fontWeight: FontWeight.w800),
+                          style: textTheme.labelLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ],
                     ),
@@ -626,6 +716,83 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(height: 8),
               const ModeSwitchCard(),
+              const SizedBox(height: 6),
+              Container(
+                margin: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.outline.withValues(alpha: 0.25),
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    SwitchListTile.adaptive(
+                      value: settings.simpleModeEnabled,
+                      title: const Text("Simple Mode"),
+                      subtitle: const Text(
+                        "Guided, lower-noise experience with safer defaults while learning.",
+                      ),
+                      onChanged: (enabled) {
+                        UserSettingsService.instance.setSimpleModeEnabled(
+                          enabled,
+                        );
+                        if (enabled) {
+                          UserSettingsService.instance.setAlwaysUseNormalMode(
+                            false,
+                          );
+                          UserSettingsService.instance.setSimpleModeCompleted(
+                            true,
+                          );
+                          UserSettingsService.instance.setSimpleModeStageIndex(
+                            0,
+                          );
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                "Simple Mode enabled. Only the guided Big-5 experience will be available.",
+                              ),
+                            ),
+                          );
+                        } else {
+                          UserSettingsService.instance.setSimpleModeCompleted(
+                            true,
+                          );
+                          UserSettingsService.instance.setSimpleModeStageIndex(
+                            5,
+                          );
+                        }
+                      },
+                    ),
+                    SwitchListTile.adaptive(
+                      value: settings.alwaysUseNormalMode,
+                      title: const Text("Always use Normal Mode"),
+                      subtitle: const Text(
+                        "Skip the login mode chooser and go straight to Normal Mode.",
+                      ),
+                      onChanged: (enabled) {
+                        UserSettingsService.instance.setAlwaysUseNormalMode(
+                          enabled,
+                        );
+                        if (enabled) {
+                          UserSettingsService.instance.setSimpleModeEnabled(
+                            false,
+                          );
+                          UserSettingsService.instance.setSimpleModeCompleted(
+                            true,
+                          );
+                          UserSettingsService.instance.setSimpleModeStageIndex(
+                            5,
+                          );
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                 child: Text("Help", style: textTheme.titleMedium),
@@ -634,7 +801,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 leading: const Icon(Icons.menu_book_outlined),
                 title: const Text("User's Guide"),
                 subtitle: const Text(
-                    "One-tap guide with feature pipelines and quick entry points."),
+                  "One-tap guide with feature pipelines and quick entry points.",
+                ),
                 onTap: () async {
                   await _pushWithHelpContext(
                     context,
@@ -646,8 +814,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ListTile(
                 leading: const Icon(Icons.palette_outlined),
                 title: const Text("Cosmetics"),
-                subtitle:
-                    const Text("Themes and UI flair (never affects trust)."),
+                subtitle: const Text(
+                  "Themes and UI flair (never affects trust).",
+                ),
                 onTap: () async {
                   await _pushWithHelpContext(
                     context,
@@ -660,8 +829,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ListTile(
                   leading: const Icon(Icons.receipt_long_outlined),
                   title: const Text("Business receipts"),
-                  subtitle:
-                      const Text("See confirmations logged on this device."),
+                  subtitle: const Text(
+                    "See confirmations logged on this device.",
+                  ),
                   onTap: () async {
                     await _pushWithHelpContext(
                       context,
@@ -674,7 +844,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 leading: const Icon(Icons.verified_outlined),
                 title: const Text("App Review survival kit"),
                 subtitle: const Text(
-                    "Test account + step-by-step review path + screencast checklist."),
+                  "Test account + step-by-step review path + screencast checklist.",
+                ),
                 onTap: () async {
                   await _pushWithHelpContext(
                     context,
@@ -687,7 +858,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 leading: const Icon(Icons.support_agent_outlined),
                 title: const Text("Support Mode"),
                 subtitle: const Text(
-                    "Opt-in volunteer support (queue + audits coming next)."),
+                  "Practice with sample tickets and help others use Prox.",
+                ),
                 onTap: () async {
                   await _pushWithHelpContext(
                     context,
@@ -700,7 +872,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 leading: const Icon(Icons.rule_outlined),
                 title: const Text("Rules, enforcement & appeals"),
                 subtitle: const Text(
-                    "Code of conduct, violations, and the appeal process."),
+                  "Code of conduct, violations, and the appeal process.",
+                ),
                 onTap: () async {
                   await _pushWithHelpContext(
                     context,
@@ -713,7 +886,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 leading: const Icon(Icons.gavel_outlined),
                 title: const Text("My reports & appeals"),
                 subtitle: const Text(
-                    "Your incident drafts, submissions, and decisions."),
+                  "Your incident drafts, submissions, and decisions.",
+                ),
                 onTap: () async {
                   await _pushWithHelpContext(
                     context,
@@ -728,7 +902,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 leading: const Icon(Icons.tune),
                 title: const Text("Match settings"),
                 subtitle: const Text(
-                    "Match scope, Tree depth, and distance precision."),
+                  "Match scope, Tree depth, and distance precision.",
+                ),
                 onTap: () async {
                   await _pushWithHelpContext(
                     context,
@@ -738,10 +913,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 },
               ),
               ListTile(
+                leading: const Icon(Icons.volume_up_outlined),
+                title: const Text("Sound & alerts"),
+                subtitle: const Text("Match cues, volume, mute, and previews."),
+                onTap: () async {
+                  await _pushWithHelpContext(
+                    context,
+                    contextKey: "settings:sound_alerts",
+                    page: const SoundAlertSettingsScreen(),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.group_outlined),
+                title: const Text("Party profile sharing"),
+                subtitle: const Text(
+                  "Choose what mutual Party members can see about you.",
+                ),
+                onTap: () async {
+                  await _pushWithHelpContext(
+                    context,
+                    contextKey: "settings:party_profile_sharing",
+                    page: const PartyProfileSharingScreen(),
+                  );
+                },
+              ),
+              ListTile(
                 leading: const Icon(Icons.radar),
                 title: const Text("Discovery filters"),
                 subtitle: const Text(
-                    "Adjust radius and Business Mode filters for nearby matches."),
+                  "Adjust radius and Business Mode filters for nearby matches.",
+                ),
                 onTap: () async {
                   await _pushWithHelpContext(
                     context,
@@ -754,10 +956,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 leading: const Icon(Icons.payments_outlined),
                 title: const Text("Business Mode & payments"),
                 subtitle: const Text(
-                    "Always-available activation path (no dead ends)."),
+                  "Always-available activation path (no dead ends).",
+                ),
                 onTap: () async {
-                  ContextHelpService.instance
-                      .setContext("settings:business_mode_payments");
+                  ContextHelpService.instance.setContext(
+                    "settings:business_mode_payments",
+                  );
                   await BusinessPaywallScreen.open(context);
                   ContextHelpService.instance.setContext("home:settings");
                 },
@@ -775,7 +979,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 leading: const Icon(Icons.timeline),
                 title: const Text("Trust timeline"),
                 subtitle: const Text(
-                    "See what affected your trust - as a simple story."),
+                  "See what affected your trust - as a simple story.",
+                ),
                 onTap: () async {
                   await _pushWithHelpContext(
                     context,
@@ -800,7 +1005,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 leading: const Icon(Icons.smart_toy_outlined),
                 title: const Text("Business avatar message"),
                 subtitle: const Text(
-                    "Set a short away message for your Business avatar helper."),
+                  "Set a short away message for your Business avatar helper.",
+                ),
                 onTap: () async {
                   await _pushWithHelpContext(
                     context,
@@ -813,7 +1019,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 leading: const Icon(Icons.block_outlined),
                 title: const Text("Blocked users"),
                 subtitle: const Text(
-                    "Manage meetup-request blocks (local-only for now)."),
+                  "Manage the people you have blocked across your devices.",
+                ),
                 onTap: () async {
                   await _pushWithHelpContext(
                     context,
@@ -826,7 +1033,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 leading: const Icon(Icons.manage_accounts_outlined),
                 title: const Text("Account & billing"),
                 subtitle: const Text(
-                    "Payments, subscription, and Prox Points wallet."),
+                  "Payments, subscription, and Prox Points wallet.",
+                ),
                 onTap: () async {
                   await _pushWithHelpContext(
                     context,
@@ -839,7 +1047,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 leading: const Icon(Icons.support_agent_outlined),
                 title: const Text("Support & feedback"),
                 subtitle: const Text(
-                    "Report bugs, request features, or ask for help."),
+                  "Report bugs, request features, or ask for help.",
+                ),
                 onTap: () async {
                   await _pushWithHelpContext(
                     context,
@@ -851,15 +1060,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ListTile(
                 leading: const Icon(Icons.info_outline),
                 title: const Text("About"),
-                subtitle:
-                    const Text("Version, release info, and what changed."),
+                subtitle: const Text(
+                  "Version, release info, and what changed.",
+                ),
                 onTap: () => _showBuildInfoSheet(context),
               ),
               const SizedBox(height: 24),
               const Divider(),
+              AnimatedBuilder(
+                animation: RuntimeDiagnosticsService.instance,
+                builder: (context, _) => SwitchListTile.adaptive(
+                  title: const Text("Share crash reports"),
+                  subtitle: const Text(
+                    "Help fix crashes. Reports exclude your messages and profile details.",
+                  ),
+                  value: RuntimeDiagnosticsService.instance.sharingEnabled,
+                  onChanged: (enabled) async {
+                    try {
+                      await RuntimeDiagnosticsService.instance
+                          .setSharingEnabled(enabled);
+                    } catch (_) {
+                      if (context.mounted)
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              "Couldn't save that preference. Try again.",
+                            ),
+                          ),
+                        );
+                    }
+                  },
+                ),
+              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                 child: Text("Account", style: textTheme.titleMedium),
+              ),
+              ListTile(
+                leading: const Icon(Icons.privacy_tip_outlined),
+                title: const Text("Your account data"),
+                subtitle: const Text(
+                  "Export an account summary or delete your account.",
+                ),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const AccountPrivacyScreen(),
+                  ),
+                ),
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -874,9 +1121,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ListTile(
                 leading: const Icon(Icons.logout),
                 title: const Text("Log out"),
-                subtitle: Text(_signingOut
-                    ? "Signing out..."
-                    : "Sign out on this device."),
+                subtitle: Text(
+                  _signingOut ? "Signing out..." : "Sign out on this device.",
+                ),
                 trailing: _signingOut
                     ? const SizedBox(
                         width: 18,

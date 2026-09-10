@@ -4,8 +4,48 @@ import "package:firebase_auth/firebase_auth.dart";
 import "package:prox/services/policy_ack_service.dart";
 import "package:prox/services/points_service.dart";
 
+Future<bool> ensureBusinessRulesAccepted(BuildContext context) async {
+  await PolicyAckService.instance.ensureLoaded();
+  if (PolicyAckService.instance
+      .isAcked(PolicyAckService.businessRulesVersion)) {
+    return true;
+  }
+  if (!context.mounted) return false;
+
+  final review = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text("Business Mode agreement"),
+      content: const Text(
+        "Before using Business Mode, review and accept its reliability, availability, and meetup expectations.",
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(false),
+          child: const Text("Not now"),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(ctx).pop(true),
+          child: const Text("Review agreement"),
+        ),
+      ],
+    ),
+  );
+  if (review != true || !context.mounted) return false;
+
+  await Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => const BusinessRulesScreen(closeAfterAccept: true),
+    ),
+  );
+  return PolicyAckService.instance
+      .isAcked(PolicyAckService.businessRulesVersion);
+}
+
 class BusinessRulesScreen extends StatelessWidget {
-  const BusinessRulesScreen({super.key});
+  final bool closeAfterAccept;
+
+  const BusinessRulesScreen({super.key, this.closeAfterAccept = false});
 
   @override
   Widget build(BuildContext context) {
@@ -63,7 +103,8 @@ class BusinessRulesScreen extends StatelessWidget {
             ),
             child: SelectableText(
               text,
-              style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant, height: 1.25),
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: cs.onSurfaceVariant, height: 1.25),
             ),
           ),
           const SizedBox(height: 14),
@@ -76,21 +117,28 @@ class BusinessRulesScreen extends StatelessWidget {
               return SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: ok ? null : () async {
-                    await svc.setAcked(PolicyAckService.businessRulesVersion, true);
-                    final uid = FirebaseAuth.instance.currentUser?.uid ?? "";
-                    if (uid.trim().isNotEmpty) {
-                      await PointsService.instance.addPoints(
-                        uid: uid,
-                        amount: 15,
-                        reason: "Accepted Business Mode rules",
-                        category: "policy_ack",
-                        contextType: "business_rules",
-                      );
-                    }
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Accepted: Business rules (+15 Prox Points)")));
-                  },
+                  onPressed: ok
+                      ? null
+                      : () async {
+                          await svc.setAcked(
+                              PolicyAckService.businessRulesVersion, true);
+                          final uid =
+                              FirebaseAuth.instance.currentUser?.uid ?? "";
+                          if (uid.trim().isNotEmpty) {
+                            await PointsService.instance.addPoints(
+                              uid: uid,
+                              amount: 15,
+                              reason: "Accepted Business Mode rules",
+                              category: "policy_ack",
+                              contextType: "business_rules",
+                            );
+                          }
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                              content: Text(
+                                  "Accepted: Business rules (+15 Prox Points)")));
+                          if (closeAfterAccept) Navigator.of(context).pop();
+                        },
                   icon: Icon(ok ? Icons.check_circle : Icons.done),
                   label: Text(ok ? "Accepted" : "I understand & accept"),
                 ),

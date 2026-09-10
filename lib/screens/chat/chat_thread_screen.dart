@@ -9,6 +9,8 @@ import "package:image_picker/image_picker.dart";
 import "package:prox/services/chat/chat_gate_service.dart";
 import "package:prox/services/chat/chat_message_service.dart";
 import "package:prox/services/meetup_service.dart";
+import "package:prox/services/meetup_focus_lock_service.dart";
+import "package:prox/widgets/meetup_session_bar.dart";
 import "package:prox/services/user_notes_service.dart";
 import "package:prox/services/user_profile_service.dart";
 import "package:prox/widgets/meetup_request_bar.dart";
@@ -35,7 +37,8 @@ class ChatThreadScreen extends StatefulWidget {
   State<ChatThreadScreen> createState() => _ChatThreadScreenState();
 }
 
-class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBindingObserver {
+class _ChatThreadScreenState extends State<ChatThreadScreen>
+    with WidgetsBindingObserver {
   final _text = TextEditingController();
   bool _sending = false;
   bool _sendingMedia = false;
@@ -44,10 +47,16 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBinding
 
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? "";
 
-  CollectionReference<Map<String, dynamic>> get _msgRef => FirebaseFirestore.instance
-      .collection("chats")
-      .doc(widget.chatId)
-      .collection("messages");
+  double _systemBottomInset(BuildContext context) {
+    final view = View.of(context);
+    return view.viewPadding.bottom / view.devicePixelRatio;
+  }
+
+  CollectionReference<Map<String, dynamic>> get _msgRef =>
+      FirebaseFirestore.instance
+          .collection("chats")
+          .doc(widget.chatId)
+          .collection("messages");
 
   DocumentReference<Map<String, dynamic>> get _chatRef =>
       FirebaseFirestore.instance.collection("chats").doc(widget.chatId);
@@ -156,7 +165,8 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBinding
     final picker = ImagePicker();
     XFile? xf;
     try {
-      xf = await picker.pickImage(source: ImageSource.camera, maxWidth: 1280, imageQuality: 72);
+      xf = await picker.pickImage(
+          source: ImageSource.camera, maxWidth: 1280, imageQuality: 72);
     } catch (_) {
       xf = null;
     }
@@ -170,7 +180,9 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBinding
       final ref = FirebaseStorage.instance.ref().child(path);
 
       final bytes = await xf.readAsBytes();
-      await ref.putData(bytes, SettableMetadata(contentType: "image/jpeg")).timeout(const Duration(minutes: 2));
+      await ref
+          .putData(bytes, SettableMetadata(contentType: "image/jpeg"))
+          .timeout(const Duration(minutes: 2));
 
       final url = await ref.getDownloadURL();
 
@@ -205,7 +217,8 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBinding
     if (isParty) return const SizedBox.shrink();
 
     final myUid = _myUid;
-    final requestedByMe = gate.requestedBy.isNotEmpty && gate.requestedBy == myUid;
+    final requestedByMe =
+        gate.requestedBy.isNotEmpty && gate.requestedBy == myUid;
 
     if (gate.isAccepted) return const SizedBox.shrink();
 
@@ -217,7 +230,8 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBinding
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.25),
+              color:
+                  Theme.of(context).colorScheme.outline.withValues(alpha: 0.25),
             ),
           ),
           child: const Text("Chat was declined."),
@@ -233,10 +247,12 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBinding
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.25),
+              color:
+                  Theme.of(context).colorScheme.outline.withValues(alpha: 0.25),
             ),
           ),
-          child: const Text("Chat request expired. Send a new request from Nearby."),
+          child: const Text(
+              "Chat request expired. Send a new request from Nearby."),
         ),
       );
     }
@@ -249,7 +265,8 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBinding
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.25),
+              color:
+                  Theme.of(context).colorScheme.outline.withValues(alpha: 0.25),
             ),
           ),
           child: const Text("Chat request sent. Waiting for them to accept..."),
@@ -264,7 +281,8 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBinding
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.25),
+            color:
+                Theme.of(context).colorScheme.outline.withValues(alpha: 0.25),
           ),
         ),
         child: const Text(
@@ -326,8 +344,10 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBinding
   }
 
   String _fmtLatLng(dynamic latAny, dynamic lngAny) {
-    final double? lat = (latAny is num) ? latAny.toDouble() : double.tryParse("$latAny");
-    final double? lng = (lngAny is num) ? lngAny.toDouble() : double.tryParse("$lngAny");
+    final double? lat =
+        (latAny is num) ? latAny.toDouble() : double.tryParse("$latAny");
+    final double? lng =
+        (lngAny is num) ? lngAny.toDouble() : double.tryParse("$lngAny");
     if (lat == null || lng == null) return "Location: (not set)";
     return "Location: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}";
   }
@@ -405,7 +425,8 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBinding
     ctrl.dispose();
   }
 
-  Widget _meetupRecapCard(Map<String, dynamic> recap, {required String notePreview}) {
+  Widget _meetupRecapCard(Map<String, dynamic> recap,
+      {required String notePreview}) {
     final cs = Theme.of(context).colorScheme;
 
     DateTime? completed;
@@ -414,7 +435,10 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBinding
 
     final kwsAny = recap["matchedKeywords"];
     final List<String> kws = (kwsAny is List)
-        ? kwsAny.map((e) => e.toString().trim()).where((s) => s.isNotEmpty).toList()
+        ? kwsAny
+            .map((e) => e.toString().trim())
+            .where((s) => s.isNotEmpty)
+            .toList()
         : const <String>[];
 
     return Padding(
@@ -443,12 +467,15 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBinding
                   ),
                 ),
                 if (notePreview.trim().isNotEmpty)
-                  Icon(Icons.note_alt_outlined, color: cs.onSurfaceVariant, size: 18),
+                  Icon(Icons.note_alt_outlined,
+                      color: cs.onSurfaceVariant, size: 18),
               ],
             ),
             const SizedBox(height: 8),
             Text(
-              completed == null ? "Completed: (unknown time)" : "Completed: ${_fmtDateTime(completed)}",
+              completed == null
+                  ? "Completed: (unknown time)"
+                  : "Completed: ${_fmtDateTime(completed)}",
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: cs.onSurfaceVariant,
                   ),
@@ -467,10 +494,12 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBinding
                 runSpacing: 6,
                 children: kws.take(8).map((k) {
                   return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: cs.outline.withValues(alpha: 0.24)),
+                      border:
+                          Border.all(color: cs.outline.withValues(alpha: 0.24)),
                       color: cs.surface,
                     ),
                     child: Text(
@@ -490,14 +519,17 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBinding
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () async {
-                      final current = await UserNotesService.instance.getNoteText(
+                      final current =
+                          await UserNotesService.instance.getNoteText(
                         otherUid: widget.otherUid,
                       );
                       if (!mounted) return;
                       await _editPrivateNote(initial: current);
                     },
                     icon: const Icon(Icons.edit_note),
-                    label: Text(notePreview.trim().isEmpty ? "Add private note" : "Edit private note"),
+                    label: Text(notePreview.trim().isEmpty
+                        ? "Add private note"
+                        : "Edit private note"),
                   ),
                 ),
               ],
@@ -526,7 +558,8 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBinding
     required String imageUrl,
   }) {
     final cs = Theme.of(context).colorScheme;
-    final bg = mine ? cs.primary.withValues(alpha: 0.20) : cs.surfaceContainerHighest;
+    final bg =
+        mine ? cs.primary.withValues(alpha: 0.20) : cs.surfaceContainerHighest;
     final border = cs.outline.withValues(alpha: 0.25);
 
     Widget body;
@@ -538,8 +571,8 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBinding
           fit: BoxFit.cover,
           height: 220,
           width: 280,
-          errorBuilder: (_, __, ___) =>
-              const SizedBox(height: 80, child: Center(child: Text("Image failed"))),
+          errorBuilder: (_, __, ___) => const SizedBox(
+              height: 80, child: Center(child: Text("Image failed"))),
           loadingBuilder: (context, child, p) {
             if (p == null) return child;
             return const SizedBox(
@@ -613,79 +646,115 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBinding
 
         return Scaffold(
           appBar: AppBar(title: Text(title)),
+          bottomNavigationBar: ListenableBuilder(
+            listenable: MeetupFocusLockService.instance,
+            builder: (context, _) {
+              final focus = MeetupFocusLockService.instance.state;
+              if (!focus.active || focus.meetupId != widget.chatId) {
+                return const SizedBox.shrink();
+              }
+              return MeetupSessionBar(
+                meetupId: widget.chatId,
+                otherUid: widget.otherUid,
+                currentScreen: "chat",
+                helpTitle: "Confirm the meetup together",
+                helpMessage:
+                    "Use chat to agree on expectations and the meeting point. Open Plan to set or confirm the pin, then move to Live when both people are ready.",
+              );
+            },
+          ),
           body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
             stream: _chatRef.snapshots(),
             builder: (context, chatSnap) {
               final chatData = chatSnap.data?.data();
               final gate = ChatGateStatus.fromChatDoc(chatData);
 
-              final recapAny = (chatData ?? const <String, dynamic>{})["meetupRecap"];
-              final Map<String, dynamic> recap =
-                  (recapAny is Map) ? Map<String, dynamic>.from(recapAny) : <String, dynamic>{};
+              final recapAny =
+                  (chatData ?? const <String, dynamic>{})["meetupRecap"];
+              final Map<String, dynamic> recap = (recapAny is Map)
+                  ? Map<String, dynamic>.from(recapAny)
+                  : <String, dynamic>{};
 
               return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                stream: (myUid.isEmpty) ? const Stream.empty() : _partyDoc(myUid).snapshots(),
+                stream: (myUid.isEmpty)
+                    ? const Stream.empty()
+                    : _partyDoc(myUid).snapshots(),
                 builder: (context, partySnap) {
                   final isParty = partySnap.data?.exists == true;
 
                   return StreamBuilder<MeetupRequestState?>(
-                    stream: MeetupService.instance.watchRequestState(chatId: widget.chatId),
+                    stream: MeetupService.instance
+                        .watchRequestState(chatId: widget.chatId),
                     builder: (context, meetupSnap) {
                       final meetupState = meetupSnap.data;
-                      final Duration? declineLeft =
-                          MeetupService.instance.declineCooldownLeftFromState(meetupState);
+                      final Duration? declineLeft = MeetupService.instance
+                          .declineCooldownLeftFromState(meetupState);
                       final bool declineCooling =
                           (declineLeft != null && declineLeft > Duration.zero);
 
                       final bool chatOpen = gate.isAccepted || isParty;
                       final bool canSend = chatOpen && !declineCooling;
 
-                      return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                        stream: UserNotesService.instance.watchNote(otherUid: widget.otherUid),
+                      return StreamBuilder<
+                          DocumentSnapshot<Map<String, dynamic>>>(
+                        stream: UserNotesService.instance
+                            .watchNote(otherUid: widget.otherUid),
                         builder: (context, noteSnap) {
-                          final nd = noteSnap.data?.data() ?? const <String, dynamic>{};
+                          final nd = noteSnap.data?.data() ??
+                              const <String, dynamic>{};
                           final noteText = (nd["text"] ?? "").toString();
                           final notePreview = noteText.trim();
 
                           return Column(
                             children: [
                               _chatGateBanner(gate, isParty: isParty),
-
                               if (recap.isNotEmpty)
-                                _meetupRecapCard(recap, notePreview: notePreview),
-
-                              if (declineCooling) _meetupDeclineLockBanner(declineLeft),
-
+                                _meetupRecapCard(recap,
+                                    notePreview: notePreview),
+                              if (declineCooling)
+                                _meetupDeclineLockBanner(declineLeft),
                               MeetupRequestBar(
                                 chatId: widget.chatId,
                                 otherUid: widget.otherUid,
                                 isParty: isParty,
                                 chatOpen: chatOpen,
                               ),
-
                               Expanded(
-                                child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                                  stream: _msgRef.orderBy("ts", descending: true).limit(80).snapshots(),
+                                child: StreamBuilder<
+                                    QuerySnapshot<Map<String, dynamic>>>(
+                                  stream: _msgRef
+                                      .orderBy("ts", descending: true)
+                                      .limit(80)
+                                      .snapshots(),
                                   builder: (context, snap) {
                                     final docs = snap.data?.docs ?? const [];
-                                    if (myUid.isNotEmpty && docs.isNotEmpty) _scheduleReadClear();
-                                    if (docs.isEmpty) return const Center(child: Text("Say hi"));
+                                    if (myUid.isNotEmpty && docs.isNotEmpty)
+                                      _scheduleReadClear();
+                                    if (docs.isEmpty)
+                                      return const Center(
+                                          child: Text("Say hi"));
 
                                     return ListView.builder(
                                       reverse: true,
                                       itemCount: docs.length,
                                       itemBuilder: (context, i) {
                                         final d = docs[i].data();
-                                        final from = (d["from"] ?? "").toString();
-                                        final text = (d["text"] ?? "").toString();
-                                        final type = (d["type"] ?? "").toString();
-                                        final imageUrl =
-                                            (d["imageUrl"] ?? d["mediaUrl"] ?? "").toString();
+                                        final from =
+                                            (d["from"] ?? "").toString();
+                                        final text =
+                                            (d["text"] ?? "").toString();
+                                        final type =
+                                            (d["type"] ?? "").toString();
+                                        final imageUrl = (d["imageUrl"] ??
+                                                d["mediaUrl"] ??
+                                                "")
+                                            .toString();
                                         final mine = from == myUid;
 
                                         final tsAny = d["ts"];
                                         DateTime? ts;
-                                        if (tsAny is Timestamp) ts = tsAny.toDate();
+                                        if (tsAny is Timestamp)
+                                          ts = tsAny.toDate();
 
                                         final read = (d["read"] == true);
 
@@ -702,54 +771,62 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> with WidgetsBinding
                                   },
                                 ),
                               ),
-
-                              SafeArea(
-                                top: false,
-                                child: Padding(
-                                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                                  child: Row(
-                                    children: [
-                                      IconButton(
-                                        tooltip: "Camera",
-                                        onPressed: (!canSend || _sendingMedia)
-                                            ? null
-                                            : () => _pickAndSendPhoto(canSend: canSend),
-                                        icon: _sendingMedia
-                                            ? const SizedBox(
-                                                width: 18,
-                                                height: 18,
-                                                child: CircularProgressIndicator(strokeWidth: 2),
-                                              )
-                                            : const Icon(Icons.camera_alt_outlined),
-                                      ),
-                                      Expanded(
-                                        child: TextField(
-                                          controller: _text,
-                                          enabled: canSend,
-                                          textInputAction: TextInputAction.send,
-                                          onSubmitted: (_) => _send(canSend: canSend),
-                                          decoration: InputDecoration(
-                                            hintText: canSend
-                                                ? "Message..."
-                                                : (declineCooling
-                                                    ? "Paused after meetup decline..."
-                                                    : "Chat locked until accepted..."),
-                                          ),
+                              Padding(
+                                padding: EdgeInsets.fromLTRB(
+                                  12,
+                                  8,
+                                  12,
+                                  12 + _systemBottomInset(context),
+                                ),
+                                child: Row(
+                                  children: [
+                                    IconButton(
+                                      tooltip: "Camera",
+                                      onPressed: (!canSend || _sendingMedia)
+                                          ? null
+                                          : () => _pickAndSendPhoto(
+                                              canSend: canSend),
+                                      icon: _sendingMedia
+                                          ? const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(
+                                                  strokeWidth: 2),
+                                            )
+                                          : const Icon(
+                                              Icons.camera_alt_outlined),
+                                    ),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: _text,
+                                        enabled: canSend,
+                                        textInputAction: TextInputAction.send,
+                                        onSubmitted: (_) =>
+                                            _send(canSend: canSend),
+                                        decoration: InputDecoration(
+                                          hintText: canSend
+                                              ? "Message..."
+                                              : (declineCooling
+                                                  ? "Paused after meetup decline..."
+                                                  : "Chat locked until accepted..."),
                                         ),
                                       ),
-                                      const SizedBox(width: 10),
-                                      FilledButton(
-                                        onPressed: _sending ? null : () => _send(canSend: canSend),
-                                        child: _sending
-                                            ? const SizedBox(
-                                                width: 18,
-                                                height: 18,
-                                                child: CircularProgressIndicator(strokeWidth: 2),
-                                              )
-                                            : const Icon(Icons.send),
-                                      ),
-                                    ],
-                                  ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    FilledButton(
+                                      onPressed: _sending
+                                          ? null
+                                          : () => _send(canSend: canSend),
+                                      child: _sending
+                                          ? const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(
+                                                  strokeWidth: 2),
+                                            )
+                                          : const Icon(Icons.send),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],

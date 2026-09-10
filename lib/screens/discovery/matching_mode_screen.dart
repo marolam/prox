@@ -1,20 +1,17 @@
+import "dart:async";
 import "package:flutter/material.dart";
 import "package:firebase_auth/firebase_auth.dart";
 
 import "package:prox/models/user_settings.dart";
 import "package:prox/screens/services/match_settings_service.dart";
 import "package:prox/services/matching/matching_mode_service.dart";
-import "package:prox/services/monetization_service.dart";
 import "package:prox/services/user_profile_service.dart";
 import "package:prox/services/user_settings_service.dart";
 import "package:prox/widgets/prox_background.dart";
 import "package:prox/widgets/prox_glass.dart";
 
 class MatchingModeScreen extends StatefulWidget {
-  const MatchingModeScreen({
-    super.key,
-    this.focusRadius = false,
-  });
+  const MatchingModeScreen({super.key, this.focusRadius = false});
 
   final bool focusRadius;
 
@@ -36,6 +33,7 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
   bool _reciprocalUnlocked = false;
   bool _keywordChainUnlocked = false;
   int _keywordCount = 0;
+  StreamSubscription<UserSettings>? _settingsSubscription;
 
   @override
   void initState() {
@@ -53,6 +51,34 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
     _singleKeywordUnlocked = d.singleKeywordMatchUnlocked;
     _reciprocalUnlocked = d.reciprocalMatchUnlocked;
     _keywordChainUnlocked = d.keywordChainUnlocked;
+    _settingsSubscription = UserSettingsService.instance.watch().listen((
+      settings,
+    ) {
+      final discovery = settings.matchDiscovery;
+      if (!mounted ||
+          (_highRadiusUnlocked == discovery.highRadiusUnlocked &&
+              _singleKeywordUnlocked == discovery.singleKeywordMatchUnlocked &&
+              _reciprocalUnlocked == discovery.reciprocalMatchUnlocked &&
+              _keywordChainUnlocked == discovery.keywordChainUnlocked))
+        return;
+      setState(() {
+        _highRadiusUnlocked = discovery.highRadiusUnlocked;
+        _singleKeywordUnlocked = discovery.singleKeywordMatchUnlocked;
+        _reciprocalUnlocked = discovery.reciprocalMatchUnlocked;
+        _keywordChainUnlocked = discovery.keywordChainUnlocked;
+        final maxRadius = MatchDiscoverySettings.allowedMaxRadiusMiles(
+          highRadiusUnlocked: _highRadiusUnlocked,
+          businessOnly: _businessOnly,
+          modeKind: _kind,
+          normalMode: _normalMode,
+        );
+        _radiusMiles = _radiusMiles
+            .clamp(MatchDiscoverySettings.minRadiusMiles, maxRadius)
+            .toDouble();
+        if (!_isKeywordModeUnlocked(_keywordMode))
+          _keywordMode = KeywordMatchMode.similar;
+      });
+    });
 
     // ignore: discarded_futures
     _refreshGuidanceContext();
@@ -62,32 +88,21 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? "";
     if (uid.trim().isEmpty) return;
 
-    final entitlements =
-        await MonetizationService.instance.getEntitlementsMap(uid: uid);
-    final unlocked = entitlements["highRadiusUnlocked"] == true;
-    final singleKeywordUnlocked =
-        entitlements["singleKeywordMatchModeUnlocked"] == true;
-    final reciprocalUnlocked =
-        entitlements["reciprocalKeywordMatchModeUnlocked"] == true;
-    final keywordChainUnlocked =
-        entitlements["keywordChainMatchModeUnlocked"] == true;
-    UserSettingsService.instance.setHighRadiusUnlocked(unlocked);
-    UserSettingsService.instance
-        .setSingleKeywordMatchUnlocked(singleKeywordUnlocked);
-    UserSettingsService.instance.setReciprocalMatchUnlocked(reciprocalUnlocked);
-    UserSettingsService.instance.setKeywordChainUnlocked(keywordChainUnlocked);
+    try {
+      final profile = await UserProfileService.instance
+          .getProfileOnce(uid)
+          .timeout(const Duration(seconds: 8));
+      if (!mounted || FirebaseAuth.instance.currentUser?.uid != uid) return;
+      setState(() => _keywordCount = _estimateKeywordCount(profile));
+    } catch (_) {
+      // Keyword-count guidance is optional; access comes from the live session.
+    }
+  }
 
-    final profile = await UserProfileService.instance.getProfileOnce(uid);
-    final keywordCount = _estimateKeywordCount(profile);
-
-    if (!mounted) return;
-    setState(() {
-      _highRadiusUnlocked = unlocked;
-      _singleKeywordUnlocked = singleKeywordUnlocked;
-      _reciprocalUnlocked = reciprocalUnlocked;
-      _keywordChainUnlocked = keywordChainUnlocked;
-      _keywordCount = keywordCount;
-    });
+  @override
+  void dispose() {
+    _settingsSubscription?.cancel();
+    super.dispose();
   }
 
   bool _isKeywordModeUnlocked(KeywordMatchMode mode) {
@@ -128,15 +143,17 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
       KeywordMatchMode.keywordChain,
     ];
 
-    return allModes.map((mode) {
-      final unlocked = _isKeywordModeUnlocked(mode);
-      final suffix = unlocked ? "" : " (Store unlock required)";
-      return DropdownMenuItem<KeywordMatchMode>(
-        value: mode,
-        enabled: unlocked,
-        child: Text("${_keywordModeLabel(mode)}$suffix"),
-      );
-    }).toList(growable: false);
+    return allModes
+        .map((mode) {
+          final unlocked = _isKeywordModeUnlocked(mode);
+          final suffix = unlocked ? "" : " (Store unlock required)";
+          return DropdownMenuItem<KeywordMatchMode>(
+            value: mode,
+            enabled: unlocked,
+            child: Text("${_keywordModeLabel(mode)}$suffix"),
+          );
+        })
+        .toList(growable: false);
   }
 
   int _estimateKeywordCount(UserProfile? profile) {
@@ -160,34 +177,40 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
         _kind == MatchingModeKind.normal &&
         _normalMode == NormalMatchMode.passive) {
       suggestions.add(
-          "Unlock High Radius in the Prox Store to extend Business Passive search up to 30 mi.");
+        "Unlock High Radius in the Prox Store to extend Business Passive search up to 30 mi.",
+      );
     }
 
     if (_radiusMiles > 15.0 && _keywordCount < 3) {
       suggestions.add(
-          "Add at least 3 clear search/provide keywords for better far-radius match quality.");
+        "Add at least 3 clear search/provide keywords for better far-radius match quality.",
+      );
     }
 
     if (_kind == MatchingModeKind.travel) {
       suggestions.add(
-          "Travel mode is strict. If results are sparse, switch to Normal Passive for broader coverage.");
+        "Travel mode is strict. If results are sparse, switch to Normal Passive for broader coverage.",
+      );
     }
 
     if (_kind == MatchingModeKind.listen) {
       suggestions.add(
-          "Listen mode only pairs opposite roles. Speak matches Listeners, and Listen matches Speakers.");
+        "Listen mode only pairs opposite roles. Speak matches Listeners, and Listen matches Speakers.",
+      );
     }
 
     if (_radiusMiles > 15.0) {
       suggestions.add(
-          "At very high radius, far profiles are filtered to keyword overlaps to reduce low-intent noise.");
+        "At very high radius, far profiles are filtered to keyword overlaps to reduce low-intent noise.",
+      );
     }
 
     if (!_singleKeywordUnlocked ||
         !_reciprocalUnlocked ||
         !_keywordChainUnlocked) {
       suggestions.add(
-          "Prox Store unlocks additional keyword modes: Single Keyword, Reciprocal Opposite, and Keyword Chain.");
+        "Prox Store unlocks additional keyword modes: Single Keyword, Reciprocal Opposite, and Keyword Chain.",
+      );
     }
 
     return suggestions;
@@ -212,12 +235,16 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
           ? _keywordMode
           : KeywordMatchMode.similar;
       final safeRadius = _radiusMiles
-          .clamp(MatchDiscoverySettings.minRadiusMiles,
-              MatchDiscoverySettings.extendedMaxRadiusMiles)
+          .clamp(
+            MatchDiscoverySettings.minRadiusMiles,
+            MatchDiscoverySettings.extendedMaxRadiusMiles,
+          )
           .toDouble();
       final safeTreasureRadius = _treasureRadius
-          .clamp(MatchDiscoverySettings.minRadiusMiles,
-              MatchDiscoverySettings.maxRadiusMiles)
+          .clamp(
+            MatchDiscoverySettings.minRadiusMiles,
+            MatchDiscoverySettings.maxRadiusMiles,
+          )
           .toDouble();
 
       svc.setRadiusMiles(safeRadius);
@@ -227,9 +254,11 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
       MatchSettingsService.instance.setBusinessOnly(_businessOnly);
       MatchSettingsService.instance.setKeywordMode(effectiveKeywordMode);
       if (_kind == MatchingModeKind.normal) {
-        svc.setMode(_normalMode == NormalMatchMode.active
-            ? ProxMatchingMode.active
-            : ProxMatchingMode.passive);
+        svc.setMode(
+          _normalMode == NormalMatchMode.active
+              ? ProxMatchingMode.active
+              : ProxMatchingMode.passive,
+        );
       }
     } catch (_) {
       // Keep the chooser closable even if persistence/network updates fail.
@@ -298,19 +327,21 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                             children: [
                               Text(
                                 "Match radius: ${_radiusMiles.toStringAsFixed(1)} mi",
-                                style: theme.textTheme.titleSmall
-                                    ?.copyWith(fontWeight: FontWeight.w800),
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
                               Slider(
                                 value: _radiusMiles,
                                 min: MatchDiscoverySettings.minRadiusMiles,
                                 max: maxAllowedRadius,
-                                divisions: ((maxAllowedRadius -
-                                            MatchDiscoverySettings
-                                                .minRadiusMiles) *
-                                        2)
-                                    .round()
-                                    .clamp(1, 100),
+                                divisions:
+                                    ((maxAllowedRadius -
+                                                MatchDiscoverySettings
+                                                    .minRadiusMiles) *
+                                            2)
+                                        .round()
+                                        .clamp(1, 100),
                                 onChanged: (v) =>
                                     setState(() => _radiusMiles = v),
                               ),
@@ -331,20 +362,22 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                                     children: [
                                       Text(
                                         "- ",
-                                        style:
-                                            theme.textTheme.bodySmall?.copyWith(
-                                          color: cs.onSurface
-                                              .withValues(alpha: 0.72),
-                                        ),
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(
+                                              color: cs.onSurface.withValues(
+                                                alpha: 0.72,
+                                              ),
+                                            ),
                                       ),
                                       Expanded(
                                         child: Text(
                                           msg,
                                           style: theme.textTheme.bodySmall
                                               ?.copyWith(
-                                            color: cs.onSurface
-                                                .withValues(alpha: 0.72),
-                                          ),
+                                                color: cs.onSurface.withValues(
+                                                  alpha: 0.72,
+                                                ),
+                                              ),
                                         ),
                                       ),
                                     ],
@@ -387,8 +420,9 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                               children: [
                                 Text(
                                   'Keyword match behavior',
-                                  style: theme.textTheme.titleSmall
-                                      ?.copyWith(fontWeight: FontWeight.w800),
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
                                 ),
                                 const SizedBox(height: 8),
                                 DropdownButtonFormField<KeywordMatchMode>(
@@ -427,12 +461,15 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                                     width: double.infinity,
                                     padding: const EdgeInsets.all(10),
                                     decoration: BoxDecoration(
-                                      color: cs.secondaryContainer
-                                          .withValues(alpha: 0.55),
+                                      color: cs.secondaryContainer.withValues(
+                                        alpha: 0.55,
+                                      ),
                                       borderRadius: BorderRadius.circular(10),
                                       border: Border.all(
-                                          color: cs.secondary
-                                              .withValues(alpha: 0.45)),
+                                        color: cs.secondary.withValues(
+                                          alpha: 0.45,
+                                        ),
+                                      ),
                                     ),
                                     child: Column(
                                       crossAxisAlignment:
@@ -442,19 +479,20 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                                           "This keyword mode requires a Prox Store unlock.",
                                           style: theme.textTheme.bodySmall
                                               ?.copyWith(
-                                            color: cs.onSecondaryContainer,
-                                            fontWeight: FontWeight.w700,
-                                          ),
+                                                color: cs.onSecondaryContainer,
+                                                fontWeight: FontWeight.w700,
+                                              ),
                                         ),
                                         const SizedBox(height: 8),
                                         Align(
                                           alignment: Alignment.centerLeft,
                                           child: FilledButton.icon(
-                                            onPressed: () =>
-                                                Navigator.of(context)
-                                                    .pushNamed("/store"),
+                                            onPressed: () => Navigator.of(
+                                              context,
+                                            ).pushNamed("/store"),
                                             icon: const Icon(
-                                                Icons.storefront_outlined),
+                                              Icons.storefront_outlined,
+                                            ),
                                             label: const Text("Open Store"),
                                           ),
                                         ),
@@ -556,8 +594,9 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                                 children: [
                                   Text(
                                     "Listen mode role",
-                                    style: theme.textTheme.titleSmall
-                                        ?.copyWith(fontWeight: FontWeight.w800),
+                                    style: theme.textTheme.titleSmall?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                    ),
                                   ),
                                   const SizedBox(height: 8),
                                   SingleChildScrollView(
@@ -588,8 +627,9 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                                         ? "Speak role finds nearby users in Listen role."
                                         : "Listen role finds nearby users in Speak role.",
                                     style: theme.textTheme.bodySmall?.copyWith(
-                                      color:
-                                          cs.onSurface.withValues(alpha: 0.78),
+                                      color: cs.onSurface.withValues(
+                                        alpha: 0.78,
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -609,8 +649,9 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                                 children: [
                                   Text(
                                     "Normal mode behavior",
-                                    style: theme.textTheme.titleSmall
-                                        ?.copyWith(fontWeight: FontWeight.w800),
+                                    style: theme.textTheme.titleSmall?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                    ),
                                   ),
                                   const SizedBox(height: 8),
                                   SingleChildScrollView(
@@ -618,11 +659,13 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                                     child: SegmentedButton<NormalMatchMode>(
                                       segments: const [
                                         ButtonSegment(
-                                            value: NormalMatchMode.passive,
-                                            label: Text("Passive")),
+                                          value: NormalMatchMode.passive,
+                                          label: Text("Passive"),
+                                        ),
                                         ButtonSegment(
-                                            value: NormalMatchMode.active,
-                                            label: Text("Active")),
+                                          value: NormalMatchMode.active,
+                                          label: Text("Active"),
+                                        ),
                                       ],
                                       selected: <NormalMatchMode>{_normalMode},
                                       onSelectionChanged: _activeLocked
@@ -639,8 +682,9 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                                         ? "Active is temporarily locked for missed responses."
                                         : "Active requires replying to new matches within 10 minutes.",
                                     style: theme.textTheme.bodySmall?.copyWith(
-                                      color:
-                                          cs.onSurface.withValues(alpha: 0.78),
+                                      color: cs.onSurface.withValues(
+                                        alpha: 0.78,
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -658,8 +702,9 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                                 children: [
                                   Text(
                                     "Treasure radius: ${_treasureRadius.toStringAsFixed(1)} mi",
-                                    style: theme.textTheme.titleSmall
-                                        ?.copyWith(fontWeight: FontWeight.w800),
+                                    style: theme.textTheme.titleSmall?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                    ),
                                   ),
                                   Slider(
                                     value: _treasureRadius,
@@ -698,8 +743,8 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                   highlight: _kind == MatchingModeKind.travel
                       ? orange
                       : (_kind == MatchingModeKind.treasureHunt
-                          ? green
-                          : (_kind == MatchingModeKind.listen ? aqua : blue)),
+                            ? green
+                            : (_kind == MatchingModeKind.listen ? aqua : blue)),
                 ),
                 const SizedBox(height: 18),
               ],

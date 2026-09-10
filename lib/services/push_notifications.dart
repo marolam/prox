@@ -23,6 +23,12 @@ class PushNotifications {
 
   StreamSubscription<RemoteMessage>? _foregroundSub;
   StreamSubscription<String>? _tokenRefreshSub;
+  StreamSubscription<RemoteMessage>? _openMessageSub;
+  Future<void>? _initializing;
+  int _sessionRevision = 0;
+  String? _lastToken;
+  Timer? _registrationRetry;
+  int _registrationAttempts = 0;
 
   bool _initialized = false;
   String? _currentUid;
@@ -30,13 +36,25 @@ class PushNotifications {
 
   GlobalKey<NavigatorState>? _navigatorKey;
   bool _openHandlersInitialized = false;
+  OverlayEntry? _activeBannerEntry;
+  Timer? _activeBannerTimer;
+  String? _activeBannerItemId;
 
   void registerNavigatorKey(GlobalKey<NavigatorState> key) {
     _navigatorKey = key;
     if (kDebugMode) debugPrint("[Push] Registered navigator key.");
   }
 
-  Future<void> initForUser(String uid) async {
+  Future<void> initForUser(String uid) {
+    if (_currentUid == uid && _initializing != null) return _initializing!;
+    final future = _initializeForUser(uid);
+    _initializing = future;
+    return future.whenComplete(() {
+      if (identical(_initializing, future)) _initializing = null;
+    });
+  }
+
+  Future<void> _initializeForUser(String uid) async {
     if (uid.isEmpty) return;
     if (_disabledForSession) {
       if (kDebugMode) debugPrint("[Push] Disabled for this app session.");
@@ -44,36 +62,65 @@ class PushNotifications {
     }
 
     if (_initialized && _currentUid == uid) return;
+    final revision = ++_sessionRevision;
     _currentUid = uid;
 
     await _requestPermission();
+    if (_disabledForSession || _auth.currentUser?.uid != uid || revision != _sessionRevision) return;
 
     try {
+      // Apple requires its APNs token before any FCM token API is called.
+      final apple = !kIsWeb &&
+          (defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS);
+      if (apple && await _fm.getAPNSToken().timeout(const Duration(seconds: 3)) == null) {
+        _scheduleRegistrationRetry(uid);
+        return;
+      }
       final String? token = await _fm.getToken().timeout(const Duration(seconds: 8));
+      if (_auth.currentUser?.uid != uid || revision != _sessionRevision) return;
       if (token != null && token.isNotEmpty) {
+        _lastToken = token;
         await _saveToken(uid, token);
       }
     } catch (e) {
       if (_isGmsBrokerIssue(e)) {
         _disabledForSession = true;
-        if (kDebugMode) debugPrint("[Push] Disabled after broker security error: $e");
+        if (kDebugMode)
+          debugPrint("[Push] Disabled after broker security error: $e");
         return;
       }
       if (kDebugMode) debugPrint("[Push] getToken error: $e");
+      _scheduleRegistrationRetry(uid);
     }
+
+    if (_auth.currentUser?.uid != uid || revision != _sessionRevision) return;
 
     await _tokenRefreshSub?.cancel();
     _tokenRefreshSub = _fm.onTokenRefresh.listen((newToken) async {
-      final String current = _auth.currentUser?.uid ?? _currentUid ?? "";
-      if (current.isEmpty) return;
+      final String current = _auth.currentUser?.uid ?? "";
+      if (current.isEmpty || current != _currentUid) return;
+      _lastToken = newToken;
       await _saveToken(current, newToken);
-    });
+    }, onError: (Object _) { _scheduleRegistrationRetry(uid); });
 
     await _foregroundSub?.cancel();
-    _foregroundSub = FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+    _foregroundSub =
+        FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
 
     _initialized = true;
+    unawaited(setupMessageOpenHandlers());
     if (kDebugMode) debugPrint("[Push] Initialized for uid=$uid");
+  }
+
+  void _scheduleRegistrationRetry(String uid) {
+    if (_registrationAttempts >= 3 || _auth.currentUser?.uid != uid) return;
+    _registrationRetry?.cancel();
+    _registrationAttempts++;
+    _registrationRetry = Timer(Duration(seconds: 3 * _registrationAttempts), () {
+      if (_auth.currentUser?.uid != uid) return;
+      _initialized = false;
+      unawaited(initForUser(uid));
+    });
   }
 
   Future<void> setupMessageOpenHandlers() async {
@@ -81,9 +128,9 @@ class PushNotifications {
     if (_openHandlersInitialized) return;
     _openHandlersInitialized = true;
 
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) async {
+    _openMessageSub = FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) async {
       await handleRemoteMessage(message);
-    });
+    }, onError: (Object _) {});
 
     try {
       final RemoteMessage? initial = await _fm.getInitialMessage();
@@ -94,7 +141,8 @@ class PushNotifications {
     } catch (e) {
       if (_isGmsBrokerIssue(e)) {
         _disabledForSession = true;
-        if (kDebugMode) debugPrint("[Push] Disabled after initial-message broker error: $e");
+        if (kDebugMode)
+          debugPrint("[Push] Disabled after initial-message broker error: $e");
         return;
       }
       if (kDebugMode) debugPrint("[Push] getInitialMessage error: $e");
@@ -118,11 +166,13 @@ class PushNotifications {
         sound: true,
         provisional: true,
       );
-      if (kDebugMode) debugPrint("[Push] Permission: ${settings.authorizationStatus}");
+      if (kDebugMode)
+        debugPrint("[Push] Permission: ${settings.authorizationStatus}");
     } catch (e) {
       if (_isGmsBrokerIssue(e)) {
         _disabledForSession = true;
-        if (kDebugMode) debugPrint("[Push] Disabled after permission broker error: $e");
+        if (kDebugMode)
+          debugPrint("[Push] Disabled after permission broker error: $e");
         return;
       }
       if (kDebugMode) debugPrint("[Push] Permission error: $e");
@@ -131,14 +181,20 @@ class PushNotifications {
 
   bool _isGmsBrokerIssue(Object e) {
     final s = e.toString();
-    return s.contains("Unknown calling package name 'com.google.android.gms'") ||
+    return s.contains(
+            "Unknown calling package name 'com.google.android.gms'") ||
         s.contains("DEVELOPER_ERROR") ||
         (s.contains("SecurityException") && s.contains("GoogleApi"));
   }
 
   Future<void> _saveToken(String uid, String token) async {
+    if (_auth.currentUser?.uid != uid) return;
     try {
-      final docRef = _fs.collection("users").doc(uid).collection("deviceTokens").doc(token);
+      final docRef = _fs
+          .collection("users")
+          .doc(uid)
+          .collection("deviceTokens")
+          .doc(token);
       await docRef.set(
         <String, Object?>{
           "token": token,
@@ -148,7 +204,8 @@ class PushNotifications {
           "valid": true,
           "lastSeenAt": FieldValue.serverTimestamp(),
           "expiresAt": TTLPolicy.expiresAtFromNow(TTLPolicy.deviceToken),
-          "build": const String.fromEnvironment("BUILD_FLAVOR", defaultValue: "dev"),
+          "build":
+              const String.fromEnvironment("BUILD_FLAVOR", defaultValue: "dev"),
         },
         SetOptions(merge: true),
       );
@@ -158,12 +215,19 @@ class PushNotifications {
   }
 
   Future<void> signOutCleanup(String uid) async {
+    _dismissActiveBanner(markSeen: false);
+    final token = _lastToken;
+    await dispose();
+    NotificationFeedService.instance.clear();
     if (uid.isEmpty) return;
     try {
-      final String? token = await _fm.getToken();
       if (token == null || token.isEmpty) return;
 
-      final docRef = _fs.collection("users").doc(uid).collection("deviceTokens").doc(token);
+      final docRef = _fs
+          .collection("users")
+          .doc(uid)
+          .collection("deviceTokens")
+          .doc(token);
       await docRef.set(
         <String, Object?>{
           "valid": false,
@@ -171,13 +235,19 @@ class PushNotifications {
           "expiresAt": TTLPolicy.expiresAtFromNow(const Duration(days: 14)),
         },
         SetOptions(merge: true),
-      );
+      ).timeout(const Duration(seconds: 3));
     } catch (e) {
       if (kDebugMode) debugPrint("[Push] signOutCleanup error: $e");
+    } finally {
+      // Invalidate delivery on this device even if offline Firestore cleanup fails.
+      try {
+        await _fm.deleteToken().timeout(const Duration(seconds: 3));
+      } catch (_) {}
     }
   }
 
   void _handleForegroundMessage(RemoteMessage message) {
+    if (_auth.currentUser?.uid != _currentUid || _currentUid == null) return;
     final item = _buildNotificationItemFromMessage(message, seen: false);
 
     // In-memory feed (no schema writes).
@@ -190,7 +260,8 @@ class PushNotifications {
   Future<void> handleRemoteMessage(RemoteMessage message) async {
     final ctx = _navigatorKey?.currentState?.context;
     if (ctx == null) {
-      if (kDebugMode) debugPrint("[Push] Missing navigator context; ignoring open.");
+      if (kDebugMode)
+        debugPrint("[Push] Missing navigator context; ignoring open.");
       return;
     }
 
@@ -218,7 +289,8 @@ class PushNotifications {
 
     String otherUid = (data["otherUid"] ?? "").toString().trim();
     if (otherUid.isEmpty) otherUid = (data["peerUid"] ?? "").toString().trim();
-    if (otherUid.isEmpty) otherUid = (data["partnerUid"] ?? "").toString().trim();
+    if (otherUid.isEmpty)
+      otherUid = (data["partnerUid"] ?? "").toString().trim();
 
     if (otherUid.isNotEmpty) {
       data["otherUid"] = otherUid;
@@ -282,8 +354,10 @@ class PushNotifications {
     final Map<String, dynamic> data = Map<String, dynamic>.from(message.data);
 
     final String rawType = (data["type"] as String?) ?? "system";
-    final bool chatRequest = (data["chatRequest"] ?? "false").toString().toLowerCase() == "true";
-    final bool partyContext = (data["isPartyContext"] ?? "false").toString().toLowerCase() == "true";
+    final bool chatRequest =
+        (data["chatRequest"] ?? "false").toString().toLowerCase() == "true";
+    final bool partyContext =
+        (data["isPartyContext"] ?? "false").toString().toLowerCase() == "true";
 
     String type = rawType;
     if (rawType == "message" && chatRequest && partyContext) {
@@ -300,15 +374,20 @@ class PushNotifications {
       ts = DateTime.fromMillisecondsSinceEpoch(tsRaw);
     } else if (tsRaw is String) {
       final int? parsed = int.tryParse(tsRaw);
-      ts = parsed != null ? DateTime.fromMillisecondsSinceEpoch(parsed) : DateTime.now();
+      ts = parsed != null
+          ? DateTime.fromMillisecondsSinceEpoch(parsed)
+          : DateTime.now();
     } else {
       ts = DateTime.now();
     }
 
     final NotificationCopyKey key = _mapTypeToCopyKey(type);
 
-    final String title = (message.notification?.title ?? (data["title"] as String?) ?? "").trim();
-    final String body = (message.notification?.body ?? (data["body"] as String?) ?? "").trim();
+    final String title =
+        (message.notification?.title ?? (data["title"] as String?) ?? "")
+            .trim();
+    final String body =
+        (message.notification?.body ?? (data["body"] as String?) ?? "").trim();
 
     String finalTitle = title.isNotEmpty ? title : NotificationCopy.title(key);
     String finalBody = body.isNotEmpty ? body : NotificationCopy.body(key);
@@ -341,6 +420,8 @@ class PushNotifications {
     final overlay = _navigatorKey?.currentState?.overlay;
     if (overlay == null) return;
 
+    _dismissActiveBanner();
+
     late OverlayEntry entry;
     entry = OverlayEntry(
       builder: (BuildContext context) {
@@ -358,18 +439,16 @@ class PushNotifications {
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 280),
                     child: InAppNotificationBanner(
-                      title: item.title.isNotEmpty ? item.title : "Notification",
+                      title:
+                          item.title.isNotEmpty ? item.title : "Notification",
                       body: item.body,
                       type: item.type,
                       onTap: () {
                         // FIX: handleTap may be sync (void). Do not await.
                         NotificationRouter.instance.handleTap(context, item);
+                        _dismissActiveBanner();
                       },
-                      onDismiss: () {
-                        try {
-                          entry.remove();
-                        } catch (_) {}
-                      },
+                      onDismiss: _dismissActiveBanner,
                     ),
                   ),
                 ),
@@ -381,6 +460,27 @@ class PushNotifications {
     );
 
     overlay.insert(entry);
+    _activeBannerEntry = entry;
+    _activeBannerItemId = item.id;
+    _activeBannerTimer = Timer(
+      const Duration(seconds: 7),
+      _dismissActiveBanner,
+    );
+  }
+
+  void _dismissActiveBanner({bool markSeen = true}) {
+    _activeBannerTimer?.cancel();
+    _activeBannerTimer = null;
+
+    final entry = _activeBannerEntry;
+    _activeBannerEntry = null;
+    if (entry?.mounted == true) entry!.remove();
+
+    final itemId = _activeBannerItemId;
+    _activeBannerItemId = null;
+    if (markSeen && itemId != null) {
+      NotificationFeedService.instance.markSeen(itemId);
+    }
   }
 
   String _platform() {
@@ -408,7 +508,8 @@ class PushNotifications {
     required String creatorUid,
   }) async {
     if (kDebugMode) {
-      debugPrint("[Push] notifyMatchCreated matchId=$matchId a=$aUid b=$bUid creator=$creatorUid");
+      debugPrint(
+          "[Push] notifyMatchCreated matchId=$matchId a=$aUid b=$bUid creator=$creatorUid");
     }
   }
 
@@ -428,7 +529,8 @@ class PushNotifications {
     required String status,
   }) async {
     if (kDebugMode) {
-      debugPrint("[Push] notifyMeetupEvent chatId=$chatId creator=$creatorUid other=$otherUid status=$status");
+      debugPrint(
+          "[Push] notifyMeetupEvent chatId=$chatId creator=$creatorUid other=$otherUid status=$status");
     }
   }
 
@@ -439,7 +541,8 @@ class PushNotifications {
     required String source,
   }) async {
     if (kDebugMode) {
-      debugPrint("[Push] notifyBeaconEvent meetupId=$meetupId uid=$uid mode=$mode source=$source");
+      debugPrint(
+          "[Push] notifyBeaconEvent meetupId=$meetupId uid=$uid mode=$mode source=$source");
     }
   }
 
@@ -456,7 +559,8 @@ class PushNotifications {
     required String bUid,
     required String creatorUid,
   }) async {
-    return notifyMatchCreated(matchId: matchId, aUid: aUid, bUid: bUid, creatorUid: creatorUid);
+    return notifyMatchCreated(
+        matchId: matchId, aUid: aUid, bUid: bUid, creatorUid: creatorUid);
   }
 
   Future<void> notifyMeetupUpdate({
@@ -465,15 +569,33 @@ class PushNotifications {
     required String otherUid,
     required String status,
   }) async {
-    return notifyMeetupEvent(chatId: chatId, creatorUid: creatorUid, otherUid: otherUid, status: status);
+    return notifyMeetupEvent(
+        chatId: chatId,
+        creatorUid: creatorUid,
+        otherUid: otherUid,
+        status: status);
   }
 
   Future<void> dispose() async {
-    await _foregroundSub?.cancel();
-    await _tokenRefreshSub?.cancel();
+    ++_sessionRevision;
+    _registrationRetry?.cancel();
+    _registrationRetry = null;
+    _registrationAttempts = 0;
+    _dismissActiveBanner(markSeen: false);
+    final foreground = _foregroundSub;
+    final tokenRefresh = _tokenRefreshSub;
+    final openMessage = _openMessageSub;
     _foregroundSub = null;
     _tokenRefreshSub = null;
+    _openMessageSub = null;
+    _openHandlersInitialized = false;
     _initialized = false;
     _currentUid = null;
+    _lastToken = null;
+    await Future.wait([
+      if (foreground != null) foreground.cancel(),
+      if (tokenRefresh != null) tokenRefresh.cancel(),
+      if (openMessage != null) openMessage.cancel(),
+    ]);
   }
 }

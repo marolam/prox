@@ -1,3 +1,4 @@
+import "package:prox/services/location_privacy_service.dart";
 import "dart:async";
 import "dart:math";
 
@@ -134,13 +135,14 @@ class MeetupService {
       "updatedAt": FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
+
   Stream<DocumentSnapshot<Map<String, dynamic>>> watchMeetup(String meetupId) =>
       meetupRef(meetupId).snapshots();
 
   Stream<MeetupRequestState?> watchRequestState({required String chatId}) {
-    return meetupRef(chatId)
-        .snapshots()
-        .map((snap) => MeetupRequestState.fromDoc(snap.data()));
+    return meetupRef(
+      chatId,
+    ).snapshots().map((snap) => MeetupRequestState.fromDoc(snap.data()));
   }
 
   bool _isExpiredByExpiresAt(Map<String, dynamic> d) {
@@ -180,7 +182,9 @@ class MeetupService {
       await chatRef.set(<String, Object?>{
         "meetupRecap": <String, Object?>{
           "createdAt": FieldValue.serverTimestamp(),
-          "completedAt": completedAt is Timestamp ? completedAt : FieldValue.serverTimestamp(),
+          "completedAt": completedAt is Timestamp
+              ? completedAt
+              : FieldValue.serverTimestamp(),
           "lat": lat is num ? lat.toDouble() : null,
           "lng": lng is num ? lng.toDouble() : null,
           "aUid": aUid,
@@ -250,11 +254,14 @@ class MeetupService {
       if (_isRatingWindowOpenFromDoc(d)) return;
 
       final completedAt = d["completedAt"];
-      final DateTime base =
-          (completedAt is Timestamp) ? completedAt.toDate() : DateTime.now();
+      final DateTime base = (completedAt is Timestamp)
+          ? completedAt.toDate()
+          : DateTime.now();
 
       await ref.set(<String, Object?>{
-        "ratingStartedAt": (completedAt is Timestamp) ? completedAt : FieldValue.serverTimestamp(),
+        "ratingStartedAt": (completedAt is Timestamp)
+            ? completedAt
+            : FieldValue.serverTimestamp(),
         "ratingExpiresAt": Timestamp.fromDate(base.add(ratingWindow)),
         "updatedAt": FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
@@ -284,8 +291,7 @@ class MeetupService {
       final int window = (nowMs / 30000).floor() + delta;
       final int seed =
           meetupId.trim().codeUnits.fold<int>(0, (a, b) => a + b) ^ window;
-      final int v =
-          ((seed.abs() * 1103515245 + 12345) & 0x7fffffff) % 10000;
+      final int v = ((seed.abs() * 1103515245 + 12345) & 0x7fffffff) % 10000;
       if (v.toString().padLeft(4, "0") == c) return true;
     }
     return false;
@@ -301,6 +307,9 @@ class MeetupService {
     final me = _auth.currentUser;
     if (me == null) throw StateError("Not signed in");
     if (chatId.trim().isEmpty) throw StateError("Missing chatId");
+    if (!await _isUserOnline(otherUid)) {
+      throw StateError("recipient_offline");
+    }
 
     final ref = meetupRef(chatId);
 
@@ -337,12 +346,33 @@ class MeetupService {
       }
     } catch (_) {}
 
-    unawaited(PushNotifications.instance.notifyMeetupEvent(
-      chatId: chatId,
-      creatorUid: me.uid,
-      otherUid: otherUid,
-      status: "requested",
-    ));
+    unawaited(
+      PushNotifications.instance.notifyMeetupEvent(
+        chatId: chatId,
+        creatorUid: me.uid,
+        otherUid: otherUid,
+        status: "requested",
+      ),
+    );
+  }
+
+  Future<bool> _isUserOnline(String uid) async {
+    final cleanUid = uid.trim();
+    if (cleanUid.isEmpty) return false;
+    final snap = await _db
+        .collection("users")
+        .doc(cleanUid)
+        .collection("presence")
+        .doc("current")
+        .get();
+    final data = snap.data();
+    if (data == null) return false;
+    final ts = data["ts"];
+    final expiresAt = data["expiresAt"];
+    if (ts is! Timestamp || expiresAt is! Timestamp) return false;
+    final now = DateTime.now();
+    return expiresAt.toDate().isAfter(now) &&
+        now.difference(ts.toDate()) <= const Duration(minutes: 5);
   }
 
   Future<void> acceptMeetupRequest({
@@ -385,12 +415,14 @@ class MeetupService {
     });
 
     if (otherUid != null && otherUid.trim().isNotEmpty) {
-      unawaited(PushNotifications.instance.notifyMeetupEvent(
-        chatId: chatId,
-        creatorUid: me.uid,
-        otherUid: otherUid,
-        status: "accepted",
-      ));
+      unawaited(
+        PushNotifications.instance.notifyMeetupEvent(
+          chatId: chatId,
+          creatorUid: me.uid,
+          otherUid: otherUid,
+          status: "accepted",
+        ),
+      );
     }
   }
 
@@ -419,12 +451,14 @@ class MeetupService {
     });
 
     if (otherUid != null && otherUid.trim().isNotEmpty) {
-      unawaited(PushNotifications.instance.notifyMeetupEvent(
-        chatId: chatId,
-        creatorUid: me.uid,
-        otherUid: otherUid,
-        status: "declined",
-      ));
+      unawaited(
+        PushNotifications.instance.notifyMeetupEvent(
+          chatId: chatId,
+          creatorUid: me.uid,
+          otherUid: otherUid,
+          status: "declined",
+        ),
+      );
     }
   }
 
@@ -466,7 +500,29 @@ class MeetupService {
     required double lng,
     int? etaMinutes,
   }) async {
-    final ref = meetupRef(chatId);
+    final cleanChatId = chatId.trim();
+    final cleanAUid = aUid.trim();
+    final cleanBUid = bUid.trim();
+    final me = _auth.currentUser;
+    if (me == null || me.uid != cleanAUid) {
+      throw StateError("not_signed_in_as_planner");
+    }
+    if (cleanChatId.isEmpty ||
+        cleanAUid.isEmpty ||
+        cleanBUid.isEmpty ||
+        cleanAUid == cleanBUid) {
+      throw ArgumentError("invalid_meetup_participants");
+    }
+    if (!lat.isFinite ||
+        !lng.isFinite ||
+        lat < -90 ||
+        lat > 90 ||
+        lng < -180 ||
+        lng > 180) {
+      throw ArgumentError("invalid_meetup_location");
+    }
+
+    final ref = meetupRef(cleanChatId);
 
     await _db.runTransaction((tx) async {
       final snap = await tx.get(ref);
@@ -475,17 +531,23 @@ class MeetupService {
 
       final String existingA = (d["aUid"] ?? "").toString().trim();
       final String existingB = (d["bUid"] ?? "").toString().trim();
-      final bool existingPairValid = existingA.isNotEmpty && existingB.isNotEmpty;
-      final bool sameSet = existingPairValid &&
-          ((existingA == aUid && existingB == bUid) ||
-              (existingA == bUid && existingB == aUid));
+      final bool existingPairValid =
+          existingA.isNotEmpty && existingB.isNotEmpty;
+      final bool sameSet =
+          existingPairValid &&
+          ((existingA == cleanAUid && existingB == cleanBUid) ||
+              (existingA == cleanBUid && existingB == cleanAUid));
 
-      final String finalAUid = (existingPairValid && sameSet) ? existingA : aUid;
-      final String finalBUid = (existingPairValid && sameSet) ? existingB : bUid;
+      final String finalAUid = (existingPairValid && sameSet)
+          ? existingA
+          : cleanAUid;
+      final String finalBUid = (existingPairValid && sameSet)
+          ? existingB
+          : cleanBUid;
 
       final String planner = (d["plannerUid"] ?? "").toString().trim();
-      final String plannerUid = planner.isNotEmpty ? planner : aUid;
-      final bool callerIsPlanner = aUid == plannerUid;
+      final String plannerUid = planner.isNotEmpty ? planner : cleanAUid;
+      final bool callerIsPlanner = cleanAUid == plannerUid;
 
       final double writeLat = callerIsPlanner
           ? lat
@@ -502,8 +564,8 @@ class MeetupService {
       }
 
       tx.set(ref, <String, Object?>{
-        "id": chatId,
-        "chatId": chatId,
+        "id": cleanChatId,
+        "chatId": cleanChatId,
         "status": "live",
         "aUid": finalAUid,
         "bUid": finalBUid,
@@ -513,9 +575,11 @@ class MeetupService {
         if (etaMinutes != null) "etaMinutes": etaMinutes,
         "plannedAt": FieldValue.serverTimestamp(),
         "locationStatus": locationStatus,
-        if (callerIsPlanner) "locationProposedBy": aUid,
+        if (callerIsPlanner) "locationProposedBy": cleanAUid,
         if (callerIsPlanner) "locationProposedAt": FieldValue.serverTimestamp(),
-        "startedAt": (d["startedAt"] is Timestamp) ? d["startedAt"] : FieldValue.serverTimestamp(),
+        "startedAt": (d["startedAt"] is Timestamp)
+            ? d["startedAt"]
+            : FieldValue.serverTimestamp(),
         "expireMinutes": (d["expireMinutes"] as int?) ?? expireMinutes,
         "expiresAt": TTLPolicy.expiresAtFromNow(TTLPolicy.meetupLiveState),
         "updatedAt": FieldValue.serverTimestamp(),
@@ -557,7 +621,7 @@ class MeetupService {
       }, SetOptions(merge: true));
     } catch (_) {}
 
-    return <String, dynamic>{"id": chatId};
+    return <String, dynamic>{"id": cleanChatId};
   }
 
   Future<void> confirmLocation({required String meetupId}) async {
@@ -592,9 +656,11 @@ class MeetupService {
         "locationStatus": "confirmed",
         "locationConfirmedBy": me.uid,
         "locationConfirmedAt": FieldValue.serverTimestamp(),
+        "lastStatusEvent": _statusEvent(me.uid, "location_confirmed"),
         "updatedAt": FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     });
+    unawaited(_notifyOtherParticipant(meetupId, "location_confirmed"));
   }
 
   Future<void> markOnMyWay({required String meetupId}) async {
@@ -614,9 +680,71 @@ class MeetupService {
       final field = (me.uid == aUid) ? "aOnMyWayAt" : "bOnMyWayAt";
       tx.set(ref, <String, Object?>{
         field: FieldValue.serverTimestamp(),
+        "lastStatusEvent": _statusEvent(me.uid, "on_my_way"),
         "updatedAt": FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     });
+    unawaited(_notifyOtherParticipant(meetupId, "on_my_way"));
+  }
+
+  Future<void> recordSessionScreen({
+    required String meetupId,
+    required String screen,
+  }) async {
+    final uid = _auth.currentUser?.uid ?? "";
+    final id = meetupId.trim();
+    if (uid.isEmpty || id.isEmpty) return;
+    await meetupRef(id).set(<String, Object?>{
+      "sessionScreens": <String, Object?>{uid: screen.trim()},
+      "updatedAt": FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<String> lastSessionScreen(String meetupId) async {
+    final uid = _auth.currentUser?.uid ?? "";
+    if (uid.isEmpty || meetupId.trim().isEmpty) return "planner";
+    try {
+      final data = (await meetupRef(meetupId.trim()).get()).data();
+      final screens = data?["sessionScreens"];
+      if (screens is Map) {
+        final value = (screens[uid] ?? "").toString().trim();
+        if (<String>{"chat", "planner", "live"}.contains(value)) return value;
+      }
+      if ((data?["locationStatus"] ?? "").toString() == "confirmed") {
+        return "live";
+      }
+    } catch (_) {}
+    return "planner";
+  }
+
+  Future<void> _notifyOtherParticipant(String meetupId, String status) async {
+    final me = _auth.currentUser?.uid ?? "";
+    if (me.isEmpty) return;
+    try {
+      final data = (await meetupRef(meetupId.trim()).get()).data();
+      if (data == null) return;
+      final aUid = (data["aUid"] ?? "").toString().trim();
+      final bUid = (data["bUid"] ?? "").toString().trim();
+      final otherUid = me == aUid ? bUid : (me == bUid ? aUid : "");
+      if (otherUid.isEmpty) return;
+      await PushNotifications.instance.notifyMeetupEvent(
+        chatId: meetupId,
+        creatorUid: me,
+        otherUid: otherUid,
+        status: status,
+      );
+    } catch (_) {}
+  }
+
+  Map<String, Object?> _statusEvent(String actorUid, String type) {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    return <String, Object?>{
+      "id": "${actorUid}_${type}_$nowMs",
+      "actorUid": actorUid,
+      "type": type,
+      "createdAt": FieldValue.serverTimestamp(),
+      "createdAtClientMs": nowMs,
+    };
   }
 
   // -----------------------------
@@ -654,9 +782,11 @@ class MeetupService {
           key: FieldValue.serverTimestamp(),
           "windowMs": tapVerifyWindow.inMilliseconds,
         },
+        "lastStatusEvent": _statusEvent(me.uid, "ready_to_verify"),
         "updatedAt": FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     });
+    unawaited(_notifyOtherParticipant(meetupId, "ready_to_verify"));
 
     try {
       final snap = await ref.get();
@@ -672,8 +802,9 @@ class MeetupService {
       if (verifiedAt is Timestamp) return true;
       if (aTs is! Timestamp || bTs is! Timestamp) return false;
 
-      final diffMs =
-          (aTs.toDate().difference(bTs.toDate())).inMilliseconds.abs();
+      final diffMs = (aTs.toDate().difference(
+        bTs.toDate(),
+      )).inMilliseconds.abs();
       if (diffMs > tapVerifyWindow.inMilliseconds) return false;
 
       final lo = min(aTs.millisecondsSinceEpoch, bTs.millisecondsSinceEpoch);
@@ -697,6 +828,9 @@ class MeetupService {
   }
 
   Future<bool> _gpsWithinRadius(Map<String, dynamic> meetup) async {
+    await LocationPrivacyService.instance.ensureLoaded();
+    if (!LocationPrivacyService.instance.mayReadLocation) return false;
+    final uid = _auth.currentUser?.uid;
     final latAny = meetup["lat"];
     final lngAny = meetup["lng"];
     final double? lat = (latAny is num)
@@ -713,7 +847,8 @@ class MeetupService {
         perm = await Geolocator.requestPermission();
       }
       final granted =
-          (perm == LocationPermission.always || perm == LocationPermission.whileInUse);
+          (perm == LocationPermission.always ||
+          perm == LocationPermission.whileInUse);
       if (!granted) return false;
 
       final enabled = await Geolocator.isLocationServiceEnabled();
@@ -727,14 +862,24 @@ class MeetupService {
         ),
       );
 
-      final d = Geolocator.distanceBetween(pos.latitude, pos.longitude, lat, lng);
-      return d <= arrivalRadiusMeters;
+      final d = Geolocator.distanceBetween(
+        pos.latitude,
+        pos.longitude,
+        lat,
+        lng,
+      );
+      return uid != null &&
+          _auth.currentUser?.uid == uid &&
+          LocationPrivacyService.instance.mayReadLocation &&
+          d <= arrivalRadiusMeters;
     } catch (_) {
       return false;
     }
   }
 
-  Future<ConfirmArrivalResult> confirmArrivalPrivacyFirst({required String meetupId}) async {
+  Future<ConfirmArrivalResult> confirmArrivalPrivacyFirst({
+    required String meetupId,
+  }) async {
     final me = _auth.currentUser;
     if (me == null) return ConfirmArrivalResult.notSignedIn;
 
@@ -760,16 +905,17 @@ class MeetupService {
       if (status == "completed") {
         // Safety: make sure rating window is open.
         unawaited(ensureRatingWindowOpen(meetupId));
-        
 
         // Safety: ensure recap exists even if completion happened earlier.
-        unawaited(_writeMeetupRecapIfMissing(
-          chatId: meetupId,
-          aUid: (d["aUid"] ?? "").toString(),
-          bUid: (d["bUid"] ?? "").toString(),
-          meetupDoc: d,
-        ));
-return const ConfirmArrivalResult(
+        unawaited(
+          _writeMeetupRecapIfMissing(
+            chatId: meetupId,
+            aUid: (d["aUid"] ?? "").toString(),
+            bUid: (d["bUid"] ?? "").toString(),
+            meetupDoc: d,
+          ),
+        );
+        return const ConfirmArrivalResult(
           status: ConfirmArrivalStatus.completed,
           message: "Already completed.",
         );
@@ -816,10 +962,13 @@ return const ConfirmArrivalResult(
         final String why = (!tapOk && !gpsOk)
             ? "Use Tap-to-Verify AND be near the pin, or use the 4-digit code."
             : (!tapOk)
-                ? "Tap-to-Verify is missing. Use Tap-to-Verify (in-person) or the 4-digit code."
-                : "GPS says you're not near the pin. Walk closer or use the 4-digit code.";
+            ? "Tap-to-Verify is missing. Use Tap-to-Verify (in-person) or the 4-digit code."
+            : "GPS says you're not near the pin. Walk closer or use the 4-digit code.";
 
-        return ConfirmArrivalResult(status: ConfirmArrivalStatus.failed, message: why);
+        return ConfirmArrivalResult(
+          status: ConfirmArrivalStatus.failed,
+          message: why,
+        );
       }
 
       return await confirmArrivalGuarded(meetupId: meetupId);
@@ -856,7 +1005,9 @@ return const ConfirmArrivalResult(
     return await confirmArrivalGuarded(meetupId: id);
   }
 
-  Future<ConfirmArrivalResult> confirmArrivalGuarded({required String meetupId}) async {
+  Future<ConfirmArrivalResult> confirmArrivalGuarded({
+    required String meetupId,
+  }) async {
     final me = _auth.currentUser;
     if (me == null) return ConfirmArrivalResult.notSignedIn;
 
@@ -884,7 +1035,8 @@ return const ConfirmArrivalResult(
         final createdAt = d["createdAt"];
         if (createdAt is Timestamp) {
           final age = DateTime.now().difference(createdAt.toDate());
-          if (age.isNegative || age < minConfirmAfterCreate) throw StateError("too_soon");
+          if (age.isNegative || age < minConfirmAfterCreate)
+            throw StateError("too_soon");
           if (age > arrivalWindow) throw StateError("too_late");
         }
 
@@ -896,6 +1048,7 @@ return const ConfirmArrivalResult(
           tx.set(ref, <String, Object?>{
             "aArrived": true,
             "aArrivedAt": FieldValue.serverTimestamp(),
+            "lastStatusEvent": _statusEvent(me.uid, "arrived"),
             "updatedAt": FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
         } else if (me.uid == bUid && !bArrived) {
@@ -903,12 +1056,21 @@ return const ConfirmArrivalResult(
           tx.set(ref, <String, Object?>{
             "bArrived": true,
             "bArrivedAt": FieldValue.serverTimestamp(),
+            "lastStatusEvent": _statusEvent(me.uid, "arrived"),
             "updatedAt": FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
         }
       });
 
       final both = await _finalizeIfBothArrived(meetupId);
+      if (wroteArrival) {
+        unawaited(
+          _notifyOtherParticipant(
+            meetupId,
+            both ? "meetup_completed" : "arrived",
+          ),
+        );
+      }
       if (both) {
         return ConfirmArrivalResult(
           status: ConfirmArrivalStatus.ok,
@@ -920,7 +1082,9 @@ return const ConfirmArrivalResult(
 
       return ConfirmArrivalResult(
         status: ConfirmArrivalStatus.ok,
-        message: wroteArrival ? "Arrival confirmed." : "Arrival already confirmed.",
+        message: wroteArrival
+            ? "Arrival confirmed."
+            : "Arrival already confirmed.",
         bothArrived: false,
         wroteArrival: wroteArrival,
       );
@@ -969,7 +1133,8 @@ return const ConfirmArrivalResult(
 
       return const ConfirmArrivalResult(
         status: ConfirmArrivalStatus.failed,
-        message: "Offline. We queued your arrival confirmation and will retry automatically.",
+        message:
+            "Offline. We queued your arrival confirmation and will retry automatically.",
       );
     }
   }
@@ -995,10 +1160,16 @@ return const ConfirmArrivalResult(
         await ref.set(<String, Object?>{
           "status": "completed",
           "completedAt": FieldValue.serverTimestamp(),
+          "lastStatusEvent": _statusEvent(
+            _auth.currentUser?.uid ?? "",
+            "meetup_completed",
+          ),
 
           // Always (re)open rating window on completion; normalize will refine with server completedAt.
           "ratingStartedAt": FieldValue.serverTimestamp(),
-          "ratingExpiresAt": Timestamp.fromDate(DateTime.now().add(ratingWindow)),
+          "ratingExpiresAt": Timestamp.fromDate(
+            DateTime.now().add(ratingWindow),
+          ),
 
           "updatedAt": FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
@@ -1010,11 +1181,13 @@ return const ConfirmArrivalResult(
         final bUid = (d["bUid"] ?? "").toString();
 
         // Referral gating: completing first meetup verifies referrals for either participant.
-        unawaited(ReferralAttribution.instance.verifyFromMeetupCompletion(
-          meetupId: meetupId,
-          aUid: aUid,
-          bUid: bUid,
-        ));
+        unawaited(
+          ReferralAttribution.instance.verifyFromMeetupCompletion(
+            meetupId: meetupId,
+            aUid: aUid,
+            bUid: bUid,
+          ),
+        );
 
         // Update referral progress for both participants
         if (aUid.isNotEmpty) {
@@ -1059,16 +1232,17 @@ return const ConfirmArrivalResult(
       } else if (both && status == "completed") {
         // Safety: completed but rating window might be missing/expired.
         unawaited(ensureRatingWindowOpen(meetupId));
-      
 
         // Safety: ensure recap exists even if completion happened earlier.
-        unawaited(_writeMeetupRecapIfMissing(
-          chatId: meetupId,
-          aUid: (d["aUid"] ?? "").toString(),
-          bUid: (d["bUid"] ?? "").toString(),
-          meetupDoc: d,
-        ));
-}
+        unawaited(
+          _writeMeetupRecapIfMissing(
+            chatId: meetupId,
+            aUid: (d["aUid"] ?? "").toString(),
+            bUid: (d["bUid"] ?? "").toString(),
+            meetupDoc: d,
+          ),
+        );
+      }
 
       return both;
     } catch (_) {
@@ -1136,7 +1310,9 @@ return const ConfirmArrivalResult(
         if (startedAt is! Timestamp) return;
 
         final int expMin = (d["expireMinutes"] as int?) ?? expireMinutes;
-        final DateTime deadline = startedAt.toDate().add(Duration(minutes: expMin));
+        final DateTime deadline = startedAt.toDate().add(
+          Duration(minutes: expMin),
+        );
         if (DateTime.now().isBefore(deadline)) return;
 
         tx.set(ref, <String, Object?>{
@@ -1158,16 +1334,22 @@ return const ConfirmArrivalResult(
     required bool thumb,
     String? reason,
   }) async {
-    await RatingsService.instance
-        .setThumb(chatId: chatId, thumb: thumb, reason: reason, otherUid: ratedUid);
+    await RatingsService.instance.setThumb(
+      chatId: chatId,
+      thumb: thumb,
+      reason: reason,
+      otherUid: ratedUid,
+    );
     unawaited(PointsService.instance.touchActivity(uid: raterUid));
 
-    unawaited(PushNotifications.instance.notifyMeetupEvent(
-      chatId: chatId,
-      creatorUid: raterUid,
-      otherUid: ratedUid,
-      status: thumb ? "rated_up" : "rated_down",
-    ));
+    unawaited(
+      PushNotifications.instance.notifyMeetupEvent(
+        chatId: chatId,
+        creatorUid: raterUid,
+        otherUid: ratedUid,
+        status: thumb ? "rated_up" : "rated_down",
+      ),
+    );
   }
 
   Future<void> addToParty({

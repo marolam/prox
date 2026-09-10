@@ -4,6 +4,7 @@ class MatchCandidate {
     required this.distanceMiles,
     required this.trustScore,
     required this.sameParty,
+    this.normalModePriority = 1,
     required this.profile,
   });
 
@@ -11,6 +12,7 @@ class MatchCandidate {
   final double distanceMiles;
   final double trustScore;
   final bool sameParty;
+  final int normalModePriority;
   final Map<String, dynamic> profile;
 
   int score() {

@@ -6,10 +6,12 @@ import "package:latlong2/latlong.dart";
 /// - Always shows a watermark so we can confirm it renders even if tiles fail.
 /// - Shows meetup pin + optional my-location pin.
 /// NOTE: Tiles may fail to load if network/DNS/TLS is blocked; pins/watermark should still appear.
-class MeetupMap extends StatelessWidget {
+class MeetupMap extends StatefulWidget {
   final LatLng center;
   final LatLng? myLocation;
   final ValueChanged<LatLng>? onLongPress;
+  final ValueChanged<LatLng>? onPinDrag;
+  final ValueChanged<LatLng>? onPinDragEnd;
   final MapController? controller;
   final double zoom;
 
@@ -18,9 +20,48 @@ class MeetupMap extends StatelessWidget {
     required this.center,
     this.myLocation,
     this.onLongPress,
+    this.onPinDrag,
+    this.onPinDragEnd,
     this.controller,
     this.zoom = 15,
   });
+
+  @override
+  State<MeetupMap> createState() => _MeetupMapState();
+}
+
+class _MeetupMapState extends State<MeetupMap> {
+  late final MapController _controller;
+  late LatLng _pin;
+  bool _draggingPin = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = widget.controller ?? MapController();
+    _pin = widget.center;
+  }
+
+  @override
+  void didUpdateWidget(covariant MeetupMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_draggingPin && oldWidget.center != widget.center) {
+      _pin = widget.center;
+    }
+  }
+
+  void _dragPin(DragUpdateDetails details) {
+    final camera = _controller.camera;
+    final pinOffset = camera.latLngToScreenOffset(_pin);
+    final next = camera.screenOffsetToLatLng(pinOffset + details.delta);
+    setState(() => _pin = next);
+    widget.onPinDrag?.call(next);
+  }
+
+  void _finishPinDrag(DragEndDetails details) {
+    setState(() => _draggingPin = false);
+    widget.onPinDragEnd?.call(_pin);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -29,14 +70,26 @@ class MeetupMap extends StatelessWidget {
 
     final markers = <Marker>[
       Marker(
-        point: center,
-        width: 46,
-        height: 46,
-        child: const _Pin(color: Color(0xFFF57C00), icon: Icons.place),
+        point: _pin,
+        width: 56,
+        height: 56,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onPanStart: widget.onPinDragEnd == null
+              ? null
+              : (_) => setState(() => _draggingPin = true),
+          onPanUpdate: widget.onPinDragEnd == null ? null : _dragPin,
+          onPanEnd: widget.onPinDragEnd == null ? null : _finishPinDrag,
+          child: _Pin(
+            color: const Color(0xFFF57C00),
+            icon: Icons.place,
+            emphasized: _draggingPin,
+          ),
+        ),
       ),
-      if (myLocation != null)
+      if (widget.myLocation != null)
         Marker(
-          point: myLocation!,
+          point: widget.myLocation!,
           width: 42,
           height: 42,
           child: const _Pin(color: Color(0xFF2E7D32), icon: Icons.my_location),
@@ -52,17 +105,21 @@ class MeetupMap extends StatelessWidget {
             child: DecoratedBox(
               decoration: BoxDecoration(color: cs.surfaceContainerHighest),
               child: FlutterMap(
-                mapController: controller,
+                mapController: _controller,
                 options: MapOptions(
-                  initialCenter: center,
-                  initialZoom: zoom,
-                  onLongPress: onLongPress == null
+                  initialCenter: widget.center,
+                  initialZoom: widget.zoom,
+                  onLongPress: widget.onLongPress == null
                       ? null
-                      : (tapPos, latLng) => onLongPress!(latLng),
+                      : (tapPos, latLng) {
+                          setState(() => _pin = latLng);
+                          widget.onLongPress!(latLng);
+                        },
                 ),
                 children: [
                   TileLayer(
-                    urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                    urlTemplate:
+                        "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
                     userAgentPackageName: "com.prox.app",
                     maxZoom: 19,
                     retinaMode: true,
@@ -97,15 +154,17 @@ class MeetupMap extends StatelessWidget {
             bottom: 10,
             child: IgnorePointer(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
                   color: cs.surface.withValues(alpha: 0.75),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: cs.outline.withValues(alpha: 0.22)),
                 ),
                 child: Text(
-                  "${center.latitude.toStringAsFixed(5)}, ${center.longitude.toStringAsFixed(5)}",
-                  style: theme.textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                  "${_pin.latitude.toStringAsFixed(5)}, ${_pin.longitude.toStringAsFixed(5)}",
+                  style: theme.textTheme.labelSmall
+                      ?.copyWith(color: cs.onSurfaceVariant),
                 ),
               ),
             ),
@@ -119,7 +178,12 @@ class MeetupMap extends StatelessWidget {
 class _Pin extends StatelessWidget {
   final Color color;
   final IconData icon;
-  const _Pin({required this.color, required this.icon});
+  final bool emphasized;
+  const _Pin({
+    required this.color,
+    required this.icon,
+    this.emphasized = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -135,10 +199,11 @@ class _Pin extends StatelessWidget {
               color: Color(0x66000000),
             ),
           ],
-          border: Border.all(color: const Color(0xFFFFFFFF).withValues(alpha: 0.18)),
+          border: Border.all(
+              color: const Color(0xFFFFFFFF).withValues(alpha: 0.18)),
         ),
-        padding: const EdgeInsets.all(10),
-        child: Icon(icon, size: 18, color: Colors.white),
+        padding: EdgeInsets.all(emphasized ? 13 : 10),
+        child: Icon(icon, size: emphasized ? 22 : 18, color: Colors.white),
       ),
     );
   }

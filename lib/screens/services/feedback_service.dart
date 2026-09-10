@@ -73,7 +73,7 @@ class FeedbackService {
       "createdAt": FieldValue.serverTimestamp(),
     };
 
-    await _db.collection("feedback").add(doc);
+    final submitted = await _db.collection("feedback").add(doc);
 
     // --- Side effects (best-effort, non-blocking) ---
     try {
@@ -86,6 +86,7 @@ class FeedbackService {
         points: _baseRewardPoints,
         reason: "tester_feedback",
         category: "feedback",
+        contextId: submitted.id,
       );
     } catch (_) {
       // Swallow errors: feedback submission must never fail because of rewards.

@@ -4,6 +4,7 @@ import "package:flutter/material.dart";
 
 import "package:prox/services/now_feed_cleanup_service.dart";
 import "package:prox/services/party_service.dart";
+import "package:prox/services/simple_mode/simple_mode_policy.dart";
 import "package:prox/services/user_profile_service.dart";
 
 class MeetupHistoryScreen extends StatefulWidget {
@@ -249,19 +250,22 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Meetups"),
-        actions: [
-          IconButton(
-            tooltip: "Clear stale now",
-            onPressed: _manualCleanupRunning ? null : _runManualCleanup,
-            icon: _manualCleanupRunning
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.auto_delete_outlined),
-          ),
-        ],
+        actions: SimpleModePolicy.isActive
+            ? null
+            : [
+                IconButton(
+                  tooltip: "Clear stale now",
+                  onPressed:
+                      _manualCleanupRunning ? null : _runManualCleanup,
+                  icon: _manualCleanupRunning
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.auto_delete_outlined),
+                ),
+              ],
       ),
       body: StreamBuilder<List<PartyMemberEntry>>(
         stream: PartyService.instance.watchMyPartyEntries(),

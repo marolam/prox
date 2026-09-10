@@ -19,10 +19,14 @@ class MatchFoundSheet extends StatelessWidget {
     required this.keywords,
     required this.onIgnore,
     required this.onSayHi,
+    this.highlightMatchedKeywords = false,
+    this.showMatchedLabel = false,
   });
 
   final String distanceLabel;
   final List<String> keywords;
+  final bool highlightMatchedKeywords;
+  final bool showMatchedLabel;
   final VoidCallback onIgnore;
   final VoidCallback onSayHi;
 
@@ -32,6 +36,12 @@ class MatchFoundSheet extends StatelessWidget {
     final cs = theme.colorScheme;
 
     final k = keywords.take(3).toList(growable: false);
+    final Color keywordBorder = highlightMatchedKeywords
+        ? const Color(0xFF15D6A6).withValues(alpha: 0.45)
+        : cs.outline.withValues(alpha: 0.16);
+    final Color keywordFill = highlightMatchedKeywords
+        ? const Color(0xFF15D6A6).withValues(alpha: 0.16)
+        : cs.surface.withValues(alpha: 0.10);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
@@ -95,17 +105,26 @@ class MatchFoundSheet extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 14),
+                if (showMatchedLabel)
+                  Text(
+                    "Matched on",
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: cs.onSurface.withValues(alpha: 0.72),
+                    ),
+                  ),
+                if (showMatchedLabel) const SizedBox(height: 8),
                 Wrap(
                   spacing: 10,
                   runSpacing: 10,
-                  children: [
-                    for (final w in k)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                        decoration: BoxDecoration(
-                          color: cs.surface.withValues(alpha: 0.10),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(color: cs.outline.withValues(alpha: 0.16)),
+                    children: [
+                      for (final w in k)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                          decoration: BoxDecoration(
+                          color: keywordFill,
+                            borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: keywordBorder),
                         ),
                         child: Text(
                           w,

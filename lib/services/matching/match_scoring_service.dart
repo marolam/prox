@@ -7,7 +7,13 @@ class MatchScoringService {
 
   List<MatchCandidate> rank(List<MatchCandidate> candidates) {
     final ranked = List<MatchCandidate>.of(candidates)
-      ..sort((a, b) => b.score().compareTo(a.score()));
+      ..sort((a, b) {
+        final byMode = a.normalModePriority.compareTo(b.normalModePriority);
+        if (byMode != 0) return byMode;
+        final byScore = b.score().compareTo(a.score());
+        if (byScore != 0) return byScore;
+        return a.distanceMiles.compareTo(b.distanceMiles);
+      });
     return ranked;
   }
 }

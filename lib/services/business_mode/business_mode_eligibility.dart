@@ -22,7 +22,7 @@ class BusinessModeEligibility {
         : BusinessGateState.locked;
   }
 
-  /// Async gate that upgrades to ACTIVE if the tester-local flag is enabled.
+  /// Paid access is confirmed by the server; progression only enables the offer.
   static Future<BusinessGateState> gateForUser({
     required String uid,
     required PointsMeta meta,
@@ -33,16 +33,9 @@ class BusinessModeEligibility {
       return BusinessGateState.locked;
     }
 
-    final testerUnlocked =
-        await BusinessModeStateService.instance.isTesterUnlocked(cleanUid);
-    if (testerUnlocked) {
-      final active = await BusinessModeStateService.instance.isActive(cleanUid);
-      return active ? BusinessGateState.active : BusinessGateState.eligible;
-    }
-
     // Canonical paid unlock path: billing entitlements.
-    final monetizationUnlocked =
-        await MonetizationService.instance.isBusinessUnlocked(cleanUid);
+    final monetizationUnlocked = await MonetizationService.instance
+        .isBusinessUnlocked(cleanUid);
     if (monetizationUnlocked) {
       final active = await BusinessModeStateService.instance.isActive(cleanUid);
       return active ? BusinessGateState.active : BusinessGateState.eligible;
@@ -54,7 +47,6 @@ class BusinessModeEligibility {
     final eligible = progressionEligible && isEligibleFromMeta(meta);
     if (!eligible) return BusinessGateState.locked;
 
-    final active = await BusinessModeStateService.instance.isActive(cleanUid);
-    return active ? BusinessGateState.active : BusinessGateState.eligible;
+    return BusinessGateState.eligible;
   }
 }

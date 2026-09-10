@@ -1,14 +1,15 @@
 import "dart:async";
-import "dart:ui" as ui;
 
 import "package:cloud_firestore/cloud_firestore.dart";
-import "package:firebase_auth/firebase_auth.dart";
+import "package:app_links/app_links.dart";
 import "package:firebase_app_check/firebase_app_check.dart";
 import "package:firebase_core/firebase_core.dart";
 import "package:flutter/foundation.dart";
 import "package:flutter/material.dart";
 
 import "firebase_options.dart";
+import "utils/app_text_scaler.dart";
+import "app_router.dart";
 
 import "screens/account/account_billing_screen.dart";
 import "screens/auth/auth_gate.dart";
@@ -21,9 +22,11 @@ import "screens/dev/system_health_hud_screen.dart";
 import "screens/dev/missing_sweep_check_screen.dart";
 import "dev/dev_user_simulator_screen.dart";
 import "screens/matches/match_inbox_screen.dart";
-import "screens/matches/matches_screen.dart";
 import "screens/meetup/meetup_live_screen.dart";
+import "screens/meetup/meetup_history_screen.dart";
+import "screens/business/business_mode_entry_screen.dart";
 import "screens/meetup/meetup_planner_screen.dart";
+import "screens/meetup/color_match_screen.dart";
 import "screens/notifications/notifications_feed_screen.dart";
 import "screens/onboarding/onboarding_screen.dart";
 import "screens/onboarding/profile_setup_screen.dart";
@@ -45,19 +48,18 @@ import "package:prox/models/user_settings.dart";
 import "package:prox/screens/dev/bug_reports/bug_reports_list_screen.dart";
 import "package:prox/services/auth/auth_bootstrap.dart";
 import "package:prox/services/bug_reporting/bug_report_service.dart";
-import "package:prox/services/critical_ui_service.dart";
-import "package:prox/services/dev/cost_hud_service.dart";
 import "package:prox/services/ime_visibility_service.dart";
 import "package:prox/services/login_update_check_service.dart";
-import "package:prox/services/presence_pulse/presence_pulse_service.dart";
+import "package:prox/services/referral/referral_attribution.dart";
 import "package:prox/services/push_notifications.dart";
 import "package:prox/services/startup_watchdog.dart";
 import "package:prox/services/user_settings_service.dart";
 import "package:prox/theme/prox_ux_theme_builder.dart";
 import "package:prox/services/navigation/route_tracker_observer.dart";
-import "package:prox/widgets/bug_reporting/bug_report_overlay.dart";
-import "package:prox/widgets/dev/cost_hud_overlay.dart";
 import "package:prox/widgets/global_top_actions_bar.dart";
+import "package:prox/widgets/update_enforcement_gate.dart";
+import "package:prox/widgets/connectivity_status_banner.dart";
+import "package:prox/services/runtime_diagnostics_service.dart";
 
 class ProxApp extends StatefulWidget {
   const ProxApp({super.key});
@@ -67,24 +69,27 @@ class ProxApp extends StatefulWidget {
 }
 
 class _ProxAppState extends State<ProxApp> {
-  bool _postInitServicesStarted = false;
   bool _postInitServicesScheduled = false;
   bool _appCheckActivated = false;
   final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
   final RouteTrackerObserver _routeTrackerObserver = RouteTrackerObserver();
+  final AppLinks _appLinks = AppLinks();
+  StreamSubscription<Uri>? _referralUriSub;
 
-  static const bool _safeMode =
-      bool.fromEnvironment("PROX_SAFE_MODE", defaultValue: false);
+  static const bool _safeMode = bool.fromEnvironment(
+    "PROX_SAFE_MODE",
+    defaultValue: false,
+  );
   static const bool _suspendGlobalOverlaysForImeRecovery = true;
 
-  late final Future<void> _firebaseInit = _initFirebaseWithRecovery().timeout(
+  late Future<void> _firebaseInit = _initializeFirebase();
+
+  Future<void> _initializeFirebase() => _initFirebaseWithRecovery().timeout(
     const Duration(seconds: 30),
     onTimeout: () => throw TimeoutException("Firebase startup timed out"),
   );
 
   Future<void> _initFirebaseWithRecovery() async {
-    const minHold = Duration(milliseconds: 700);
-    final sw = Stopwatch()..start();
     bool retried = false;
     while (true) {
       try {
@@ -124,10 +129,7 @@ class _ProxAppState extends State<ProxApp> {
 
     StartupWatchdog.instance.disarm();
 
-    final remaining = minHold - sw.elapsed;
-    if (remaining > Duration.zero) {
-      await Future.delayed(remaining);
-    }
+    unawaited(RuntimeDiagnosticsService.instance.initializeFirebase());
   }
 
   Future<void> _activateAppCheckIfSupported() async {
@@ -145,8 +147,9 @@ class _ProxAppState extends State<ProxApp> {
         return;
       case TargetPlatform.iOS:
         await FirebaseAppCheck.instance.activate(
-          providerApple:
-              kReleaseMode ? AppleDeviceCheckProvider() : AppleDebugProvider(),
+          providerApple: kReleaseMode
+              ? AppleDeviceCheckProvider()
+              : AppleDebugProvider(),
         );
         _appCheckActivated = true;
         return;
@@ -156,100 +159,75 @@ class _ProxAppState extends State<ProxApp> {
   }
 
   void _startPostInitServicesOnce() {
-    FlutterError.onError = (FlutterErrorDetails details) {
-      FlutterError.presentError(details);
-    };
-    ui.PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
-      final err = error.toString();
-      if (err.contains("[cloud_firestore/permission-denied]")) {
-        debugPrint(
-            "[AppInit] Firestore permission issue handled during startup.");
-        return true;
-      }
-      debugPrint("[AppInit] Unhandled async error: $error");
-      return true;
-    };
     if (_postInitServicesScheduled) return;
     _postInitServicesScheduled = true;
-
-    try {
-      ImeVisibilityService.instance.ensureStarted();
-    } catch (e) {
-      debugPrint("[AppInit] IME visibility start failed: $e");
-    }
-    try {
-      UserSettingsService.instance.ensureLoaded();
-    } catch (e) {
-      debugPrint("[AppInit] user settings preload failed: $e");
-    }
-
-    if (!_safeMode) {
-      Future<void>.delayed(const Duration(seconds: 6), () async {
-        if (!mounted) return;
-        if (CriticalUiService.instance.isActive) {
-          // Keep retrying while a critical UI (like profile editing) is active.
-          while (mounted && CriticalUiService.instance.isActive) {
-            await Future<void>.delayed(const Duration(seconds: 2));
-          }
-          if (!mounted) return;
-        }
-
-        if (_postInitServicesStarted) return;
-
-        final uid = FirebaseAuth.instance.currentUser?.uid ?? "";
-        if (uid.trim().isEmpty) {
-          // Keep login/onboarding responsive; defer auth-bound services until a user exists.
-          return;
-        }
-
-        _postInitServicesStarted = true;
-
-        try {
-          PresencePulseService.instance.start();
-        } catch (e) {
-          debugPrint("[AppInit] presence pulse start failed: $e");
-        }
-        try {
-          BugReportService.instance.ensureReady();
-        } catch (e) {
-          debugPrint("[AppInit] bug report service start failed: $e");
-        }
-        try {
-          CostHudService.instance.ensureReady();
-        } catch (e) {
-          debugPrint("[AppInit] cost HUD service start failed: $e");
-        }
-
-        try {
-          // ignore: discarded_futures
-          AuthBootstrap.instance.start();
-        } catch (e) {
-          debugPrint("[AppInit] auth bootstrap start failed: $e");
-        }
-
-        try {
-          // ignore: discarded_futures
-          PushNotifications.instance.setupMessageOpenHandlers();
-        } catch (e) {
-          debugPrint("[AppInit] push message-open handlers setup failed: $e");
-        }
-      });
-
-      try {
-        PushNotifications.instance.registerNavigatorKey(_navKey);
-      } catch (e) {
-        debugPrint("[AppInit] push navigator key registration failed: $e");
+    // The Firebase-backed MaterialApp and navigator must exist before an initial
+    // notification is routed. No arbitrary timer or pre-existing login is needed.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      void startService(String operation, FutureOr<void> Function() action) {
+        unawaited(
+          Future<void>.sync(action).catchError((
+            Object error,
+            StackTrace stack,
+          ) {
+            RuntimeDiagnosticsService.instance.record(
+              error,
+              stack,
+              operation: operation,
+            );
+          }),
+        );
       }
 
-      try {
+      startService("Account session startup", AuthBootstrap.instance.start);
+      startService(
+        "Keyboard visibility startup",
+        ImeVisibilityService.instance.ensureStarted,
+      );
+      startService(
+        "Preferences startup",
+        UserSettingsService.instance.ensureLoaded,
+      );
+      if (!_safeMode) {
+        PushNotifications.instance.registerNavigatorKey(_navKey);
+        startService(
+          "Notification routing startup",
+          PushNotifications.instance.setupMessageOpenHandlers,
+        );
         LoginUpdateCheckService.instance.registerNavigatorKey(_navKey);
         LoginUpdateCheckService.instance.startLiveWatcher();
-      } catch (e) {
-        debugPrint("[AppInit] live update watcher start failed: $e");
       }
-    }
+      StartupWatchdog.instance.disarmAfterFirstFrame();
+    });
+  }
 
-    StartupWatchdog.instance.disarmAfterFirstFrame();
+  @override
+  void initState() {
+    super.initState();
+    _initReferralLinks();
+  }
+
+  @override
+  void dispose() {
+    _referralUriSub?.cancel();
+    LoginUpdateCheckService.instance.stopLiveWatcher();
+    super.dispose();
+  }
+
+  void _initReferralLinks() {
+    // App Links / deep links can carry referral attribution context (code/token).
+    _appLinks
+        .getInitialLink()
+        .then((Uri? uri) {
+          if (uri == null) return;
+          unawaited(ReferralAttribution.instance.captureFromLaunchUri(uri));
+        })
+        .catchError((_) {});
+
+    _referralUriSub = _appLinks.uriLinkStream.listen((Uri uri) {
+      unawaited(ReferralAttribution.instance.captureFromLaunchUri(uri));
+    });
   }
 
   @override
@@ -267,7 +245,11 @@ class _ProxAppState extends State<ProxApp> {
         } else if (snap.hasError) {
           child = MaterialApp(
             debugShowCheckedModeBanner: false,
-            home: _InitErrorScreen(err: snap.error.toString()),
+            home: _InitErrorScreen(
+              onRetry: () {
+                setState(() => _firebaseInit = _initializeFirebase());
+              },
+            ),
           );
         } else {
           _startPostInitServicesOnce();
@@ -287,19 +269,24 @@ class _ProxAppState extends State<ProxApp> {
                 initialRoute: "/auth",
                 navigatorObservers: <NavigatorObserver>[
                   BugReportService.instance.routeObserver,
-                  CostHudService.instance.routeObserver,
                   _routeTrackerObserver,
                 ],
                 builder: (context, child) {
-                  final scale = settings.textScaleFactor.clamp(0.9, 1.6);
                   final media = MediaQuery.of(context);
                   final Widget scaledChild = MediaQuery(
-                    data: media.copyWith(textScaler: TextScaler.linear(scale)),
-                    child: child ?? const SizedBox.shrink(),
+                    data: media.copyWith(
+                      textScaler: AppTextScaler(
+                        systemScaler: media.textScaler,
+                        preference: settings.textScaleFactor,
+                      ),
+                    ),
+                    child: ConnectivityStatusBanner(
+                      child: child ?? const SizedBox.shrink(),
+                    ),
                   );
 
                   if (_suspendGlobalOverlaysForImeRecovery) {
-                    return scaledChild;
+                    return UpdateEnforcementGate(child: scaledChild);
                   }
 
                   final Widget base = Stack(
@@ -311,16 +298,7 @@ class _ProxAppState extends State<ProxApp> {
                       ),
                     ],
                   );
-                  if (_safeMode) return base;
-
-                  final Widget withBug = BugReportOverlay(
-                    enabled: BugReportService.instance.isEnabledForThisBuild,
-                    child: base,
-                  );
-                  return CostHudOverlay(
-                    enabled: CostHudService.instance.isEnabledForThisBuild,
-                    child: withBug,
-                  );
+                  return UpdateEnforcementGate(child: base);
                 },
                 onGenerateRoute: (_) => null,
                 onUnknownRoute: (settings) {
@@ -338,9 +316,13 @@ class _ProxAppState extends State<ProxApp> {
                   "/profile_setup": (_) => const ProfileSetupScreen(),
 
                   "/home": (_) => const HomeRootShell(),
-                  "/matches": (_) => const MatchesScreen(),
                   "/nearby": (_) => const MatchInboxScreen(),
                   "/inbox": (_) => const ChatThreadsScreen(),
+                  "/chats": (_) => const ChatThreadsScreen(),
+                  "/meetups": (_) => const MeetupHistoryScreen(),
+                  "/meetup": (_) => const MeetupHistoryScreen(),
+                  "/business-mode": (_) => const BusinessModeEntryScreen(),
+                  "/business-setup": AppRouter.buildBusinessSetup,
 
                   // Dev
                   "/dev": (_) => const DevPanel(),
@@ -352,13 +334,21 @@ class _ProxAppState extends State<ProxApp> {
 
                   // Core flows
                   "/chat": (context) => ChatThreadScreen.fromArgs(
-                      ModalRoute.of(context)?.settings.arguments),
+                    ModalRoute.of(context)?.settings.arguments,
+                  ),
                   "/meetup_plan": (context) => MeetupPlannerScreen.fromArgs(
-                      ModalRoute.of(context)?.settings.arguments),
+                    ModalRoute.of(context)?.settings.arguments,
+                  ),
                   "/meetup_live": (context) => MeetupLiveScreen.fromArgs(
-                      ModalRoute.of(context)?.settings.arguments),
+                    ModalRoute.of(context)?.settings.arguments,
+                  ),
+                  "/color-match": (context) => ColorMatchScreen(
+                    meetupId: (ModalRoute.of(context)?.settings.arguments ?? "")
+                        .toString(),
+                  ),
                   "/rate": (context) => RatingScreen.fromArgs(
-                      ModalRoute.of(context)?.settings.arguments),
+                    ModalRoute.of(context)?.settings.arguments,
+                  ),
 
                   // Hubs
                   "/dashboard": (_) => const DashboardScreen(),
@@ -389,8 +379,8 @@ class _ProxAppState extends State<ProxApp> {
 }
 
 class _InitErrorScreen extends StatelessWidget {
-  final String err;
-  const _InitErrorScreen({required this.err});
+  final VoidCallback onRetry;
+  const _InitErrorScreen({required this.onRetry});
 
   @override
   Widget build(BuildContext context) {
@@ -398,9 +388,24 @@ class _InitErrorScreen extends StatelessWidget {
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text(
-            "Startup failed:\n\n$err",
-            textAlign: TextAlign.center,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off_outlined, size: 48),
+              const SizedBox(height: 16),
+              const Text("Prox couldn't start", textAlign: TextAlign.center),
+              const SizedBox(height: 8),
+              const Text(
+                "Check your connection and try again.",
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh),
+                label: const Text("Try again"),
+              ),
+            ],
           ),
         ),
       ),

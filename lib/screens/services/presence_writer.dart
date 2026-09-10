@@ -1,4 +1,4 @@
-﻿import "dart:async";
+import "dart:async";
 import "dart:math" as math;
 
 import "package:cloud_firestore/cloud_firestore.dart";
@@ -12,6 +12,11 @@ import "package:prox/services/ime_visibility_service.dart";
 import "package:prox/services/motion_classifier.dart";
 import "package:prox/services/ttl/ttl_policy.dart";
 import "package:prox/services/user_settings_service.dart";
+import "package:prox/services/location_privacy_service.dart";
+import "package:prox/services/geoquery_service.dart";
+import "package:prox/services/runtime_diagnostics_service.dart";
+import "package:prox/services/device_location_resolver.dart";
+import "package:prox/utils/async_pulse_scheduler.dart";
 
 class MotionSnapshot {
   final double lat;
@@ -46,6 +51,7 @@ class PresenceWriter {
     AppLifecycleService.instance.addListener(_onLifecycle);
     ImeVisibilityService.instance.ensureStarted();
     ImeVisibilityService.instance.addListener(_onImeChanged);
+    LocationPrivacyService.instance.addListener(_onLocationPrivacyChanged);
   }
 
   static final PresenceWriter instance = PresenceWriter._();
@@ -55,6 +61,9 @@ class PresenceWriter {
   String? _cachedAppVersion;
 
   final MotionClassifier _motion = MotionClassifier();
+  int _sessionRevision = 0;
+  bool _lastCached = false;
+  Future<_PositionResult>? _positionPending;
 
   MotionState _currentMotion = MotionState.unknown;
   MotionState get currentMotion => _currentMotion;
@@ -89,7 +98,20 @@ class PresenceWriter {
   Timer? _maxAgeTimer;
 
   // Burst GPS timer (instead of continuous getPositionStream)
-  Timer? _pulseTimer;
+  late final AsyncPulseScheduler _pulseScheduler = AsyncPulseScheduler(
+    interval: () => _pulseIntervalFor(_currentMotion),
+    canRun: () =>
+        _liveRunning &&
+        AppLifecycleService.instance.isForeground &&
+        !_pausedForIme &&
+        !_pausedForCriticalUi,
+    action: () => _pulseOnce(reason: "scheduled"),
+    onError: (error, stack) => RuntimeDiagnosticsService.instance.record(
+      error,
+      stack,
+      operation: "Presence pulse",
+    ),
+  );
 
   double? _pendingLat;
   double? _pendingLng;
@@ -109,7 +131,6 @@ class PresenceWriter {
   bool _pausedForBackground = false;
   bool _pausedForIme = false;
   bool _pausedForCriticalUi = false;
-  bool _startingPulse = false;
 
   final StreamController<MotionSnapshot> _motionController =
       StreamController<MotionSnapshot>.broadcast();
@@ -160,7 +181,10 @@ class PresenceWriter {
     _rollMetricsWindowIfNeeded();
     if (_ttffMs.isEmpty) return 0;
     final sorted = List<int>.from(_ttffMs)..sort();
-    final idx = ((sorted.length - 1) * 0.95).round().clamp(0, sorted.length - 1);
+    final idx = ((sorted.length - 1) * 0.95).round().clamp(
+      0,
+      sorted.length - 1,
+    );
     return sorted[idx];
   }
 
@@ -188,25 +212,36 @@ class PresenceWriter {
   }
 
   Future<bool> startLive({String reason = "live"}) async {
+    await LocationPrivacyService.instance.ensureLoaded();
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return false;
+    final revision = _sessionRevision;
     _liveClients += 1;
 
     if (_liveRunning) return true;
+    if (!LocationPrivacyService.instance.locationEnabled) {
+      _liveRunning = true;
+      _pausedForBackground = !AppLifecycleService.instance.isForeground;
+      return true; // Registered but paused until the user enables location.
+    }
 
-    final bool enabled = await _isServiceEnabledWithRetry();
-    if (!enabled) {
-      _log("[PresenceWriter] startLive location services disabled reason=$reason");
+    final bool enabled =
+        LocationPrivacyService.instance.locationEnabled &&
+        await _isServiceEnabledWithRetry();
+    if (revision != _sessionRevision || _liveClients == 0) return false;
+    if (!enabled || _auth.currentUser?.uid != uid) {
+      _log(
+        "[PresenceWriter] startLive location services disabled reason=$reason",
+      );
       _liveClients = math.max(0, _liveClients - 1);
       return false;
     }
 
+    if (_liveRunning) return true;
     _liveRunning = true;
-    _pausedForBackground = false;
-
-    // Best-effort seed write
-    // ignore: unawaited_futures
-    flushNow(reason: "seed_startLive:$reason");
-
-    _startPulse();
+    _pausedForBackground = !AppLifecycleService.instance.isForeground;
+    _pausedForIme = ImeVisibilityService.instance.isVisible;
+    _startPulse(immediate: true);
     _scheduleMaxAgeFlush();
     return true;
   }
@@ -215,12 +250,39 @@ class PresenceWriter {
     if (_liveClients > 0) _liveClients -= 1;
 
     if (_liveClients <= 0) {
+      _sessionRevision++;
       _liveClients = 0;
       _liveRunning = false;
       _pausedForBackground = false;
       _cancelTimers();
       _stopPulse();
     }
+  }
+
+  /// Account transitions end all presence clients, including meetup work.
+  void stopForSignOut() {
+    _sessionRevision++;
+    _positionPending = null;
+    _lastCached = false;
+    _writeSuppressedUntil = null;
+    _pausedForCriticalUi = false;
+    _currentMotion = MotionState.unknown;
+    _motion.reset();
+    _liveClients = 0;
+    _meetupModeClients = 0;
+    _liveRunning = false;
+    _pausedForBackground = !AppLifecycleService.instance.isForeground;
+    _pendingLat = null;
+    _pendingLng = null;
+    _lastLat = null;
+    _lastLng = null;
+    _lastTs = null;
+    _lastWrite = null;
+    _lastWriteLat = null;
+    _lastWriteLng = null;
+    _lastInteractionWrite = null;
+    _cancelTimers();
+    _stopPulse();
   }
 
   Future<void> beginMeetupMode({String reason = "meetup"}) async {
@@ -237,7 +299,9 @@ class PresenceWriter {
     _scheduleMaxAgeFlush();
   }
 
-  Future<void> notifyForegroundInteraction({String reason = "foreground"}) async {
+  Future<void> notifyForegroundInteraction({
+    String reason = "foreground",
+  }) async {
     await _maybeInteractionWrite(reason: "fg:$reason");
   }
 
@@ -270,7 +334,9 @@ class PresenceWriter {
 
   bool _isStartupSeedReason(String reason) {
     final r = reason.toLowerCase();
-    return r.contains("seed") || r.contains("post_auth") || r.contains("bootstrap");
+    return r.contains("seed") ||
+        r.contains("post_auth") ||
+        r.contains("bootstrap");
   }
 
   bool _skipAsDuplicateStartupSeed(String reason) {
@@ -294,10 +360,14 @@ class PresenceWriter {
 
   Future<bool> _isServiceEnabledWithRetry() async {
     try {
-      final bool enabled = await Geolocator.isLocationServiceEnabled();
+      final bool enabled = await Geolocator.isLocationServiceEnabled().timeout(
+        const Duration(seconds: 5),
+      );
       if (enabled) return true;
       await Future<void>.delayed(const Duration(seconds: 2));
-      return await Geolocator.isLocationServiceEnabled();
+      return await Geolocator.isLocationServiceEnabled().timeout(
+        const Duration(seconds: 5),
+      );
     } catch (_) {
       return false;
     }
@@ -307,7 +377,9 @@ class PresenceWriter {
     final base = throttle;
 
     if (speedMps >= 0.0 && speedMps < 0.20) {
-      return base < const Duration(seconds: 45) ? const Duration(seconds: 45) : base;
+      return base < const Duration(seconds: 45)
+          ? const Duration(seconds: 45)
+          : base;
     }
 
     if (speedMps >= 8.0) return const Duration(seconds: 8);
@@ -317,7 +389,8 @@ class PresenceWriter {
   }
 
   Duration get _effectiveDebounce => isMeetupMode ? meetupDebounce : debounce;
-  Duration get _effectiveMaxAgeFlush => isMeetupMode ? meetupMaxAgeFlush : maxAgeFlush;
+  Duration get _effectiveMaxAgeFlush =>
+      isMeetupMode ? meetupMaxAgeFlush : maxAgeFlush;
 
   Duration _pulseIntervalFor(MotionState motion) {
     if (isMeetupMode) return const Duration(seconds: 6);
@@ -338,41 +411,37 @@ class PresenceWriter {
     return const Duration(seconds: 10);
   }
 
-  bool _isAccuracyAcceptable({required Position pos, required bool meetupMode}) {
+  bool _isAccuracyAcceptable({
+    required Position pos,
+    required bool meetupMode,
+  }) {
     final meters = pos.accuracy;
     if (!meters.isFinite || meters <= 0) return true;
     // Keep meetup mode stricter while tolerating noisier passive fixes.
     return meetupMode ? meters <= 150 : meters <= 300;
   }
 
-  void _startPulse() {
-    if (!_liveRunning) return;
-    if (_pausedForBackground) return;
-    if (_pausedForIme) return;
-    if (_pausedForCriticalUi) return;
-
-    if (_startingPulse) return;
-    _startingPulse = true;
-
-    try {
-      _pulseTimer?.cancel();
-
-      final interval = _pulseIntervalFor(_currentMotion);
-      _pulseTimer = Timer.periodic(interval, (_) {
-        // ignore: unawaited_futures
-        _pulseOnce(reason: "timer");
-      });
-
-      // ignore: unawaited_futures
-      _pulseOnce(reason: "start");
-    } finally {
-      _startingPulse = false;
-    }
+  void _startPulse({bool immediate = false}) {
+    _pulseScheduler.start(immediate: immediate);
   }
 
-  void _stopPulse() {
-    _pulseTimer?.cancel();
-    _pulseTimer = null;
+  void _stopPulse() => _pulseScheduler.stop();
+
+  void _onLocationPrivacyChanged() {
+    if (!LocationPrivacyService.instance.locationEnabled) {
+      _sessionRevision++;
+      GeoQueryService.instance.clearSession();
+      _cancelTimers();
+      _lastLat = null;
+      _lastLng = null;
+      _lastTs = null;
+      _positionPending = null;
+      _motion.reset();
+      _currentMotion = MotionState.unknown;
+    } else if (_liveRunning) {
+      _startPulse(immediate: true);
+      _scheduleMaxAgeFlush();
+    }
   }
 
   void _onLifecycle() {
@@ -382,8 +451,7 @@ class PresenceWriter {
 
     if (!isForeground && !_pausedForBackground) {
       _pausedForBackground = true;
-      // ignore: unawaited_futures
-      flushNow(reason: "lifecycle_bg");
+      _cancelTimers();
       _stopPulse();
       return;
     }
@@ -428,15 +496,20 @@ class PresenceWriter {
       return;
     }
 
+    final revision = _sessionRevision;
     final user = _auth.currentUser;
     if (user == null) {
       _log("[PresenceWriter] pulse skipped no user reason=$reason");
       return;
     }
 
-    final bool enabled = await _isServiceEnabledWithRetry();
-    if (!enabled) {
-      _log("[PresenceWriter] pulse skipped location services disabled reason=$reason");
+    final bool enabled =
+        LocationPrivacyService.instance.locationEnabled &&
+        await _isServiceEnabledWithRetry();
+    if (!enabled || !_sessionIsCurrent(user.uid, revision) || !_liveRunning) {
+      _log(
+        "[PresenceWriter] pulse skipped location services disabled reason=$reason",
+      );
       return;
     }
 
@@ -454,16 +527,13 @@ class PresenceWriter {
     final Position? pos = result.pos;
     final bool usedCached = result.cached;
 
-    try {
-      // no-op: result already fetched
-    } finally {
-      sw.stop();
-      final elapsed = sw.elapsedMilliseconds;
-      _gpsOnMs += elapsed.clamp(0, 60000);
-      _ttffMs.add(elapsed.clamp(0, 60000));
-    }
+    sw.stop();
+    final elapsed = sw.elapsedMilliseconds;
+    _gpsOnMs += elapsed.clamp(0, 60000);
+    _ttffMs.add(elapsed.clamp(0, 60000));
 
-    if (pos == null) return;
+    if (pos == null || !_sessionIsCurrent(user.uid, revision) || !_liveRunning)
+      return;
     if (!_isAccuracyAcceptable(pos: pos, meetupMode: isMeetupMode)) {
       _log(
         "[PresenceWriter] pulse skipped poor accuracy=${pos.accuracy.toStringAsFixed(1)}m reason=$reason",
@@ -477,8 +547,14 @@ class PresenceWriter {
 
     final now = DateTime.now();
 
-    _motion.addSample(lat: pos.latitude, lng: pos.longitude, ts: now);
-    _currentMotion = _motion.currentState;
+    if (!usedCached) {
+      _motion.addSample(
+        lat: pos.latitude,
+        lng: pos.longitude,
+        ts: pos.timestamp,
+      );
+      _currentMotion = _motion.currentState;
+    }
 
     double speedMps = 0.0;
     if (_lastLat != null && _lastLng != null && _lastTs != null) {
@@ -496,7 +572,8 @@ class PresenceWriter {
 
     _lastLat = pos.latitude;
     _lastLng = pos.longitude;
-    _lastTs = now;
+    _lastTs = pos.timestamp;
+    _lastCached = usedCached;
 
     if (!_motionController.isClosed) {
       _motionController.add(
@@ -530,7 +607,8 @@ class PresenceWriter {
       }
     }
 
-    final bool dueToMaxAge = _lastWrite == null ||
+    final bool dueToMaxAge =
+        _lastWrite == null ||
         now.difference(_lastWrite!) >= _effectiveMaxAgeFlush;
 
     if (!passedMovementGate && !dueToMaxAge) {
@@ -564,7 +642,11 @@ class PresenceWriter {
   }
 
   void _scheduleMaxAgeFlush() {
-    if (!_liveRunning) return;
+    if (!_liveRunning ||
+        _pausedForBackground ||
+        _pausedForIme ||
+        _pausedForCriticalUi)
+      return;
 
     final Duration maxAge = _effectiveMaxAgeFlush;
 
@@ -572,7 +654,10 @@ class PresenceWriter {
     final DateTime last = _lastWrite ?? now.subtract(maxAge);
 
     final Duration untilDue = maxAge - now.difference(last);
-    final Duration delay = untilDue.isNegative ? Duration.zero : untilDue;
+    // Failed/offline writes must not schedule an immediate retry loop.
+    final Duration delay = untilDue < const Duration(seconds: 5)
+        ? const Duration(seconds: 5)
+        : untilDue;
 
     _maxAgeTimer?.cancel();
     _maxAgeTimer = Timer(delay, () {
@@ -588,6 +673,8 @@ class PresenceWriter {
     bool force = false,
     bool cached = false,
   }) {
+    if (_auth.currentUser?.uid != uid || !_liveRunning || _pausedForBackground)
+      return;
     _pendingLat = lat;
     _pendingLng = lon;
     _pendingForce = _pendingForce || force;
@@ -618,7 +705,8 @@ class PresenceWriter {
     _debounceTimer = null;
 
     final user = _auth.currentUser;
-    if (user == null) return;
+    final revision = _sessionRevision;
+    if (user == null || !_sessionIsCurrent(user.uid, revision)) return;
     if (!_liveRunning) return;
 
     final double? lat = _pendingLat;
@@ -643,7 +731,7 @@ class PresenceWriter {
       lon: lon,
       cached: cached,
     );
-    if (wrote) {
+    if (wrote && _sessionIsCurrent(user.uid, revision)) {
       _markWrote(DateTime.now(), lat, lon);
     }
     _scheduleMaxAgeFlush();
@@ -657,16 +745,22 @@ class PresenceWriter {
   }
 
   Future<void> flushNow({String reason = "flush"}) async {
+    await LocationPrivacyService.instance.ensureLoaded();
+    if (!LocationPrivacyService.instance.mayReadLocation) return;
+    if (!AppLifecycleService.instance.isForeground || _pausedForIme) return;
     if (_pausedForCriticalUi) {
       _log("[PresenceWriter] flush skipped critical UI pause reason=$reason");
       return;
     }
 
     if (_skipAsDuplicateStartupSeed(reason)) {
-      _log("[PresenceWriter] flush skipped duplicate startup seed reason=$reason");
+      _log(
+        "[PresenceWriter] flush skipped duplicate startup seed reason=$reason",
+      );
       return;
     }
 
+    final revision = _sessionRevision;
     final user = _auth.currentUser;
     if (user == null) {
       _log("[PresenceWriter] flush skipped no user reason=$reason");
@@ -677,13 +771,23 @@ class PresenceWriter {
       return;
     }
 
-    final bool enabled = await _isServiceEnabledWithRetry();
-    if (!enabled) {
-      _log("[PresenceWriter] flush skipped location services disabled reason=$reason");
+    final bool enabled =
+        LocationPrivacyService.instance.locationEnabled &&
+        await _isServiceEnabledWithRetry();
+    if (!enabled || !_sessionIsCurrent(user.uid, revision)) {
+      _log(
+        "[PresenceWriter] flush skipped location services disabled reason=$reason",
+      );
       return;
     }
 
-    if (_lastLat != null && _lastLng != null) {
+    final lastLat = _lastLat;
+    final lastLng = _lastLng;
+    final lastTs = _lastTs;
+    if (lastLat != null &&
+        lastLng != null &&
+        lastTs != null &&
+        DateTime.now().difference(lastTs) <= _lastKnownMaxAge) {
       _debounceTimer?.cancel();
       _debounceTimer = null;
       _pendingLat = null;
@@ -692,11 +796,12 @@ class PresenceWriter {
 
       final bool wrote = await _writePresence(
         uid: user.uid,
-        lat: _lastLat!,
-        lon: _lastLng!,
+        lat: lastLat,
+        lon: lastLng,
+        cached: _lastCached,
       );
-      if (wrote) {
-        _markWrote(DateTime.now(), _lastLat!, _lastLng!);
+      if (wrote && _sessionIsCurrent(user.uid, revision)) {
+        _markWrote(DateTime.now(), lastLat, lastLng);
       }
       _scheduleMaxAgeFlush();
       return;
@@ -709,13 +814,18 @@ class PresenceWriter {
     String reason = "one_shot",
     LocationAccuracy accuracy = LocationAccuracy.medium,
   }) async {
+    await LocationPrivacyService.instance.ensureLoaded();
+    if (!LocationPrivacyService.instance.mayReadLocation) return false;
+    if (!AppLifecycleService.instance.isForeground) return false;
     if (_pausedForCriticalUi) {
       _log("[PresenceWriter] oneShot skipped critical UI pause reason=$reason");
       return false;
     }
 
     if (_skipAsDuplicateStartupSeed(reason)) {
-      _log("[PresenceWriter] oneShot skipped duplicate startup seed reason=$reason");
+      _log(
+        "[PresenceWriter] oneShot skipped duplicate startup seed reason=$reason",
+      );
       return false;
     }
 
@@ -724,17 +834,13 @@ class PresenceWriter {
       return false;
     }
 
-    final bool enabled = await _isServiceEnabledWithRetry();
-    if (!enabled) {
-      _log("[PresenceWriter] oneShot skipped location services disabled reason=$reason");
-      return false;
-    }
-
+    final revision = _sessionRevision;
     final user = _auth.currentUser;
-    if (user == null) {
-      _log("[PresenceWriter] oneShot skipped no user reason=$reason");
-      return false;
-    }
+    if (user == null || !_sessionIsCurrent(user.uid, revision)) return false;
+    final bool enabled =
+        LocationPrivacyService.instance.locationEnabled &&
+        await _isServiceEnabledWithRetry();
+    if (!enabled || !_sessionIsCurrent(user.uid, revision)) return false;
 
     final sw = Stopwatch()..start();
     try {
@@ -745,8 +851,8 @@ class PresenceWriter {
       final Position? pos = result.pos;
       final bool usedCached = result.cached;
 
-      if (pos == null) {
-        _log("[PresenceWriter] oneShot no position reason=$reason");
+      if (pos == null || !_sessionIsCurrent(user.uid, revision)) {
+        _log("[PresenceWriter] oneShot no current position reason=$reason");
         return false;
       }
       if (!_isAccuracyAcceptable(pos: pos, meetupMode: isMeetupMode)) {
@@ -764,7 +870,8 @@ class PresenceWriter {
 
       _lastLat = pos.latitude;
       _lastLng = pos.longitude;
-      _lastTs = DateTime.now();
+      _lastTs = pos.timestamp;
+      _lastCached = usedCached;
 
       final bool wrote = await _writePresence(
         uid: user.uid,
@@ -772,11 +879,13 @@ class PresenceWriter {
         lon: pos.longitude,
         cached: usedCached,
       );
-      if (!wrote) return false;
+      if (!wrote || !_sessionIsCurrent(user.uid, revision)) return false;
 
       _markWrote(DateTime.now(), pos.latitude, pos.longitude);
       _scheduleMaxAgeFlush();
-      _log("[PresenceWriter] oneShot wrote uid=${user.uid} cached=$usedCached reason=$reason");
+      _log(
+        "[PresenceWriter] oneShot wrote uid=${user.uid} cached=$usedCached reason=$reason",
+      );
       return true;
     } catch (_) {
       sw.stop();
@@ -793,6 +902,8 @@ class PresenceWriter {
     required double lon,
     bool cached = false,
   }) async {
+    final revision = _sessionRevision;
+    if (!_sessionIsCurrent(uid, revision)) return false;
     final demoAdjusted = await _applyDemoNearbyLocationOverride(
       uid: uid,
       lat: lat,
@@ -802,24 +913,38 @@ class PresenceWriter {
     final ref = _db.doc("users/$uid/presence/current");
     try {
       final String appVersion = await _appVersionLabel();
-      await ref.set(
-        <String, Object?>{
-          "kind": "current",
-          "geopoint": GeoPoint(demoAdjusted.lat, demoAdjusted.lon),
-          "appVersion": appVersion,
-          "ts": FieldValue.serverTimestamp(),
-          "expiresAt": TTLPolicy.expiresAtFromNow(presenceTtl),
-          if (cached) "cached": true,
-        },
-        SetOptions(merge: true),
-      );
+      if (!_sessionIsCurrent(uid, revision)) return false;
+      await ref
+          .set(<String, Object?>{
+            "kind": "current",
+            "geopoint": GeoPoint(demoAdjusted.lat, demoAdjusted.lon),
+            "latitude": demoAdjusted.lat,
+            "longitude": demoAdjusted.lon,
+            "appVersion": appVersion,
+            "ts": FieldValue.serverTimestamp(),
+            "expiresAt": TTLPolicy.expiresAtFromNow(presenceTtl),
+            "cached": cached,
+          }, SetOptions(merge: true))
+          .timeout(const Duration(seconds: 8));
+      if (!_sessionIsCurrent(uid, revision)) {
+        if (!LocationPrivacyService.instance.locationEnabled &&
+            _auth.currentUser?.uid == uid) {
+          await ref.delete().timeout(const Duration(seconds: 5));
+        }
+        return false;
+      }
       _log("[PresenceWriter] write success uid=$uid cached=$cached");
       return true;
     } on FirebaseException catch (e) {
       if (e.code == "permission-denied" || e.code == "unauthenticated") {
         // Auth/rules races can happen briefly during startup; pause writes to avoid
         // noisy retry storms and let auth refresh settle.
-        await _refreshIdTokenBestEffort();
+        if (!_sessionIsCurrent(uid, revision)) return false;
+        await _refreshIdTokenBestEffort().timeout(
+          const Duration(seconds: 5),
+          onTimeout: () {},
+        );
+        if (!_sessionIsCurrent(uid, revision)) return false;
         _suppressWritesFor(const Duration(seconds: 30));
         _log(
           "[PresenceWriter] write skipped (${e.code}) uid=$uid; suppressing for 30s",
@@ -827,7 +952,9 @@ class PresenceWriter {
         return false;
       }
 
-      _log("[PresenceWriter] write failed uid=$uid code=${e.code}: ${e.message}");
+      _log(
+        "[PresenceWriter] write failed uid=$uid code=${e.code}: ${e.message}",
+      );
       return false;
     } catch (e) {
       _log("[PresenceWriter] write failed uid=$uid: $e");
@@ -854,11 +981,14 @@ class PresenceWriter {
     try {
       await UserSettingsService.instance.ensureLoaded();
       final settings = UserSettingsService.instance.current;
-      if (!settings.demoModeEnabled || !settings.demoSimulatedNearbyLocationEnabled) {
+      if (!settings.demoModeEnabled ||
+          !settings.demoSimulatedNearbyLocationEnabled) {
         return (lat: lat, lon: lon);
       }
 
-      final miles = settings.demoSimulatedNearbyOffsetMiles.clamp(0.0, 1.0).toDouble();
+      final miles = settings.demoSimulatedNearbyOffsetMiles
+          .clamp(0.0, 1.0)
+          .toDouble();
       if (miles <= 0.0) return (lat: lat, lon: lon);
 
       final bearingDeg = _stableBearingForUid(uid);
@@ -900,7 +1030,8 @@ class PresenceWriter {
     final sinAngular = math.sin(angularDistance);
     final cosAngular = math.cos(angularDistance);
 
-    final sinLat2 = sinLat1 * cosAngular + cosLat1 * sinAngular * math.cos(bearing);
+    final sinLat2 =
+        sinLat1 * cosAngular + cosLat1 * sinAngular * math.cos(bearing);
     final lat2 = math.asin(sinLat2.clamp(-1.0, 1.0));
 
     final y = math.sin(bearing) * sinAngular * cosLat1;
@@ -910,10 +1041,7 @@ class PresenceWriter {
     double outLon = lon2 * 180.0 / math.pi;
     outLon = ((outLon + 540.0) % 360.0) - 180.0;
 
-    return (
-      lat: (lat2 * 180.0 / math.pi).clamp(-90.0, 90.0),
-      lon: outLon,
-    );
+    return (lat: (lat2 * 180.0 / math.pi).clamp(-90.0, 90.0), lon: outLon);
   }
 
   bool _isWriteSuppressed() {
@@ -941,18 +1069,6 @@ class PresenceWriter {
     }
   }
 
-  Future<Position?> _getLastKnownIfFresh() async {
-    try {
-      final last = await Geolocator.getLastKnownPosition();
-      if (last == null) return null;
-      final age = DateTime.now().difference(last.timestamp);
-      if (age > _lastKnownMaxAge) return null;
-      return last;
-    } catch (_) {
-      return null;
-    }
-  }
-
   double _distanceMeters(double lat1, double lon1, double lat2, double lon2) {
     const double earthRadius = 6371000.0;
     double degToRad(double deg) => deg * (math.pi / 180.0);
@@ -966,32 +1082,55 @@ class PresenceWriter {
     final double sinLat = math.sin(dLat / 2);
     final double sinLon = math.sin(dLon / 2);
 
-    final double a = sinLat * sinLat +
-        sinLon * sinLon * math.cos(rLat1) * math.cos(rLat2);
+    final double a =
+        sinLat * sinLat + sinLon * sinLon * math.cos(rLat1) * math.cos(rLat2);
 
     final double c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
     return earthRadius * c;
   }
 
-    Future<_PositionResult> _getPositionWithFallback({
+  bool _sessionIsCurrent(String uid, int revision) =>
+      revision == _sessionRevision &&
+      _auth.currentUser?.uid == uid &&
+      AppLifecycleService.instance.isForeground &&
+      LocationPrivacyService.instance.mayReadLocation &&
+      !ImeVisibilityService.instance.isVisible &&
+      !_pausedForIme &&
+      !_pausedForCriticalUi;
+
+  Future<_PositionResult> _getPositionWithFallback({
+    required LocationAccuracy accuracy,
+    required Duration timeLimit,
+  }) {
+    final pending = _positionPending;
+    if (pending != null) return pending;
+    final request = _readPositionWithFallback(
+      accuracy: accuracy,
+      timeLimit: timeLimit,
+    );
+    _positionPending = request;
+    return request.whenComplete(() {
+      if (identical(_positionPending, request)) _positionPending = null;
+    });
+  }
+
+  Future<_PositionResult> _readPositionWithFallback({
     required LocationAccuracy accuracy,
     required Duration timeLimit,
   }) async {
-    try {
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: LocationSettings(
-          accuracy: accuracy,
-          distanceFilter: 0,
-          timeLimit: timeLimit,
-        ),
-      );
-      return _PositionResult(pos: pos, cached: false);
-    } catch (_) {}
-
-    final last = await _getLastKnownIfFresh();
-    if (last != null) return _PositionResult(pos: last, cached: true);
-
-    return const _PositionResult(pos: null, cached: false);
+    final uid = _auth.currentUser?.uid;
+    final revision = _sessionRevision;
+    final result = await DeviceLocationResolver.instance.resolve(
+      accuracy: accuracy,
+      timeLimit: timeLimit,
+      maxCachedAge: _lastKnownMaxAge,
+      maxAccuracyMeters: isMeetupMode ? 150 : 300,
+      isCurrent: () => uid != null && _sessionIsCurrent(uid, revision),
+    );
+    if (result.failure != null) {
+      _log('[PresenceWriter] position unavailable (${result.failure!.name})');
+    }
+    return _PositionResult(pos: result.position, cached: result.cached);
   }
 
   void _log(String message) {
@@ -1005,8 +1144,5 @@ class _PositionResult {
   final Position? pos;
   final bool cached;
 
-  const _PositionResult({
-    required this.pos,
-    required this.cached,
-  });
+  const _PositionResult({required this.pos, required this.cached});
 }

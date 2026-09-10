@@ -12,9 +12,9 @@ class ColorMatchButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return IconButton(
-      icon: const Icon(Icons.palette_outlined),
-      tooltip: "Color match",
+    return FilledButton.icon(
+      icon: const Icon(Icons.wb_sunny_outlined),
+      label: const Text("Find each other"),
       onPressed: () {
         onStarted?.call();
         Navigator.of(context).pushNamed("/color-match", arguments: meetupId);

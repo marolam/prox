@@ -1,0 +1,114 @@
+plugins {
+    id "com.android.application"
+    id "org.jetbrains.kotlin.android"
+    id "dev.flutter.flutter-gradle-plugin"
+    id "com.google.gms.google-services"
+    id "com.google.firebase.crashlytics"
+}
+
+import java.util.Properties
+import java.io.FileInputStream
+
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+// Build metadata (Suggestion #8)
+// Provide these via env or CI:
+//   GIT_SHA, BUILD_TIME_UTC, BUILD_CHANNEL
+def proxGitSha    = System.getenv("GIT_SHA") ?: "dev"
+def proxBuildTime = System.getenv("BUILD_TIME_UTC") ?: "unknown"
+def proxChannel   = System.getenv("BUILD_CHANNEL") ?: "local"
+
+// Google Play app updates require Android 16/API 36 from August 31, 2026.
+def proxCompileSdk = 36
+def proxTargetSdk  = 36
+kotlin {
+    jvmToolchain(17)
+}
+
+android {
+    namespace "com.prox.app"
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    // Pin the tested SDK explicitly (do not rely on flutter.* defaults).
+    compileSdk proxCompileSdk
+
+    defaultConfig {
+        applicationId "com.prox.app"
+
+        // Keep Flutter-provided minimum, but pin targetSdk
+        minSdkVersion flutter.minSdkVersion
+        targetSdk proxTargetSdk
+
+        versionCode flutter.versionCode
+        versionName flutter.versionName
+        multiDexEnabled true
+        multiDexKeepProguard file("multidex-config.pro")
+
+        // Expose build metadata to runtime (auditable builds)
+        buildConfigField "String", "PROX_GIT_SHA", "\"${proxGitSha}\""
+        buildConfigField "String", "PROX_BUILD_TIME_UTC", "\"${proxBuildTime}\""
+        buildConfigField "String", "PROX_BUILD_CHANNEL", "\"${proxChannel}\""
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled true
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    signingConfigs {
+        debug { }
+        release {
+            if (keystorePropertiesFile.exists()) {
+                keyAlias keystoreProperties["keyAlias"]
+                keyPassword keystoreProperties["keyPassword"]
+                storeFile rootProject.file(keystoreProperties["storeFile"])
+                storePassword keystoreProperties["storePassword"]
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+            shrinkResources false
+            signingConfig signingConfigs.debug
+        }
+        release {
+            signingConfig signingConfigs.release
+
+            // Tester-safe: disable shrink/minify to avoid plugin stripping.
+            minifyEnabled false
+            shrinkResources false
+
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"),
+                    "proguard-rules.pro"
+        }
+    }
+
+    packagingOptions {
+        resources {
+            excludes += ["META-INF/AL2.0", "META-INF/LGPL2.1"]
+        }
+    }
+}
+
+flutter {
+    source "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"
+    implementation "androidx.multidex:multidex:2.0.1"
+}

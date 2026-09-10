@@ -1,4 +1,3 @@
-import "dart:async";
 import "dart:developer" as dev;
 
 import "package:cloud_firestore/cloud_firestore.dart";
@@ -24,6 +23,7 @@ class UserProfile {
 
   final bool isBusiness;
   final int? availabilityMinutes;
+  final int? ageYears;
 
   final String? referrerUid;
   final String? rootReferrerUid;
@@ -45,6 +45,7 @@ class UserProfile {
     this.keywordSectionLocks,
     this.isBusiness = false,
     this.availabilityMinutes,
+    this.ageYears,
     this.referrerUid,
     this.rootReferrerUid,
     this.partyDepth,
@@ -70,17 +71,38 @@ class UserProfile {
     return const <String>[];
   }
 
-  static Map<String, List<String>> _readKeywordGroups(Map<String, dynamic> data) {
+  static int? _readAgeYears(dynamic raw) {
+    if (raw is num) {
+      final int value = raw.toInt();
+      if (value >= 13 && value <= 120) return value;
+      return null;
+    }
+    if (raw is String) {
+      final int? value = int.tryParse(raw.trim());
+      if (value != null && value >= 13 && value <= 120) return value;
+    }
+    return null;
+  }
+
+  static Map<String, List<String>> _readKeywordGroups(
+    Map<String, dynamic> data,
+  ) {
     final dynamic raw = data["keywords"] ?? data["keywordGroups"];
     if (raw is Map) {
       final m = Map<String, dynamic>.from(raw);
 
       final List<String> searching = _readStringList(
-        m["Searching For"] ?? m["SearchingFor"] ?? m["searchingFor"] ?? m["searching_for"],
+        m["Searching For"] ??
+            m["SearchingFor"] ??
+            m["searchingFor"] ??
+            m["searching_for"],
       );
 
       final List<String> provide = _readStringList(
-        m["Can Provide"] ?? m["CanProvide"] ?? m["canProvide"] ?? m["can_provide"],
+        m["Can Provide"] ??
+            m["CanProvide"] ??
+            m["canProvide"] ??
+            m["can_provide"],
       );
 
       return <String, List<String>>{
@@ -89,8 +111,12 @@ class UserProfile {
       };
     }
 
-    final List<String> searching = _readStringList(data["SearchingFor"] ?? data["Searching For"]);
-    final List<String> provide = _readStringList(data["CanProvide"] ?? data["Can Provide"]);
+    final List<String> searching = _readStringList(
+      data["SearchingFor"] ?? data["Searching For"],
+    );
+    final List<String> provide = _readStringList(
+      data["CanProvide"] ?? data["Can Provide"],
+    );
 
     return <String, List<String>>{
       "Searching For": searching,
@@ -120,16 +146,23 @@ class UserProfile {
   }
 
   factory UserProfile.fromMap(String uid, Map<String, dynamic> data) {
-    final String? displayName = toStringOrNull(data["displayName"] ?? data["name"]);
+    final String? displayName = toStringOrNull(
+      data["displayName"] ?? data["name"],
+    );
     final String? photoUrl = _readPhotoUrlBestEffort(data);
 
     final String? headline = toStringOrNull(data["headline"]);
     final String? status = toStringOrNull(data["status"]);
-    final String? searching = toStringOrNull(data["searchingText"] ?? data["searching"]);
-    final String? providing = toStringOrNull(data["providingText"] ?? data["providing"]);
+    final String? searching = toStringOrNull(
+      data["searchingText"] ?? data["searching"],
+    );
+    final String? providing = toStringOrNull(
+      data["providingText"] ?? data["providing"],
+    );
 
     final Map<String, List<String>> groups = _readKeywordGroups(data);
-    final List<String> searchingFor = groups["Searching For"] ?? const <String>[];
+    final List<String> searchingFor =
+        groups["Searching For"] ?? const <String>[];
     final List<String> canProvide = groups["Can Provide"] ?? const <String>[];
 
     Map<String, dynamic>? keywordWorkspace;
@@ -149,11 +182,18 @@ class UserProfile {
       }
     }
 
-    final bool isBusiness = (data["businessEnabled"] as bool?) ?? (data["isBusiness"] as bool?) ?? false;
-    final int? availabilityMinutes = (data["availabilityMinutes"] as num?)?.toInt();
+    final bool isBusiness =
+        (data["businessEnabled"] as bool?) ??
+        (data["isBusiness"] as bool?) ??
+        false;
+    final int? availabilityMinutes = (data["availabilityMinutes"] as num?)
+        ?.toInt();
+    final int? ageYears = _readAgeYears(data["ageYears"] ?? data["age"]);
 
     final String? referrerUid = toStringOrNull(data["referrer"]);
-    final String? rootReferrerUid = toStringOrNull(data["root_referrer"] ?? data["rootReferrer"]);
+    final String? rootReferrerUid = toStringOrNull(
+      data["root_referrer"] ?? data["rootReferrer"],
+    );
     final int? partyDepth = (data["partyDepth"] as num?)?.toInt();
 
     DateTime? joinedAt;
@@ -180,6 +220,7 @@ class UserProfile {
       keywordSectionLocks: keywordSectionLocks,
       isBusiness: isBusiness,
       availabilityMinutes: availabilityMinutes,
+      ageYears: ageYears,
       referrerUid: referrerUid,
       rootReferrerUid: rootReferrerUid,
       partyDepth: partyDepth,
@@ -188,12 +229,16 @@ class UserProfile {
     );
   }
 
-  factory UserProfile.fromDoc(String uid, DocumentSnapshot<Map<String, dynamic>> doc) {
+  factory UserProfile.fromDoc(
+    String uid,
+    DocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
     final data = doc.data() ?? const <String, dynamic>{};
     return UserProfile.fromMap(uid, data);
   }
 
-  bool get hasMinimumKeywords => searchingFor.isNotEmpty && canProvide.isNotEmpty;
+  bool get hasMinimumKeywords =>
+      searchingFor.isNotEmpty && canProvide.isNotEmpty;
 }
 
 class UserProfileService {
@@ -201,17 +246,60 @@ class UserProfileService {
   static final UserProfileService instance = UserProfileService._();
 
   final Map<String, UserProfile> _profileCache = <String, UserProfile>{};
+  int _sessionRevision = 0;
+
+  void clearSession() {
+    _sessionRevision++;
+    _profileCache.clear();
+    uploadDebug.value = const ProfileUploadDebugState();
+  }
+
+  void _cacheProfile(String uid, UserProfile profile) {
+    _profileCache.remove(uid);
+    _profileCache[uid] = profile;
+    if (_profileCache.length > 200)
+      _profileCache.remove(_profileCache.keys.first);
+  }
 
   final ValueNotifier<ProfileUploadDebugState> uploadDebug =
       ValueNotifier<ProfileUploadDebugState>(const ProfileUploadDebugState());
 
-  static const String _storageBucketOverride = String.fromEnvironment("PROX_STORAGE_BUCKET");
+  static const String _storageBucketOverride = String.fromEnvironment(
+    "PROX_STORAGE_BUCKET",
+  );
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   late final FirebaseStorage _storage = _createStorage();
 
-  DocumentReference<Map<String, dynamic>> _usersRef(String uid) => _db.doc("users/$uid");
-  DocumentReference<Map<String, dynamic>> _profilesRef(String uid) => _db.doc("profiles/$uid");
+  Future<List<String>> _filterModeratedKeywords(List<String> values) async {
+    final normalized = values
+        .map(
+          (value) => value.trim().toLowerCase().replaceAll(RegExp(r"\s+"), " "),
+        )
+        .where((value) => value.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    if (normalized.isEmpty) return const <String>[];
+    final hidden = <String>{};
+    for (var start = 0; start < normalized.length; start += 10) {
+      final end = (start + 10).clamp(0, normalized.length);
+      final snap = await _db
+          .collection("keywordModeration")
+          .where("normalizedKeyword", whereIn: normalized.sublist(start, end))
+          .get();
+      hidden.addAll(
+        snap.docs
+            .where((doc) => doc.data()["hidden"] == true)
+            .map((doc) => (doc.data()["normalizedKeyword"] ?? "").toString()),
+      );
+    }
+    return normalized.where((value) => !hidden.contains(value)).toList();
+  }
+
+  DocumentReference<Map<String, dynamic>> _usersRef(String uid) =>
+      _db.doc("users/$uid");
+  DocumentReference<Map<String, dynamic>> _profilesRef(String uid) =>
+      _db.doc("publicProfiles/$uid");
 
   FirebaseStorage _createStorage() {
     final raw = _storageBucketOverride.trim();
@@ -251,7 +339,9 @@ class UserProfileService {
       return "Photo upload failed because the user is not authenticated. Please sign in again and retry.";
     }
 
-    if ((error is FirebaseException && (error.code == "unauthorized" || error.code == "permission-denied")) ||
+    if ((error is FirebaseException &&
+            (error.code == "unauthorized" ||
+                error.code == "permission-denied")) ||
         lower.contains("httpresult: 403") ||
         lower.contains("permission denied") ||
         lower.contains("does not have permission")) {
@@ -291,20 +381,26 @@ class UserProfileService {
   Stream<UserProfile?> watchProfile(String uid) {
     final String u = uid.trim();
     if (u.isEmpty) return const Stream<UserProfile?>.empty();
+    final viewer = FirebaseAuth.instance.currentUser?.uid;
+    final revision = _sessionRevision;
+    bool currentSession() =>
+        revision == _sessionRevision &&
+        viewer != null &&
+        FirebaseAuth.instance.currentUser?.uid == viewer;
 
     if (_isMe(u)) {
       return _usersRef(u).snapshots().map((snap) {
-        if (!snap.exists) return null;
+        if (!snap.exists || !currentSession()) return null;
         final p = UserProfile.fromDoc(u, snap);
-        _profileCache[u] = p;
+        _cacheProfile(u, p);
         return p;
       });
     }
 
     return _profilesRef(u).snapshots().map((snap) {
-      if (!snap.exists) return null;
+      if (!snap.exists || !currentSession()) return null;
       final p = UserProfile.fromDoc(u, snap);
-      _profileCache[u] = p;
+      _cacheProfile(u, p);
       return p;
     });
   }
@@ -312,20 +408,27 @@ class UserProfileService {
   Future<UserProfile?> getProfileOnce(String uid) async {
     final String u = uid.trim();
     if (u.isEmpty) return null;
+    final viewer = FirebaseAuth.instance.currentUser?.uid;
+    final revision = _sessionRevision;
+    bool currentSession() =>
+        revision == _sessionRevision &&
+        viewer != null &&
+        FirebaseAuth.instance.currentUser?.uid == viewer;
+    if (!currentSession()) return null;
 
     try {
       if (_isMe(u)) {
         final snap = await _usersRef(u).get();
-        if (!snap.exists) return null;
+        if (!snap.exists || !currentSession()) return null;
         final p = UserProfile.fromDoc(u, snap);
-        _profileCache[u] = p;
+        _cacheProfile(u, p);
         return p;
       }
 
       final snap = await _profilesRef(u).get();
-      if (!snap.exists) return null;
+      if (!snap.exists || !currentSession()) return null;
       final p = UserProfile.fromDoc(u, snap);
-      _profileCache[u] = p;
+      _cacheProfile(u, p);
       return p;
     } catch (_) {
       return null;
@@ -347,7 +450,9 @@ class UserProfileService {
       throw StateError("Photo upload failed: user is not signed in.");
     }
     if (me != uid) {
-      throw StateError("Photo upload failed: auth uid mismatch (me=$me target=$uid).");
+      throw StateError(
+        "Photo upload failed: auth uid mismatch (me=$me target=$uid).",
+      );
     }
 
     dev.log(
@@ -406,19 +511,29 @@ class UserProfileService {
       }
     }
 
-    _updateUploadDebug(status: "failed", error: _niceStorageUploadError(lastError ?? "unknown storage error"));
-    throw StateError(_niceStorageUploadError(lastError ?? "unknown storage error"));
+    _updateUploadDebug(
+      status: "failed",
+      error: _niceStorageUploadError(lastError ?? "unknown storage error"),
+    );
+    throw StateError(
+      _niceStorageUploadError(lastError ?? "unknown storage error"),
+    );
   }
 
   String _niceFirestoreError(FirebaseException e) {
     final code = e.code;
     final msg = (e.message ?? "").trim();
 
-    if (code == "permission-denied") return "Permission denied by Firestore rules.";
-    if (code == "unavailable") return "Network issue (Firestore unavailable). Try again.";
-    if (code == "failed-precondition") return "Firestore precondition failed (often an index or offline state).";
-    if (code == "invalid-argument") return "Invalid data sent to Firestore (bad field type/size).";
-    if (code == "resource-exhausted") return "Quota/resource exhausted (Firestore throttling).";
+    if (code == "permission-denied")
+      return "Permission denied by Firestore rules.";
+    if (code == "unavailable")
+      return "Network issue (Firestore unavailable). Try again.";
+    if (code == "failed-precondition")
+      return "Firestore precondition failed (often an index or offline state).";
+    if (code == "invalid-argument")
+      return "Invalid data sent to Firestore (bad field type/size).";
+    if (code == "resource-exhausted")
+      return "Quota/resource exhausted (Firestore throttling).";
     if (msg.isNotEmpty) return "Firestore error ($code): $msg";
     return "Firestore error ($code).";
   }
@@ -437,7 +552,14 @@ class UserProfileService {
     Map<String, dynamic>? keywordMetrics,
     bool? isBusiness,
     int? availabilityMinutes,
+    int? ageYears,
   }) async {
+    if (searchingFor != null) {
+      searchingFor = await _filterModeratedKeywords(searchingFor);
+    }
+    if (canProvide != null) {
+      canProvide = await _filterModeratedKeywords(canProvide);
+    }
     final userRef = _usersRef(uid);
     final payload = <String, Object?>{};
 
@@ -478,7 +600,12 @@ class UserProfileService {
     }
 
     if (isBusiness != null) payload["businessEnabled"] = isBusiness;
-    if (availabilityMinutes != null) payload["availabilityMinutes"] = availabilityMinutes;
+    if (availabilityMinutes != null)
+      payload["availabilityMinutes"] = availabilityMinutes;
+    if (ageYears != null) {
+      payload["ageYears"] = ageYears;
+      payload["age"] = ageYears;
+    }
 
     payload["updatedAt"] = FieldValue.serverTimestamp();
 
@@ -493,121 +620,16 @@ class UserProfileService {
       );
       throw StateError(_niceFirestoreError(e));
     } catch (e, st) {
-      dev.log("[Profile] upsert /users/$uid unexpected error: $e", name: "prox.profile", error: e, stackTrace: st);
+      dev.log(
+        "[Profile] upsert /users/$uid unexpected error: $e",
+        name: "prox.profile",
+        error: e,
+        stackTrace: st,
+      );
       throw StateError("Unknown error saving profile. Details: $e");
     }
 
-    // Mirror best-effort in background (must never block profile save UX).
-    unawaited(_mirrorProfile(uid: uid, userRef: userRef));
-  }
-
-  Future<void> _mirrorProfile({
-    required String uid,
-    required DocumentReference<Map<String, dynamic>> userRef,
-  }) async {
-    try {
-      final snap = await userRef.get();
-      final data = snap.data() ?? <String, dynamic>{};
-
-      final String name = (data["displayName"] ?? data["name"] ?? "").toString().trim();
-      final String photo = (data["photoUrl"] ?? data["photoURL"] ?? data["selfieUrl"] ?? "").toString().trim();
-
-      Map<String, dynamic> kw = <String, dynamic>{};
-      final rawKw = data["keywords"];
-      if (rawKw is Map) {
-        kw = Map<String, dynamic>.from(rawKw);
-      }
-
-      List<String> readList(dynamic v) {
-        if (v is List) {
-          return v.map((e) => e.toString().trim()).where((s) => s.isNotEmpty).toList(growable: false);
-        }
-        return const <String>[];
-      }
-
-      final searching = readList(
-        kw["Searching For"] ??
-            kw["SearchingFor"] ??
-            kw["searchingFor"] ??
-            kw["searching_for"] ??
-            data["SearchingFor"] ??
-            data["Searching For"],
-      );
-      final provide = readList(
-        kw["Can Provide"] ??
-            kw["CanProvide"] ??
-            kw["canProvide"] ??
-            kw["can_provide"] ??
-            data["CanProvide"] ??
-            data["Can Provide"],
-      );
-
-      final active = <String>{};
-      for (final s in searching) {
-        active.add(s.toLowerCase().trim());
-      }
-      for (final s in provide) {
-        active.add(s.toLowerCase().trim());
-      }
-
-      final keywordGroups = <String, Object?>{
-        "Searching For": searching,
-        "Can Provide": provide,
-      };
-
-      final Map<String, dynamic> workspace = () {
-        final raw = data["keywordWorkspace"];
-        if (raw is Map) return Map<String, dynamic>.from(raw);
-        return <String, dynamic>{};
-      }();
-
-      List<String> workspaceList(String key) {
-        final raw = workspace[key];
-        if (raw is List) {
-          return raw
-              .map((e) {
-                if (e is Map) {
-                  return (e["value"] ?? e["keyword"] ?? "").toString().trim();
-                }
-                return e.toString().trim();
-              })
-              .where((s) => s.isNotEmpty)
-              .toList(growable: false);
-        }
-        return const <String>[];
-      }
-
-      final visibleInventory = workspaceList("visibleInventory");
-      if (visibleInventory.isNotEmpty) {
-        keywordGroups["Visible Inventory"] = visibleInventory;
-      }
-
-      final profileMirror = <String, Object?>{
-        "uid": uid,
-        "displayName": name.isEmpty ? null : name,
-        "photoUrl": photo.isEmpty ? null : photo,
-        "name": name.isEmpty ? null : name,
-        "selfieUrl": photo.isEmpty ? null : photo,
-        "photoURL": photo.isEmpty ? null : photo,
-        "headline": data["headline"],
-        "searchingText": data["searchingText"],
-        "providingText": data["providingText"],
-        "businessEnabled": (data["businessEnabled"] == true),
-        "isBusiness": (data["businessEnabled"] == true),
-        "availabilityMinutes": data["availabilityMinutes"],
-        "activeKeywords": active.toList()..sort(),
-        "keywordGroups": keywordGroups,
-        "keywords": keywordGroups,
-        "keywordWorkspace": workspace,
-        "keywordSectionLocks": data["keywordSectionLocks"],
-        "searchKey": name.toLowerCase(),
-        "updatedAt": FieldValue.serverTimestamp(),
-      };
-
-      await _db.collection("profiles").doc(uid).set(profileMirror, SetOptions(merge: true));
-    } catch (e, st) {
-      dev.log("[Profile] mirror /profiles/$uid failed (ignored): $e", name: "prox.profile", error: e, stackTrace: st);
-    }
+    // The server publishes an allowlisted discovery profile after this save.
   }
 }
 

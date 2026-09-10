@@ -1,0 +1,51 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null
+        && !firestore.exists(/databases/(default)/documents/accountDeletions/$(request.auth.uid));
+    }
+
+    function validImageUpload() {
+      return request.resource != null
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType in ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    }
+
+    function isChatParticipant(chatId) {
+      return signedIn()
+        && request.auth.uid in firestore.get(
+          /databases/(default)/documents/chats/$(chatId)
+        ).data.participants;
+    }
+
+    match /chatMedia/{chatId}/{fileName} {
+      allow read: if isChatParticipant(chatId);
+      allow create: if isChatParticipant(chatId)
+        && fileName.matches(request.auth.uid + '-.*')
+        && validImageUpload();
+      allow update, delete: if false;
+    }
+
+    match /profiles/{uid}/{fileName} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.auth.uid == uid
+        && validImageUpload();
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /users/{uid}/{fileName} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.auth.uid == uid
+        && validImageUpload();
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

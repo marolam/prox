@@ -3,7 +3,7 @@
  *
  * Production-safe HomeShell (Material 3).
  * Swipe tabs (2 pages x 5):
- * - Page 1: Nearby / Matches / Meetups / Party / Profile
+ * - Page 1: Nearby / Meetups / Party / Profile / HQ
  * - Page 2: HQ / Referrals / Support / Settings
  *
  * Triage add-on (tester build):
@@ -14,8 +14,8 @@ import "dart:async";
 
 import "package:flutter/material.dart";
 
+import "package:prox/models/user_settings.dart";
 import "package:prox/screens/match_inbox/match_inbox_screen.dart";
-import "package:prox/screens/matches/matches_screen.dart";
 import "package:prox/screens/meetup/meetup_history_screen.dart";
 import "package:prox/screens/party/party_screen.dart";
 import "package:prox/screens/profile/profile_screen.dart";
@@ -25,6 +25,8 @@ import "package:prox/screens/support/support_hub_screen.dart";
 import "package:prox/screens/settings/settings_screen.dart";
 import "package:prox/screens/settings/support_feedback_screen.dart";
 import "package:prox/services/help/context_help_service.dart";
+import "package:prox/services/simple_mode/simple_mode_policy.dart";
+import "package:prox/services/user_settings_service.dart";
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -41,6 +43,7 @@ class _HomeShellState extends State<HomeShell> {
   bool _suppressNextFeedbackTap = false;
   DateTime? _testerComboArmedUntil;
   Timer? _testerComboResetTimer;
+  StreamSubscription<UserSettings>? _settingsSub;
   static const int _testerComboLongPressGoal = 3;
 
   static const int _tabsPerPage = 5;
@@ -50,11 +53,6 @@ class _HomeShellState extends State<HomeShell> {
       label: "Nearby",
       icon: Icons.radar,
       child: MatchInboxScreen(),
-    ),
-    _ShellTab(
-      label: "Matches",
-      icon: Icons.chat_bubble_outline,
-      child: MatchesScreen(),
     ),
     _ShellTab(
       label: "Meetups",
@@ -95,18 +93,39 @@ class _HomeShellState extends State<HomeShell> {
 
   static int _pageForIndex(int i) => i ~/ _tabsPerPage;
 
-  int get _pageCount => (_tabs.length / _tabsPerPage).ceil();
+  bool get _isSimpleMode {
+    return SimpleModePolicy.isActive;
+  }
+
+  // Simple Mode mirrors the complete Normal Mode shell. Restricted features
+  // stay visible so users learn where they live, but cannot open them.
+  List<_ShellTab> get _visibleTabs => _tabs;
+
+  bool _isTabEnabled(_ShellTab tab) {
+    return !_isSimpleMode ||
+        SimpleModePolicy.allowedHomeTabs.contains(tab.label);
+  }
+
+  int get _pageCount => (_visibleTabs.length / _tabsPerPage).ceil();
 
   @override
   void initState() {
     super.initState();
     _navPageController = PageController(initialPage: _pageForIndex(_index));
+    _settingsSub = UserSettingsService.instance.watch().listen((_) {
+      if (!mounted) return;
+      if (_isSimpleMode && !<int>[0, 1, 3].contains(_index)) {
+        _index = 0;
+      }
+      setState(() {});
+    });
     _syncHelpContext();
   }
 
   @override
   void dispose() {
     _testerComboResetTimer?.cancel();
+    _settingsSub?.cancel();
     ContextHelpService.instance.setContext(null);
     _navPageController.dispose();
     super.dispose();
@@ -135,14 +154,16 @@ class _HomeShellState extends State<HomeShell> {
   void _armTesterMenuCombo() {
     final now = DateTime.now();
 
-    if (_testerComboArmedUntil == null || now.isAfter(_testerComboArmedUntil!)) {
+    if (_testerComboArmedUntil == null ||
+        now.isAfter(_testerComboArmedUntil!)) {
       _resetTesterCombo();
     }
 
     _testerComboResetTimer?.cancel();
     _testerComboLongPressCount += 1;
     _testerComboArmedUntil = now.add(const Duration(seconds: 12));
-    _testerComboResetTimer = Timer(const Duration(seconds: 12), _resetTesterCombo);
+    _testerComboResetTimer =
+        Timer(const Duration(seconds: 12), _resetTesterCombo);
 
     if (_testerComboLongPressCount >= _testerComboLongPressGoal) {
       _resetTesterCombo();
@@ -151,7 +172,9 @@ class _HomeShellState extends State<HomeShell> {
     }
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Dev combo: ${_testerComboLongPressCount}/${_testerComboLongPressGoal} long-presses")),
+      SnackBar(
+          content: Text(
+              "Dev combo: ${_testerComboLongPressCount}/${_testerComboLongPressGoal} long-presses")),
     );
   }
 
@@ -174,16 +197,89 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   void _selectTab(int index) {
+    if (_tabs[index].label == "Party" &&
+        UserSettingsService.instance.current.partyUnlockHighlightPending) {
+      UserSettingsService.instance.setPartyUnlockHighlightPending(false);
+    }
     setState(() {
       _index = index;
       _syncHelpContext();
     });
   }
 
+  void _showSimpleModeLock(_ShellTab tab) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          "${tab.label} is available in Normal Mode. Complete the Big-5 with Profile, Nearby, chat, and Meetups.",
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showSimpleHelp() async {
+    final label = _tabs[_index].label;
+    final guidance = SimpleModePolicy.guidanceFor(label);
+    final switchRequested = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.info_outline),
+        title: Text("${guidance.step}: ${guidance.title}"),
+        content: Text(guidance.message),
+        actions: [
+          TextButton.icon(
+            onPressed: () => Navigator.of(context).pop(true),
+            icon: const Icon(Icons.tune),
+            label: const Text("Switch to Normal Mode"),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text("Got it"),
+          ),
+        ],
+      ),
+    );
+    if (switchRequested != true || !mounted) return;
+
+    final confirmed = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            icon: const Icon(Icons.lock_open_outlined),
+            title: const Text("Are you sure?"),
+            content: const Text(
+              "Normal Mode unlocks all screens, settings, and advanced "
+              "controls. The Big-5 guidance will no longer limit what you "
+              "can open. You can return to Simple Mode later from Settings.",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text("Stay in Simple Mode"),
+              ),
+              FilledButton.icon(
+                onPressed: () => Navigator.of(context).pop(true),
+                icon: const Icon(Icons.check_circle_outline),
+                label: const Text("Use Normal Mode"),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !mounted) return;
+
+    UserSettingsService.instance.unlockPartyFromSimpleMode();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Normal Mode is now active.")),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ColorScheme cs = Theme.of(context).colorScheme;
-    final int currentPage = _pageForIndex(_index);
+    final visibleTabs = _visibleTabs;
+    final int visibleIndex = visibleTabs.indexOf(_tabs[_index]);
+    final int currentPage = _pageForIndex(visibleIndex < 0 ? 0 : visibleIndex);
 
     final scaffold = Scaffold(
       body: SafeArea(
@@ -200,16 +296,24 @@ class _HomeShellState extends State<HomeShell> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            GestureDetector(
-              onLongPress: _onFeedbackLongPress,
-              child: FloatingActionButton.extended(
-                heroTag: "fab_feedback",
-                onPressed: _onFeedbackPressed,
-                icon: const Icon(Icons.flag_outlined),
-                label: const Text("Feedback"),
-                tooltip: "Send feedback / bug report",
+            if (_isSimpleMode)
+              FloatingActionButton.extended(
+                heroTag: "fab_simple_help",
+                onPressed: _showSimpleHelp,
+                icon: const Icon(Icons.info_outline),
+                label: const Text("What do I do?"),
+              )
+            else
+              GestureDetector(
+                onLongPress: _onFeedbackLongPress,
+                child: FloatingActionButton.extended(
+                  heroTag: "fab_feedback",
+                  onPressed: _onFeedbackPressed,
+                  icon: const Icon(Icons.flag_outlined),
+                  label: const Text("Feedback"),
+                  tooltip: "Send feedback / bug report",
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -235,8 +339,9 @@ class _HomeShellState extends State<HomeShell> {
                   },
                   itemBuilder: (context, page) {
                     final int start = page * _tabsPerPage;
-                    final int end = (start + _tabsPerPage).clamp(0, _tabs.length);
-                    final tabs = _tabs.sublist(start, end);
+                    final int end =
+                        (start + _tabsPerPage).clamp(0, visibleTabs.length);
+                    final tabs = visibleTabs.sublist(start, end);
 
                     return Row(
                       children: [
@@ -244,8 +349,14 @@ class _HomeShellState extends State<HomeShell> {
                           Expanded(
                             child: _NavButton(
                               tab: tabs[i],
-                              selected: _index == (start + i),
-                              onTap: () => _selectTab(start + i),
+                              selected: _tabs[_index] == tabs[i],
+                              enabled: _isTabEnabled(tabs[i]),
+                              highlighted: tabs[i].label == "Party" &&
+                                  UserSettingsService.instance.current
+                                      .partyUnlockHighlightPending,
+                              onTap: () => _isTabEnabled(tabs[i])
+                                  ? _selectTab(_tabs.indexOf(tabs[i]))
+                                  : _showSimpleModeLock(tabs[i]),
                             ),
                           ),
                       ],
@@ -255,9 +366,9 @@ class _HomeShellState extends State<HomeShell> {
               ),
               AnimatedOpacity(
                 duration: const Duration(milliseconds: 220),
-                opacity: _showSwipeHint ? 1 : 0,
+                opacity: _showSwipeHint && _pageCount > 1 ? 1 : 0,
                 child: IgnorePointer(
-                  ignoring: !_showSwipeHint,
+                  ignoring: !_showSwipeHint || _pageCount <= 1,
                   child: Padding(
                     padding: const EdgeInsets.only(top: 4),
                     child: Row(
@@ -267,10 +378,11 @@ class _HomeShellState extends State<HomeShell> {
                         const SizedBox(width: 6),
                         Text(
                           "Swipe for more",
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                color: cs.onSurfaceVariant,
-                                fontWeight: FontWeight.w600,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.labelSmall?.copyWith(
+                                    color: cs.onSurfaceVariant,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                         ),
                       ],
                     ),
@@ -320,11 +432,15 @@ class _NavButton extends StatelessWidget {
   final _ShellTab tab;
   final bool selected;
   final VoidCallback onTap;
+  final bool enabled;
+  final bool highlighted;
 
   const _NavButton({
     required this.tab,
     required this.selected,
     required this.onTap,
+    this.enabled = true,
+    this.highlighted = false,
   });
 
   @override
@@ -336,33 +452,50 @@ class _NavButton extends StatelessWidget {
     final double iconSize = compact ? 20 : 22;
     final double labelSize = compact ? 10 : 11;
 
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: onTap,
-      child: Padding(
-        padding: EdgeInsets.symmetric(vertical: compact ? 7 : 6, horizontal: compact ? 1 : 2),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              tab.icon,
-              size: iconSize,
-              color: selected ? cs.primary : cs.onSurfaceVariant,
+    return Semantics(
+      enabled: enabled,
+      button: true,
+      label: enabled ? tab.label : "${tab.label}, locked in Simple Mode",
+      child: Opacity(
+        opacity: enabled ? 1 : 0.42,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            decoration: highlighted
+                ? BoxDecoration(
+                    color: cs.primaryContainer,
+                    border: Border.all(color: cs.primary, width: 2),
+                    borderRadius: BorderRadius.circular(12),
+                  )
+                : null,
+            padding: EdgeInsets.symmetric(
+                vertical: compact ? 7 : 6, horizontal: compact ? 1 : 2),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  enabled ? tab.icon : Icons.lock_outline,
+                  size: iconSize,
+                  color: selected ? cs.primary : cs.onSurfaceVariant,
+                ),
+                SizedBox(height: compact ? 3 : 4),
+                Text(
+                  tab.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: labelSize,
+                    color: selected ? cs.primary : cs.onSurfaceVariant,
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                    letterSpacing: compact ? -0.1 : 0,
+                  ),
+                ),
+              ],
             ),
-            SizedBox(height: compact ? 3 : 4),
-            Text(
-              tab.label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.labelSmall?.copyWith(
-                fontSize: labelSize,
-                color: selected ? cs.primary : cs.onSurfaceVariant,
-                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                letterSpacing: compact ? -0.1 : 0,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

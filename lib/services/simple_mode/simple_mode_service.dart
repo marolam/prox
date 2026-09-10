@@ -44,7 +44,7 @@ class SimpleModeService {
   Future<void> refresh() async {
     await UserSettingsService.instance.ensureLoaded();
     final settings = UserSettingsService.instance.current;
-    if (!settings.simpleModeEnabled || settings.simpleModeCompleted) {
+    if (settings.alwaysUseNormalMode || !settings.simpleModeEnabled) {
       _emit(const SimpleModeState(stage: SimpleModeStage.unlocked));
       return;
     }
