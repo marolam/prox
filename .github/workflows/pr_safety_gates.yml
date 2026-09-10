@@ -57,6 +57,9 @@ jobs:
       - name: Test release publication and local shipping without external writes
         run: python -m unittest discover -s tools/scripts/tests -p "test_release*.py"
 
+      - name: Test read-only TestFlight discovery
+        run: node --test tools/scripts/tests/test_testflight_inspection.mjs
+
   core-regression:
     runs-on: ubuntu-latest
     steps:

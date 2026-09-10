@@ -48,7 +48,7 @@ on:
         required: false
         default: ""
       ios_update_url:
-        description: Installable App Store or TestFlight URL (defaults to IOS_UPDATE_URL repository variable)
+        description: Optional install link (defaults to IOS_UPDATE_URL; omit for invite-only TestFlight)
         required: false
         default: ""
       external_checkout_session_url:
@@ -430,7 +430,13 @@ jobs:
         shell: pwsh
         run: |
           ./tools/scripts/sync_release_remote_config.ps1 -PrepareOnly -Platform android -LatestVersion $env:APP_VERSION -DownloadUrl $env:PUBLIC_APK_URL -OutputPath artifacts/release/android-update-policy.parameters.json
-          ./tools/scripts/sync_release_remote_config.ps1 -PrepareOnly -Platform ios -LatestVersion $env:APP_VERSION -IosDownloadUrl $env:IOS_UPDATE_URL -OutputPath artifacts/release/ios-update-policy.parameters.json
+          if ($LASTEXITCODE -ne 0) { throw 'Android policy preparation failed.' }
+          if ($env:IOS_UPDATE_URL) {
+            ./tools/scripts/sync_release_remote_config.ps1 -PrepareOnly -Platform ios -LatestVersion $env:APP_VERSION -IosDownloadUrl $env:IOS_UPDATE_URL -OutputPath artifacts/release/ios-update-policy.parameters.json
+            if ($LASTEXITCODE -ne 0) { throw 'iOS policy preparation failed.' }
+          } else {
+            Write-Host 'Invite-only TestFlight: no public install link configured; iOS policy preparation skipped.'
+          }
 
       - name: Upload paired build artifacts
         uses: actions/upload-artifact@v4
@@ -545,7 +551,7 @@ jobs:
             echo "Verified Android APK: $PUBLIC_APK_URL"
             echo "TestFlight upload enabled: $UPLOAD_TO_TESTFLIGHT"
             echo "Android policy auto-activation configured: ${AUTO_PUBLISH_ANDROID_POLICY:-false} (production only)"
-            echo "iOS policy is prepared only. Activate it after Apple processing/review and tester availability are confirmed."
+            echo "iOS policy is prepared only when an install URL is configured. Activate it after Apple processing/review and tester availability are confirmed."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Cleanup signing material

@@ -40,7 +40,7 @@ def resolve(version, env):
         raise ValueError("APK URL must be the exact asset URL for this release: " + apk_url)
     ios_url = env.get("IOS_UPDATE_URL", "")
     parsed = urlparse(ios_url)
-    if (parsed.scheme != "https" or parsed.hostname not in ("testflight.apple.com", "apps.apple.com")
+    if ios_url and (parsed.scheme != "https" or parsed.hostname not in ("testflight.apple.com", "apps.apple.com")
             or parsed.username or parsed.password or parsed.port or parsed.path in ("", "/")):
         raise ValueError("Configure IOS_UPDATE_URL with the actual TestFlight/App Store install link")
     upload = env.get("UPLOAD_TO_TESTFLIGHT") or "true"

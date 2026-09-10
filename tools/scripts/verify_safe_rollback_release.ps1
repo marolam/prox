@@ -50,9 +50,14 @@ Write-Host "Tag:      $Tag"
 Write-Host "Asset:    $ExpectedAsset"
 Write-Host "Expected: sha256:$expectedHash"
 
-$releaseJson = (& gh release view $Tag --repo $Repo --json tagName,assets,url 2>$null | Out-String).Trim()
-if ([string]::IsNullOrWhiteSpace($releaseJson)) {
-  throw "Could not read GitHub release $Repo@$Tag."
+$previousErrorPreference = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+  $releaseJson = (& gh release view $Tag --repo $Repo --json tagName,assets,url 2>$null | Out-String).Trim()
+  $readExitCode = $LASTEXITCODE
+} finally { $ErrorActionPreference = $previousErrorPreference }
+if ($readExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($releaseJson)) {
+  throw "Could not read protected GitHub release $Repo@$Tag. CI requires ROLLBACK_GITHUB_TOKEN with contents read access to that private repository."
 }
 
 $release = $releaseJson | ConvertFrom-Json

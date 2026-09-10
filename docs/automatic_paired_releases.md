@@ -43,7 +43,7 @@ Configure repository variables:
 
 | Variable | Value |
 | --- | --- |
-| `IOS_UPDATE_URL` | The real TestFlight join link or App Store app link |
+| `IOS_UPDATE_URL` | Optional real TestFlight join link or App Store app link; invite-only TestFlight uploads work without one |
 | `ANDROID_SIGNING_CERT_SHA256` | SHA-256 certificate digest from a known installed/published APK, as printed by `apksigner verify --print-certs`; this is the certificate digest, not the APK checksum |
 | `RELEASE_REPO` | Optional; defaults to `marolam/prox` |
 | `AUTO_PUBLISH_ANDROID_POLICY` | Set to `true` after backend readiness and rollout scope are verified; otherwise policy is prepared only |
@@ -58,10 +58,24 @@ unattended releases require environment settings that allow them.
 On September 10, the four Android signing secrets and certificate digest were
 configured in `marolam/prox` after the local key was verified against the actual
 published build 19 APK. The existing iOS upload secrets were already present,
-and all three release environments were created. The private rollback token and
-actual TestFlight link still need configuration before the first automated run.
+and all three release environments were created. The private rollback token
+still needs configuration before the first automated release run.
 The protected private `v1.0` is not interchangeable with public `v1.0`: their
 APK checksums differ.
+
+A read-only App Store Connect lookup confirmed app `6798915421`, bundle
+`com.prox-us.prox`, with internal and external `Prox Testers` groups. The external
+group's public link is disabled. Uploads support this invite-only setup; omitting
+`IOS_UPDATE_URL` skips iOS policy preparation and keeps the app's existing portal
+fallback. No tester group, public access setting, or App Store build was changed.
+To repeat this inspection using the existing CI-held API key:
+
+```powershell
+gh workflow run ios_signed_device_ipa.yml --ref release/paired-automation-20260910 -f inspect_testflight=true
+```
+
+This mode performs only App Store Connect GET requests and skips all builds and
+uploads. Once merged, use `--ref main`.
 
 PR and production branch guards use the same private rollback credential. The
 production branch guard allows a committed version bump to precede its tag;
@@ -107,8 +121,8 @@ Firebase Remote Config is the update authority for the new app code; there is no
 and is not the updater's source of truth. `release-manifest.json` records the
 published package version, commit, filenames, hashes and signing certificate.
 
-The workflow prepares separate Android and iOS policy JSON files as Actions
-artifacts. Production Android policy is activated automatically only when
+The workflow prepares Android policy JSON and, when an install URL is configured,
+separate iOS policy JSON as Actions artifacts. Production Android policy is activated automatically only when
 `AUTO_PUBLISH_ANDROID_POLICY=true`, after the public APK checksum is verified.
 This uses a version-pinned URL, never a potentially stale `latest` redirect.
 It does not redeploy the application backend or its database indexes: complete
@@ -170,6 +184,7 @@ Validation commands (no publication):
 
 ```powershell
 python -m unittest discover -s tools/scripts/tests -p 'test_release*.py'
+node --test tools/scripts/tests/test_testflight_inspection.mjs
 powershell -NoProfile -File tools/scripts/test_update_release_policy.ps1
 flutter test test/login_update_prompt_test.dart test/update_policy_test.dart test/update_enforcement_gate_test.dart
 ```

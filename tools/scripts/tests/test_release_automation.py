@@ -44,13 +44,18 @@ class ReleaseParametersTests(unittest.TestCase):
 
     def test_reject_mismatch_missing_link_and_invalid_settings(self):
         for override in [dict(GITHUB_REF_NAME="v0.19.0+19"), dict(GITHUB_REF_TYPE="branch"),
-                         dict(INPUT_RELEASE_CHANNEL="tester"), dict(IOS_UPDATE_URL=""),
+                         dict(INPUT_RELEASE_CHANNEL="tester"),
                          dict(IOS_UPDATE_URL="https://testflight.apple.com.evil.test/join/testers"),
                          dict(IOS_UPDATE_URL="https://testflight.apple.com/"),
                          dict(EXPORT_METHOD="ad-hoc"), dict(UPLOAD_TO_TESTFLIGHT="yes"),
                          dict(INPUT_PUBLIC_APK_URL="https://github.com/marolam/prox/releases/latest/download/app-release.apk")]:
             with self.subTest(override=override), self.assertRaises(ValueError):
                 resolve("0.19.0+20", dict(self.env, **override))
+
+    def test_invite_only_testflight_does_not_require_public_join_link(self):
+        result = resolve("0.19.0+20", dict(self.env, IOS_UPDATE_URL=""))
+        self.assertEqual(result["IOS_UPDATE_URL"], "")
+        self.assertEqual(result["UPLOAD_TO_TESTFLIGHT"], "true")
 
     def test_tag_ancestry_uses_commit_containment(self):
         with patch("release_parameters.subprocess.check_output", return_value="origin/main\norigin/release/next\n"), \
