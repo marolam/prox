@@ -3,3 +3,37 @@
 .env.*
 functions/.env.*
 tools/.env/
+
+# Generated output and machine-local caches.
+.dart_tool/
+.flutter-plugins*
+build/
+**/node_modules/
+**/.gradle/
+**/.kotlin/
+**/.cxx/
+**/__pycache__/
+**/ephemeral/
+**/Pods/
+**/.symlinks/
+.backup-*/
+.backups/
+logs/
+**/*-debug.log
+artifacts/
+tools/logs/
+functions/lib/
+functions/functions/
+r5_chat_fail.txt
+zy_chat_fail.txt
+
+# Signing material and developer-specific SDK locations must stay local.
+**/key.properties
+**/local.properties
+**/*.jks
+**/*.keystore
+**/*.p12
+**/*.p8
+**/*.mobileprovision
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
