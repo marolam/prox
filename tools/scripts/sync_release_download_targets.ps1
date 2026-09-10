@@ -2,6 +2,7 @@ Param(
   [string]$Repo = "marolam/prox",
   [string]$ProjectId = "prox-42bef",
   [string]$PublicApkUrl = "",
+  [string]$IosUpdateUrl = "https://www.prox-us.com/tester-portal.html",
   [string]$ReferralDownloadUrl = "https://us-central1-prox-42bef.cloudfunctions.net/referralApkDownload",
   [string]$ReferralCode = "",
   [string]$EnvFilePath = "",
@@ -159,6 +160,7 @@ Write-Host "== Sync release download targets ==" -ForegroundColor Cyan
 Write-Host "Repo:               $Repo"
 Write-Host "Project:            $ProjectId"
 Write-Host "Public APK URL:     $PublicApkUrl"
+Write-Host "iOS update URL:     $IosUpdateUrl"
 Write-Host "Referral endpoint:  $ReferralDownloadUrl"
 Write-Host "Functions env file: $EnvFilePath"
 
@@ -172,6 +174,7 @@ if (-not (Test-Path $envDir)) {
 
 Set-DotEnvValue -Path $EnvFilePath -Key "PROX_PUBLIC_APK_URL" -Value $PublicApkUrl
 Set-DotEnvValue -Path $EnvFilePath -Key "PROX_PUBLIC_APK_FALLBACK_URL" -Value $PublicApkUrl
+Set-DotEnvValue -Path $EnvFilePath -Key "PROX_IOS_UPDATE_URL" -Value $IosUpdateUrl
 Set-DotEnvValue -Path $EnvFilePath -Key "PROX_REFERRAL_DOWNLOAD_URL" -Value $ReferralDownloadUrl
 Write-Host "Updated referral download env keys." -ForegroundColor Green
 

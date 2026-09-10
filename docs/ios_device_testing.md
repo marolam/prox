@@ -1,13 +1,13 @@
 # iOS Device Testing
 
-This repo now has a Flutter iOS host project under `ios/` for the Prox app bundle ID `com.prox.app`.
+This repo now has a Flutter iOS host project under `ios/` for the Prox app bundle ID `com.prox-us.prox`.
 
 ## Current Firebase iOS App
 
 - Firebase project: `prox-42bef`
 - Firebase iOS app: `Prox iOS`
-- Firebase app ID: `1:12575732319:ios:c647ed1f20cde1f45561ea`
-- Bundle ID: `com.prox.app`
+- Firebase app ID: `1:12575732319:ios:295d3725a038e4dc5561ea`
+- Bundle ID: `com.prox-us.prox`
 - Config files: `ios/Runner/GoogleService-Info.plist`, `ios/firebase_app_id_file.json`, `lib/firebase_options.dart`
 
 ## First Mac Setup
@@ -23,7 +23,7 @@ cd ..
 flutter devices
 ```
 
-Open `ios/Runner.xcworkspace` in Xcode and set the Runner target Signing & Capabilities team. Keep the bundle identifier as `com.prox.app`.
+Open `ios/Runner.xcworkspace` in Xcode and set the Runner target Signing & Capabilities team. Keep the bundle identifier as `com.prox-us.prox`.
 
 For the first device run, use a tester/dev flavor so it stays separate from release publishing:
 
@@ -84,12 +84,27 @@ Required repository secrets:
 - `IOS_PROVISION_PROFILE_BASE64`: Base64 of your `.mobileprovision`
 - `IOS_TEAM_ID`: Apple Developer Team ID
 
+Optional repository secrets for TestFlight upload:
+
+- `APP_STORE_CONNECT_API_KEY_ID`: App Store Connect API key ID
+- `APP_STORE_CONNECT_ISSUER_ID`: App Store Connect API issuer ID
+- `APP_STORE_CONNECT_API_KEY_P8_BASE64`: Base64 of the App Store Connect API key `.p8`
+
 How to run from PC:
 
 1. Push your branch to GitHub.
 2. Open GitHub -> Actions -> `iOS Signed Device IPA`.
 3. Click `Run workflow` and keep `export_method` as `ad-hoc` for direct tester installs.
 4. Download artifact `Runner-signed-ipa` from the run summary.
+
+TestFlight path from PC (no Mac required):
+
+1. Ensure your provisioning profile is App Store distribution compatible for bundle ID `com.prox-us.prox`.
+2. Open GitHub -> Actions -> `iOS Signed Device IPA`.
+3. Click `Run workflow` with:
+  - `export_method=app-store`
+  - `upload_to_testflight=true`
+4. Wait for completion, then check App Store Connect -> TestFlight for processing status.
 
 Fast CLI helper in this repo:
 
@@ -106,5 +121,5 @@ powershell -ExecutionPolicy Bypass -File .\tools\scripts\run_ios_cloud_compile_a
 
 Notes:
 
-- The provisioning profile must match bundle ID `com.prox.app` and include your iPhone UDID for ad-hoc installs.
+- The provisioning profile must match bundle ID `com.prox-us.prox` and include your iPhone UDID for ad-hoc installs.
 - If you prefer TestFlight, use an App Store distribution profile and upload the IPA to App Store Connect.

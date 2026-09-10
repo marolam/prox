@@ -1,0 +1,60 @@
+name: Backend Safety Checks
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rules-and-functions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            functions/package-lock.json
+            functions_notifications/package-lock.json
+
+      - name: Setup emulator Java runtime
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install locked backend dependencies
+        run: |
+          npm --prefix functions ci
+          npm --prefix functions_notifications ci
+
+      - name: Audit both backend dependency trees
+        run: |
+          npm --prefix functions audit --audit-level=low
+          npm --prefix functions_notifications audit --audit-level=low
+
+      - name: Build notifications code
+        run: npm --prefix functions_notifications run build
+
+      - name: Install verified Firebase emulator CLI
+        run: npm install --global firebase-tools@15.1.0
+
+      - name: Build functions and test Firestore and Storage permissions
+        run: npm --prefix functions run test:emulators
+
+      - name: Preserve emulator logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-emulator-logs
+          if-no-files-found: ignore
+          path: |
+            *-debug.log
+            functions/*-debug.log

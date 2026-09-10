@@ -5,6 +5,10 @@ Param(
   [string]$TesterGuideUrl = "https://prox-us.com/tester-guide",
   [string]$TesterSupportUrl = "https://prox-us.com/tester-support",
   [string]$ExternalCheckoutSessionUrl = "",
+  [ValidateSet("tester", "staging", "prod")]
+  [string]$ReleaseChannel = "tester",
+  [string]$PublicApkUrl = "",
+  [switch]$EnableBusinessMode,
   [switch]$SkipBuild,
   [switch]$CleanInstall,
   [switch]$FailIfNoReadyDevices,
@@ -73,6 +77,22 @@ function Resolve-ApkPath {
     Select-Object -First 1).FullName
 }
 
+function Get-PubspecVersion {
+  Param([string]$RepoPath)
+
+  $pubspecPath = Join-Path $RepoPath "pubspec.yaml"
+  if (-not (Test-Path $pubspecPath)) {
+    throw "pubspec.yaml not found at: $pubspecPath"
+  }
+
+  $versionLine = Get-Content -Path $pubspecPath | Where-Object { $_ -match "^version:\s*" } | Select-Object -First 1
+  if ([string]::IsNullOrWhiteSpace($versionLine)) {
+    throw "Could not parse version from pubspec.yaml"
+  }
+
+  return ($versionLine -replace "^version:\s*", "").Trim()
+}
+
 $repoPathInput = (Get-Location).Path
 $resolvedRepoPath = Resolve-Path $repoPathInput -ErrorAction Stop
 Set-Location $resolvedRepoPath
@@ -86,12 +106,22 @@ Write-Host "== Prox release deploy to devices ==" -ForegroundColor Cyan
 Write-Host "Repo:    $resolvedRepoPath"
 Write-Host "Devices: $($DeviceIds -join ', ')"
 Write-Host "Package: $PackageName"
+Write-Host "Channel: $ReleaseChannel"
+Write-Host "Business Mode build enabled: $($EnableBusinessMode.IsPresent)"
 
 if ([string]::IsNullOrWhiteSpace($ExternalCheckoutSessionUrl)) {
   $ExternalCheckoutSessionUrl = $env:PROX_EXTERNAL_CHECKOUT_SESSION_URL
 }
 
 if (-not $SkipBuild) {
+  $pubspecVersion = Get-PubspecVersion -RepoPath $resolvedRepoPath
+  $pubspecShortVersion = if ($pubspecVersion.Contains("+")) {
+    ($pubspecVersion.Split("+")[0]).Trim()
+  } else {
+    $pubspecVersion
+  }
+  $testerBuildValue = if ($ReleaseChannel -eq "tester") { "true" } else { "false" }
+
   $preBuildApkPath = $null
   $preBuildApkTime = $null
   try {
@@ -106,9 +136,27 @@ if (-not $SkipBuild) {
     "build",
     "apk",
     "--release",
+    "--dart-define=PROX_APP_VERSION=$pubspecVersion",
+    "--dart-define=PROX_APP_VERSION_SHORT=$pubspecShortVersion",
+    "--dart-define=PROX_RELEASE_CHANNEL=$ReleaseChannel",
+    "--dart-define=PROX_TESTER_BUILD=$testerBuildValue",
     "--dart-define=PROX_TESTER_GUIDE_URL=$TesterGuideUrl",
     "--dart-define=PROX_TESTER_SUPPORT_URL=$TesterSupportUrl"
   )
+  if (-not [string]::IsNullOrWhiteSpace($PublicApkUrl)) {
+    $buildArgs += "--dart-define=PROX_PUBLIC_APK_URL=$PublicApkUrl"
+  }
+  if ($EnableBusinessMode) {
+    $buildArgs += "--dart-define=PROX_ENABLE_BUSINESS_MODE=true"
+    $buildArgs += "--dart-define=PROX_BUSINESS_MODE_FORCE_OFF=false"
+    $buildArgs += "--dart-define=PROX_PRO_MODE_PREVIEW_ENABLED=true"
+    $buildArgs += "--dart-define=PROX_PRO_MODE_PREVIEW_LOGINS=marty.marola@hotmail.com"
+  }
+  else {
+    $buildArgs += "--dart-define=PROX_ENABLE_BUSINESS_MODE=false"
+    $buildArgs += "--dart-define=PROX_BUSINESS_MODE_FORCE_OFF=true"
+    $buildArgs += "--dart-define=PROX_PRO_MODE_PREVIEW_ENABLED=false"
+  }
   if (-not [string]::IsNullOrWhiteSpace($ExternalCheckoutSessionUrl)) {
     $buildArgs += "--dart-define=PROX_EXTERNAL_CHECKOUT_SESSION_URL=$ExternalCheckoutSessionUrl"
     Write-Host "Using PROX_EXTERNAL_CHECKOUT_SESSION_URL dart-define." -ForegroundColor Cyan

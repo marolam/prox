@@ -1,0 +1,41 @@
+name: Prod Release Guard
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      release_channel:
+        description: Release channel to validate
+        required: true
+        default: prod
+        type: choice
+        options:
+          - prod
+          - staging
+          - tester
+
+jobs:
+  prod-branch-and-flag-guard:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Guard release branch and feature flags
+        shell: pwsh
+        run: |
+          $channel = "${{ github.event.inputs.release_channel }}"
+          if ([string]::IsNullOrWhiteSpace($channel)) { $channel = "prod" }
+          powershell -ExecutionPolicy Bypass -File .\tools\scripts\check_release_guard.ps1 -ReleaseChannel $channel -BranchName "${{ github.ref_name }}"
+
+      - name: Verify safe rollback release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.ROLLBACK_GITHUB_TOKEN || secrets.RELEASE_GITHUB_TOKEN || github.token }}
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\tools\scripts\verify_safe_rollback_release.ps1
+
+      # A version bump reaches main before its release tag is pushed. Artifact
+      # version/latest verification belongs to the paired publication workflow.

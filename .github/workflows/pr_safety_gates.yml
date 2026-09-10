@@ -1,0 +1,82 @@
+name: PR Safety Gates
+
+on:
+  pull_request:
+    branches:
+      - main
+      - release/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-safety:
+    uses: ./.github/workflows/backend_safety_checks.yml
+
+  safe-rollback-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify safe rollback release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.ROLLBACK_GITHUB_TOKEN || secrets.RELEASE_GITHUB_TOKEN || github.token }}
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\tools\scripts\verify_safe_rollback_release.ps1
+
+      - name: Prompt-update safety gate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.ROLLBACK_GITHUB_TOKEN || secrets.RELEASE_GITHUB_TOKEN || github.token }}
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\tools\scripts\safe_update_gate.ps1 -SkipAnalyzer
+
+  release-guard:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate release guard defaults
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\tools\scripts\check_release_guard.ps1 -ReleaseChannel tester
+
+      - name: Verify platform update policy preparation
+        shell: pwsh
+        run: ./tools/scripts/test_update_release_policy.ps1
+
+      - name: Set up release tooling Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Test release publication and local shipping without external writes
+        run: python -m unittest discover -s tools/scripts/tests -p "test_release*.py"
+
+  core-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.41.1'
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Verify mobile Firebase identity
+        run: python3 tools/scripts/verify_platform_firebase_config.py
+
+      - name: Analyze application
+        run: flutter analyze
+
+      - name: Complete regression suite
+        run: flutter test

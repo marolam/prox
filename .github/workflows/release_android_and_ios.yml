@@ -1,0 +1,559 @@
+name: Paired Android + iOS Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+  workflow_dispatch:
+    inputs:
+      release_channel:
+        description: Release channel (tester/staging/prod)
+        required: false
+        default: prod
+        type: choice
+        options:
+          - tester
+          - staging
+          - prod
+      build_flavor_ios:
+        description: iOS build flavor (dart define)
+        required: false
+        default: ios_device
+      export_method:
+        description: Xcode export method (ad-hoc, development, app-store)
+        required: false
+        default: app-store
+      staging_apk_asset_name:
+        description: APK asset filename for staging channel (for example app-release-staging.apk)
+        required: false
+        default: "app-release-staging.apk"
+      staging_ipa_asset_name:
+        description: IPA asset filename for staging channel (for example app-release-staging.ipa)
+        required: false
+        default: "app-release-staging.ipa"
+      release_notes_template:
+        description: Release notes template ({VERSION}, {SHORT_VERSION}, {CHANNEL}, {REPO}, {TIMESTAMP})
+        required: false
+        default: "Prox {VERSION} release ({CHANNEL}) | includes paired Android APK and iOS IPA assets."
+      upload_to_testflight:
+        description: Upload resulting IPA to TestFlight when export_method=app-store
+        required: false
+        default: "true"
+      repo:
+        description: GitHub owner/repo for release upload
+        required: false
+        default: marolam/prox
+      public_apk_url:
+        description: Optional exact version-pinned APK URL (normally leave empty)
+        required: false
+        default: ""
+      ios_update_url:
+        description: Installable App Store or TestFlight URL (defaults to IOS_UPDATE_URL repository variable)
+        required: false
+        default: ""
+      external_checkout_session_url:
+        description: PROX_EXTERNAL_CHECKOUT_SESSION_URL (optional)
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: paired-release-publication
+  cancel-in-progress: false
+
+jobs:
+  backend-safety:
+    uses: ./.github/workflows/backend_safety_checks.yml
+
+  build-and-release:
+    needs: backend-safety
+    runs-on: macos-15
+    environment: ${{ (endsWith(github.ref_name, '-tester') || inputs.release_channel == 'tester') && 'paired-release-gate-tester' || (endsWith(github.ref_name, '-staging') || inputs.release_channel == 'staging') && 'paired-release-gate-staging' || 'paired-release-gate-prod' }}
+    timeout-minutes: 120
+
+    env:
+      BUNDLE_ID: com.prox-us.prox
+      TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+      IOS_UPDATE_URL: ${{ inputs.ios_update_url || vars.IOS_UPDATE_URL }}
+      UPLOAD_TO_TESTFLIGHT: ${{ inputs.upload_to_testflight }}
+      EXPORT_METHOD: ${{ inputs.export_method }}
+      INPUT_RELEASE_CHANNEL: ${{ inputs.release_channel }}
+      INPUT_BUILD_FLAVOR_IOS: ${{ inputs.build_flavor_ios }}
+      INPUT_PUBLIC_APK_URL: ${{ inputs.public_apk_url }}
+      INPUT_EXTERNAL_CHECKOUT_URL: ${{ inputs.external_checkout_session_url }}
+      INPUT_STAGING_APK: ${{ inputs.staging_apk_asset_name }}
+      INPUT_STAGING_IPA: ${{ inputs.staging_ipa_asset_name }}
+      INPUT_NOTES_TEMPLATE: ${{ inputs.release_notes_template }}
+      RELEASE_REPO: ${{ inputs.repo || vars.RELEASE_REPO || 'marolam/prox' }}
+      FIREBASE_PROJECT_ID: prox-42bef
+      ANDROID_SIGNING_CERT_SHA256: ${{ vars.ANDROID_SIGNING_CERT_SHA256 }}
+      AUTO_PUBLISH_ANDROID_POLICY: ${{ vars.AUTO_PUBLISH_ANDROID_POLICY }}
+      APP_STORE_CONNECT_API_KEY_P8_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8_BASE64 }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+      IOS_PROVISION_PROFILE_BASE64: ${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}
+      IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+      IOS_CERT_P12_BASE64: ${{ secrets.IOS_CERT_P12_BASE64 }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up release tooling Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Resolve Flutter project
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f pubspec.yaml ]]; then
+            echo "PROJECT_DIR=." >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          project_dir="$(git ls-files '**/pubspec.yaml' | grep -vE '(^|/)(build|.dart_tool|node_modules)/' | head -n 1 | xargs -I{} dirname {})"
+          if [[ -z "${project_dir:-}" ]]; then
+            echo "No pubspec.yaml found in repository checkout." >&2
+            exit 1
+          fi
+          echo "PROJECT_DIR=$project_dir" >> "$GITHUB_ENV"
+
+      - name: Resolve version, tag and approved source branch
+        shell: bash
+        run: python3 "${PROJECT_DIR}/tools/scripts/release_parameters.py"
+
+      - name: Validate release guard and reject an already published version
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN || github.token }}
+        run: |
+          ./tools/scripts/check_release_guard.ps1 -ReleaseChannel $env:RELEASE_CHANNEL -BranchName $env:RELEASE_BRANCH
+          if ($LASTEXITCODE -ne 0) { throw 'Release branch/feature guard failed.' }
+          ./tools/scripts/publish_github_release.ps1 -ValidateOnly -Repo $env:RELEASE_REPO -Tag $env:RELEASE_TAG -TargetCommit $env:GITHUB_SHA -Prerelease:($env:RELEASE_CHANNEL -ne 'prod') -RequireExistingTag:($env:GITHUB_REF_TYPE -eq 'tag')
+          if ($LASTEXITCODE -ne 0) { throw 'Release preflight failed.' }
+
+      - name: Verify protected rollback
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.ROLLBACK_GITHUB_TOKEN || secrets.RELEASE_GITHUB_TOKEN || github.token }}
+        run: ./tools/scripts/verify_safe_rollback_release.ps1
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install pinned Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.41.1'
+          cache: true
+
+      - name: Flutter pub get
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter pub get
+
+      - name: Analyze and test the complete application
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          python3 tools/scripts/verify_platform_firebase_config.py
+          flutter analyze
+          flutter test
+          python3 -m unittest discover -s tools/scripts/tests -p "test_release*.py"
+          pwsh -NoProfile -File tools/scripts/test_update_release_policy.ps1
+
+      - name: Prepare common platform defines
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/release
+          python3 - <<'PY'
+          import json, os
+          values = {
+            "PROX_APP_VERSION": os.environ["APP_VERSION"],
+            "PROX_APP_VERSION_SHORT": os.environ["APP_VERSION_SHORT"],
+            "PROX_RELEASE_CHANNEL": os.environ["RELEASE_CHANNEL"],
+            "PROX_TESTER_BUILD": os.environ["TESTER_BUILD"],
+            "PROX_PUBLIC_APK_URL": os.environ["PUBLIC_APK_URL"],
+            "PROX_IOS_UPDATE_URL": os.environ["IOS_UPDATE_URL"],
+            "PROX_ENFORCE_MINIMUM_VERSION": "true",
+            "PROX_MIN_REQUIRED_VERSION": os.environ["APP_VERSION"],
+            "PROX_TESTER_GUIDE_URL": "https://prox-us.com/tester-guide",
+            "PROX_TESTER_SUPPORT_URL": "https://prox-us.com/tester-support",
+            "PROX_ENABLE_BUSINESS_MODE": "false",
+            "PROX_BUSINESS_MODE_FORCE_OFF": "true",
+            "PROX_PRO_MODE_PREVIEW_ENABLED": "false",
+            "PROX_EXTERNAL_CHECKOUT_SESSION_URL": os.environ["EXTERNAL_CHECKOUT_SESSION_URL"],
+          }
+          with open("artifacts/release/paired_defines.json", "w") as f:
+              json.dump(values, f, indent=2)
+          PY
+
+      - name: Configure Android release signing
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          required = ("ANDROID_KEYSTORE_BASE64", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD", "ANDROID_STORE_PASSWORD")
+          missing = [key for key in required if not os.environ.get(key)]
+          if missing:
+              raise SystemExit("Missing signing secrets: " + ", ".join(missing))
+          keystore = Path(os.environ["RUNNER_TEMP"]) / "prox-release.jks"
+          keystore.write_bytes(base64.b64decode(os.environ["ANDROID_KEYSTORE_BASE64"], validate=True))
+          keystore.chmod(0o600)
+          def prop(value):
+              return value.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r")
+          values = {"storeFile": str(keystore), "keyAlias": os.environ["ANDROID_KEY_ALIAS"],
+              "keyPassword": os.environ["ANDROID_KEY_PASSWORD"], "storePassword": os.environ["ANDROID_STORE_PASSWORD"]}
+          Path("android/key.properties").write_text("\n".join(key + "=" + prop(value) for key, value in values.items()))
+          PY
+
+      - name: Validate release notes quality
+        shell: bash
+        run: |
+          set -euo pipefail
+          NOTES="${RELEASE_NOTES}"
+          if [[ -z "${NOTES}" ]]; then
+            echo "Release notes are empty." >&2
+            exit 1
+          fi
+          if ! echo "$NOTES" | grep -iq "APK"; then
+            echo "Release notes must mention APK." >&2
+            exit 1
+          fi
+          if ! echo "$NOTES" | grep -iq "IPA"; then
+            echo "Release notes must mention IPA." >&2
+            exit 1
+          fi
+          if [[ "$NOTES" != *"$APP_VERSION"* ]]; then
+            echo "Release notes must include version token replacement ($APP_VERSION)." >&2
+            exit 1
+          fi
+          if (( ${#NOTES} < 25 )); then
+            echo "Release notes are too short." >&2
+            exit 1
+          fi
+          if ! echo "$NOTES" | grep -iq "android"; then
+            echo "Release notes should mention Android or APK." >&2
+            exit 1
+          fi
+          if ! echo "$NOTES" | grep -iq "ios"; then
+            echo "Release notes should mention iOS or IPA." >&2
+            exit 1
+          fi
+
+      - name: Build release APK (Android)
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x android/gradlew
+          flutter build apk --release --dart-define-from-file=artifacts/release/paired_defines.json
+
+      - name: Select Xcode with iOS 26+ SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          shopt -s nullglob
+          xcode_apps=(/Applications/Xcode*.app)
+          shopt -u nullglob
+          if [[ ${#xcode_apps[@]} -eq 0 ]]; then
+            echo "No Xcode app installations found under /Applications." >&2
+            exit 1
+          fi
+
+          selected=""
+          for app in /Applications/Xcode_26*.app /Applications/Xcode_27*.app /Applications/Xcode_28*.app; do
+            if [[ -d "$app" ]]; then
+              selected="$app"
+            fi
+          done
+          if [[ -z "$selected" ]]; then
+            selected="$(ls -1d /Applications/Xcode*.app | sort -V | tail -n 1)"
+          fi
+
+          echo "Using Xcode: $selected"
+          sudo xcode-select -s "$selected/Contents/Developer"
+          xcodebuild -version
+          xcodebuild -showsdks
+          if ! xcodebuild -showsdks | grep -Eq 'iphoneos(26|[3-9][0-9])'; then
+            echo "iOS 26+ SDK is required for App Store Connect/TestFlight uploads." >&2
+            exit 1
+          fi
+
+      - name: Validate iOS signing secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${IOS_CERT_P12_BASE64}" ]] || { echo "Missing required secret: IOS_CERT_P12_BASE64" >&2; exit 1; }
+          [[ -n "${IOS_CERT_PASSWORD}" ]] || { echo "Missing required secret: IOS_CERT_PASSWORD" >&2; exit 1; }
+          [[ -n "${IOS_PROVISION_PROFILE_BASE64}" ]] || { echo "Missing required secret: IOS_PROVISION_PROFILE_BASE64" >&2; exit 1; }
+          [[ -n "${TEAM_ID}" ]] || { echo "Missing required secret: IOS_TEAM_ID" >&2; exit 1; }
+          if [[ "${UPLOAD_TO_TESTFLIGHT}" == "true" ]]; then
+            [[ -n "${APP_STORE_CONNECT_API_KEY_ID}" ]] || { echo "Missing required secret for TestFlight upload: APP_STORE_CONNECT_API_KEY_ID" >&2; exit 1; }
+            [[ -n "${APP_STORE_CONNECT_ISSUER_ID}" ]] || { echo "Missing required secret for TestFlight upload: APP_STORE_CONNECT_ISSUER_ID" >&2; exit 1; }
+            [[ -n "${APP_STORE_CONNECT_API_KEY_P8_BASE64}" ]] || { echo "Missing required secret for TestFlight upload: APP_STORE_CONNECT_API_KEY_P8_BASE64" >&2; exit 1; }
+          fi
+
+      - name: Install signing certificate and provisioning profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          CERT_DIR="$RUNNER_TEMP/signing"
+          mkdir -p "$CERT_DIR"
+          echo -n "${IOS_CERT_P12_BASE64}" | base64 --decode > "$CERT_DIR/cert.p12"
+          echo -n "${IOS_PROVISION_PROFILE_BASE64}" | base64 --decode > "$CERT_DIR/profile.mobileprovision"
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+          security create-keychain -p "$RUNNER_TEMP" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$RUNNER_TEMP" "$KEYCHAIN_PATH"
+          security import "$CERT_DIR/cert.p12" -P "${IOS_CERT_PASSWORD}" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          security default-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$RUNNER_TEMP" "$KEYCHAIN_PATH"
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$CERT_DIR/profile.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/"
+
+          PROFILE_PLIST="$RUNNER_TEMP/profile.plist"
+          security cms -D -i "$CERT_DIR/profile.mobileprovision" > "$PROFILE_PLIST"
+          PROFILE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$PROFILE_PLIST")"
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          export PROFILE_PLIST
+          python3 - <<'PY'
+          import os, plistlib, re
+          from pathlib import Path
+          profile = plistlib.loads(Path(os.environ["PROFILE_PLIST"]).read_bytes())
+          entitlements = profile.get("Entitlements", {})
+          if not entitlements.get("aps-environment") or not entitlements.get("com.apple.developer.associated-domains"):
+              raise SystemExit("Provisioning profile must enable Push Notifications and Associated Domains.")
+          if not entitlements.get("application-identifier", "").endswith("." + os.environ["BUNDLE_ID"]):
+              raise SystemExit("Provisioning profile bundle ID does not match the application.")
+          if os.environ["TEAM_ID"] not in profile.get("TeamIdentifier", []):
+              raise SystemExit("Provisioning profile belongs to a different Apple team.")
+          project = Path(os.environ["PROJECT_DIR"]) / "ios/Runner.xcodeproj/project.pbxproj"
+          text = project.read_text()
+          def quoted(value):
+              return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+          values = {"PROVISIONING_PROFILE_SPECIFIER": quoted(profile["Name"]),
+              "DEVELOPMENT_TEAM": quoted(os.environ["TEAM_ID"]),
+              "CODE_SIGN_IDENTITY": quoted("Apple Development" if os.environ["EXPORT_METHOD"] == "development" else "Apple Distribution"),
+              "APS_ENVIRONMENT": quoted(entitlements["aps-environment"])}
+          for key, value in values.items():
+              text = re.sub(r"\b" + key + r" = [^;]+;", lambda match: key + " = " + value + ";", text)
+          project.write_text(text)
+          PY
+
+      - name: Build signed IPA (iOS)
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > ios/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>${EXPORT_METHOD}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>teamID</key>
+            <string>${TEAM_ID}</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${BUNDLE_ID}</key>
+              <string>${PROFILE_NAME}</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
+
+          flutter build ipa --release \
+            --export-options-plist=ios/ExportOptions.plist \
+            --dart-define-from-file=artifacts/release/paired_defines.json \
+            "--dart-define=BUILD_FLAVOR=${BUILD_FLAVOR_IOS}"
+
+      - name: Normalize paired artifact names
+        run: |
+          set -euo pipefail
+          PROJECT="${PROJECT_DIR:-.}"
+          BASE_APK="$PROJECT/build/app/outputs/flutter-apk/app-release.apk"
+          BASE_IPA="$(ls -1t "$PROJECT/build/ios/ipa/"*.ipa | head -n 1)"
+          if [[ -z "$BASE_IPA" ]]; then
+            echo "No IPA found for normalization under $PROJECT/build/ios/ipa/" >&2
+            exit 1
+          fi
+
+          if [[ "$APK_ASSET_NAME" != "app-release.apk" ]]; then
+            cp "$BASE_APK" "$PROJECT/build/app/outputs/flutter-apk/$APK_ASSET_NAME"
+          fi
+          if [[ "$BASE_IPA" != "$PROJECT/build/ios/ipa/$IPA_ASSET_NAME" ]]; then
+            cp "$BASE_IPA" "$PROJECT/build/ios/ipa/$IPA_ASSET_NAME"
+          fi
+
+      - name: Verify package versions, Android signing identity and artifact checksums
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: python3 tools/scripts/verify_release_artifacts.py
+
+      - name: Prepare separate platform update policies
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: pwsh
+        run: |
+          ./tools/scripts/sync_release_remote_config.ps1 -PrepareOnly -Platform android -LatestVersion $env:APP_VERSION -DownloadUrl $env:PUBLIC_APK_URL -OutputPath artifacts/release/android-update-policy.parameters.json
+          ./tools/scripts/sync_release_remote_config.ps1 -PrepareOnly -Platform ios -LatestVersion $env:APP_VERSION -IosDownloadUrl $env:IOS_UPDATE_URL -OutputPath artifacts/release/ios-update-policy.parameters.json
+
+      - name: Upload paired build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: paired-release-artifacts
+          path: |
+            ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/${{ env.APK_ASSET_NAME }}
+            ${{ env.PROJECT_DIR }}/build/ios/ipa/${{ env.IPA_ASSET_NAME }}
+            ${{ env.PROJECT_DIR }}/artifacts/release/*.json
+          if-no-files-found: error
+
+      - name: Optional TestFlight upload
+        if: ${{ env.UPLOAD_TO_TESTFLIGHT == 'true' }}
+        shell: bash
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          if [[ "${EXPORT_METHOD}" != "app-store" ]]; then
+            echo "TestFlight upload requires export_method=app-store." >&2
+            exit 1
+          fi
+
+          API_KEY_DIR="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$API_KEY_DIR"
+          API_KEY_ID="${APP_STORE_CONNECT_API_KEY_ID}"
+          ISSUER_ID="${APP_STORE_CONNECT_ISSUER_ID}"
+          API_KEY_PATH="$API_KEY_DIR/AuthKey_${API_KEY_ID}.p8"
+          echo -n "${APP_STORE_CONNECT_API_KEY_P8_BASE64}" | base64 --decode > "$API_KEY_PATH"
+          chmod 600 "$API_KEY_PATH"
+
+          IPA_PATH="build/ios/ipa/$IPA_ASSET_NAME"
+          if [[ ! -f "$IPA_PATH" ]]; then
+            echo "No IPA found at $IPA_PATH" >&2
+            exit 1
+          fi
+
+          xcrun altool \
+            --upload-app \
+            -f "$IPA_PATH" \
+            -t ios \
+            --apiKey "$API_KEY_ID" \
+            --apiIssuer "$ISSUER_ID"
+
+      - name: Publish paired release to GitHub
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN || github.token }}
+          ROLLBACK_GITHUB_TOKEN: ${{ secrets.ROLLBACK_GITHUB_TOKEN || secrets.RELEASE_GITHUB_TOKEN || github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $project = (Resolve-Path -LiteralPath $env:PROJECT_DIR).Path
+          $parameters = @{
+            Tag = $env:RELEASE_TAG
+            TargetCommit = $env:GITHUB_SHA
+            RequireExistingTag = ($env:GITHUB_REF_TYPE -eq 'tag')
+            AdditionalAssets = @("$project/artifacts/release/release-manifest.json")
+            Repo = $env:RELEASE_REPO
+            RepoPath = $project
+            ApkPath = "$project/build/app/outputs/flutter-apk/$env:APK_ASSET_NAME"
+            ApkAssetName = $env:APK_ASSET_NAME
+            IpaPath = "$project/build/ios/ipa/$env:IPA_ASSET_NAME"
+            IpaAssetName = $env:IPA_ASSET_NAME
+            Notes = $env:RELEASE_NOTES
+          }
+          if ($env:RELEASE_CHANNEL -ne 'prod') {
+            $parameters.Prerelease = $true
+            $parameters.SetLatest = $false
+          }
+          & "$project/tools/scripts/publish_github_release.ps1" @parameters
+          if ($LASTEXITCODE -ne 0) { throw 'Paired release publication failed.' }
+
+      - name: Verify anonymous Android download against the built APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: python3 tools/scripts/verify_release_artifacts.py --published
+
+      - name: Set up Node for Android update policy deployment
+        if: ${{ env.RELEASE_CHANNEL == 'prod' && env.AUTO_PUBLISH_ANDROID_POLICY == 'true' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Authenticate Firebase policy deployment
+        if: ${{ env.RELEASE_CHANNEL == 'prod' && env.AUTO_PUBLISH_ANDROID_POLICY == 'true' }}
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Activate the verified Android update policy
+        if: ${{ env.RELEASE_CHANNEL == 'prod' && env.AUTO_PUBLISH_ANDROID_POLICY == 'true' }}
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: pwsh
+        env:
+          UPDATE_LEGACY_ANDROID_POLICY: ${{ vars.UPDATE_LEGACY_ANDROID_POLICY }}
+        run: |
+          npm install --global firebase-tools@15.1.0
+          if ($LASTEXITCODE -ne 0) { throw 'Firebase CLI installation failed.' }
+          $policy = @{
+            ProjectId = $env:FIREBASE_PROJECT_ID
+            Platform = 'android'
+            LatestVersion = $env:APP_VERSION
+            DownloadUrl = $env:PUBLIC_APK_URL
+          }
+          if ($env:UPDATE_LEGACY_ANDROID_POLICY -eq 'true') { $policy.IncludeLegacyAndroidPolicy = $true }
+          ./tools/scripts/sync_release_remote_config.ps1 @policy
+          if ($LASTEXITCODE -ne 0) { throw 'Android update policy activation failed.' }
+
+      - name: Record distribution status
+        shell: bash
+        run: |
+          {
+            echo "Release: $RELEASE_TAG"
+            echo "Verified Android APK: $PUBLIC_APK_URL"
+            echo "TestFlight upload enabled: $UPLOAD_TO_TESTFLIGHT"
+            echo "Android policy auto-activation configured: ${AUTO_PUBLISH_ANDROID_POLICY:-false} (production only)"
+            echo "iOS policy is prepared only. Activate it after Apple processing/review and tester availability are confirmed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup signing material
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/prox-release.jks" "${PROJECT_DIR}/android/key.properties" "$RUNNER_TEMP/signing/cert.p12" "$RUNNER_TEMP/signing/profile.mobileprovision" "$HOME/.appstoreconnect/private_keys/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8"
+          rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/profile.mobileprovision"
+          if [[ -n "${KEYCHAIN_PATH:-}" && -f "$KEYCHAIN_PATH" ]]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi
