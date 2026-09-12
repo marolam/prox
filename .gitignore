@@ -37,3 +37,5 @@ zy_chat_fail.txt
 **/*.mobileprovision
 ios/Flutter/Generated.xcconfig
 ios/Flutter/flutter_export_environment.sh
+# Short-lived GitHub-to-Google authentication files.
+gha-creds-*.json

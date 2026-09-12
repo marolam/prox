@@ -66,7 +66,6 @@ Configure these repository secrets on the repository running the workflow:
 | `APP_STORE_CONNECT_API_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_API_KEY_P8_BASE64` | App Store Connect upload authentication |
 | `ROLLBACK_GITHUB_TOKEN` | Read access to the protected `v1.0` release in private `marolam/prox-us` |
 | `RELEASE_GITHUB_TOKEN` | Only needed when publishing to another repository; requires contents write access there |
-| `FIREBASE_SERVICE_ACCOUNT` | Google service-account JSON for Remote Config deployment, only if automatic Android policy activation is enabled |
 
 The ordinary workflow token can publish in its own repository but cannot read
 the private rollback repository. Rollback verification uses the rollback token,
@@ -80,8 +79,19 @@ Configure repository variables:
 | `IOS_UPDATE_URL` | Optional real TestFlight join link or App Store app link; invite-only TestFlight uploads work without one |
 | `ANDROID_SIGNING_CERT_SHA256` | SHA-256 certificate digest from a known installed/published APK, as printed by `apksigner verify --print-certs`; this is the certificate digest, not the APK checksum |
 | `RELEASE_REPO` | Optional; defaults to `marolam/prox` |
+| `FIREBASE_WIF_PROVIDER` | `projects/12575732319/locations/global/workloadIdentityPools/github-releases/providers/prox-release` |
+| `FIREBASE_RELEASE_SERVICE_ACCOUNT` | `prox-release-policy@prox-42bef.iam.gserviceaccount.com` |
 | `AUTO_PUBLISH_ANDROID_POLICY` | Set to `true` after backend readiness and rollout scope are verified; otherwise policy is prepared only |
 | `UPDATE_LEGACY_ANDROID_POLICY` | Set to `true` if deployed clients need shared update keys or the reserved legacy Android condition already exists |
+
+Firebase policy deployment uses GitHub OIDC through Workload Identity Federation,
+with no service-account key secret. The identity has only
+`roles/cloudconfig.admin` in `prox-42bef`. Its trust condition restricts the
+immutable GitHub repository ID `1108798524`, main/version-tag refs, and the paired
+release workflow (plus the main-only read-only authentication check). It has no
+permission to deploy application functions or Firestore rules. Run
+`Verify release policy authentication` on main before enabling automatic policy
+activation; this fetches the live template without changing it or logging it.
 
 The workflow selects `paired-release-gate-prod`, `paired-release-gate-staging`,
 or `paired-release-gate-tester`. Configure their allowed deployment branches/tags

@@ -1,0 +1,33 @@
+name: Verify release policy authentication
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned Firebase CLI
+        run: npm install --global firebase-tools@15.1.0
+      - name: Authenticate using the release identity
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: prox-42bef
+          workload_identity_provider: ${{ vars.FIREBASE_WIF_PROVIDER }}
+          service_account: ${{ vars.FIREBASE_RELEASE_SERVICE_ACCOUNT }}
+      - name: Verify access without changing the live policy
+        shell: bash
+        run: |
+          firebase remoteconfig:get --project prox-42bef --non-interactive -o "$RUNNER_TEMP/remoteconfig.json"
+          node -e 'const fs = require("node:fs"); const template = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/remoteconfig.json", "utf8")); if (!template.parameters?.update_latest_version_android) throw new Error("Android update policy missing"); console.log("Release identity can read the live Android update policy.");'
+          echo 'Keyless Firebase release authentication verified; live policy unchanged.' >> "$GITHUB_STEP_SUMMARY"
