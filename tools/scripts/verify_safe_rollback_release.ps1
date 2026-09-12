@@ -53,11 +53,21 @@ Write-Host "Expected: sha256:$expectedHash"
 $previousErrorPreference = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 try {
-  $releaseJson = (& gh release view $Tag --repo $Repo --json tagName,assets,url 2>$null | Out-String).Trim()
+  # Use the documented Contents-read REST endpoint directly. Keep failure
+  # details in memory; print only the HTTP status, never credentials or bodies.
+  $endpoint = "repos/$Repo/releases/tags/$([Uri]::EscapeDataString($Tag))"
+  $releaseJson = (& gh api $endpoint 2>&1 | Out-String).Trim()
   $readExitCode = $LASTEXITCODE
 } finally { $ErrorActionPreference = $previousErrorPreference }
 if ($readExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($releaseJson)) {
-  throw "Could not read protected GitHub release $Repo@$Tag. CI requires ROLLBACK_GITHUB_TOKEN with contents read access to that private repository."
+  $httpStatus = if ($releaseJson -match 'HTTP ([0-9]{3})') { $Matches[1] } else { 'unknown' }
+  $detail = switch ($httpStatus) {
+    '401' { 'GitHub rejected the token. Replace the secret with the full, unexpired generated token value.' }
+    '403' { 'GitHub denied release access. Check token approval and Contents: read permission.' }
+    '404' { "GitHub could not expose the private release. Check that the token selects $Repo and has Contents: read permission." }
+    default { 'Check GitHub availability and the configured rollback credential.' }
+  }
+  throw "Rollback release read failed (HTTP $httpStatus) for $Repo@$Tag. $detail"
 }
 
 $release = $releaseJson | ConvertFrom-Json
