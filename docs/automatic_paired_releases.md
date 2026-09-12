@@ -21,9 +21,11 @@ the portal HTML. Website linking does not activate Firebase in-app update policy
 
 PR #9 was merged into `main` on September 12, 2026 (commit `57d0ffd`), and the
 paired release workflow is active. The release environments have no required
-reviewers or wait timers. CI still needs the private rollback read token listed
-below before unattended releases can pass preflight. The portal link itself
-works independently with the currently published release.
+reviewers or wait timers. The private rollback token is configured and passed
+the production release guard in GitHub Actions on September 12:
+https://github.com/marolam/prox/actions/runs/34681739946 (attempt 2).
+Matching version tags on main can now run the paired build/publication workflow
+without manual approvals. No new release was published by this readiness check.
 
 The implementation is in `.github/workflows/release_android_and_ios.yml`.
 `release_parameters.py` resolves both tag and manual-dispatch inputs. The
@@ -79,7 +81,7 @@ On September 10, the four Android signing secrets and certificate digest were
 configured in `marolam/prox` after the local key was verified against the actual
 published build 19 APK. The existing iOS upload secrets were already present,
 and all three release environments were created. The private rollback token
-still needs configuration before the first automated release run.
+was configured on September 12 and its repository access verified from CI.
 The protected private `v1.0` is not interchangeable with public `v1.0`: their
 APK checksums differ.
 
