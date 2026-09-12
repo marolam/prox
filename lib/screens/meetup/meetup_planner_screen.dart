@@ -4,11 +4,12 @@ import "package:firebase_auth/firebase_auth.dart";
 import "package:flutter/material.dart";
 import "package:geolocator/geolocator.dart";
 import "package:latlong2/latlong.dart";
-import "package:url_launcher/url_launcher.dart";
 
 import "package:prox/services/meetup_service.dart";
 import "package:prox/widgets/meetup_session_bar.dart";
 import "package:prox/widgets/meetup_map.dart";
+import "package:prox/widgets/meetup_progress_card.dart";
+import "package:prox/widgets/meetup_flow_guard.dart";
 
 class MeetupPlannerScreen extends StatefulWidget {
   final String chatId;
@@ -243,17 +244,6 @@ class _MeetupPlannerScreenState extends State<MeetupPlannerScreen> {
     }
   }
 
-  Future<void> _openMaps(double lat, double lng) async {
-    final uri = Uri.parse(
-      "https://www.google.com/maps/search/?api=1&query=$lat,$lng",
-    );
-    try {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } catch (_) {
-      _snack("Couldn't open maps.");
-    }
-  }
-
   Future<void> _confirmLocation() async {
     final myUid = _myUid;
     if (myUid.isEmpty) return;
@@ -323,78 +313,227 @@ class _MeetupPlannerScreenState extends State<MeetupPlannerScreen> {
   Widget build(BuildContext context) {
     final myUid = _myUid;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("Plan meetup"),
-        actions: [
-          IconButton(
-            tooltip: "Help",
-            onPressed: _showHelp,
-            icon: const Icon(Icons.help_outline),
-          ),
-        ],
-      ),
-      bottomNavigationBar: MeetupSessionBar(
-        meetupId: widget.chatId,
-        otherUid: widget.otherUid,
-        currentScreen: "planner",
-        helpTitle: "Plan the meetup",
-        helpMessage:
-            "Set one clear public meeting point. The other person confirms it, then both of you open Live and update each step as it happens.",
-      ),
-      body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-        stream: MeetupService.instance.watchMeetup(widget.chatId),
-        builder: (context, snap) {
-          final bool exists = snap.data?.exists == true;
-          final d = snap.data?.data() ?? <String, dynamic>{};
+    return MeetupFlowGuard(
+      meetupId: widget.chatId,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text("Plan meetup"),
+          actions: [
+            IconButton(
+              tooltip: "Help",
+              onPressed: _showHelp,
+              icon: const Icon(Icons.help_outline),
+            ),
+          ],
+        ),
+        bottomNavigationBar: MeetupSessionBar(
+          meetupId: widget.chatId,
+          otherUid: widget.otherUid,
+          currentScreen: "planner",
+          helpTitle: "Plan the meetup",
+          helpMessage:
+              "Set one clear public meeting point. The other person confirms it, then both of you open Live and update each step as it happens.",
+        ),
+        body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          stream: MeetupService.instance.watchMeetup(widget.chatId),
+          builder: (context, snap) {
+            if (snap.hasError)
+              return const Center(
+                child: Text(
+                  "Could not load the meeting point. Check your connection. Safety is available above.",
+                ),
+              );
+            if (!snap.hasData)
+              return const Center(child: CircularProgressIndicator());
+            final bool exists = snap.data?.exists == true;
+            final d = snap.data?.data() ?? <String, dynamic>{};
 
-          final String plannerUid = (d["plannerUid"] ?? "").toString().trim();
-          final bool iAmPlanner = plannerUid.isEmpty
-              ? true
-              : plannerUid == myUid;
+            final String plannerUid = (d["plannerUid"] ?? "").toString().trim();
+            final bool iAmPlanner = plannerUid.isEmpty
+                ? true
+                : plannerUid == myUid;
 
-          final String locStatus = (d["locationStatus"] ?? "")
-              .toString()
-              .trim();
-          final double? lat = (d["lat"] is num)
-              ? (d["lat"] as num).toDouble()
-              : double.tryParse((d["lat"] ?? "").toString());
-          final double? lng = (d["lng"] is num)
-              ? (d["lng"] as num).toDouble()
-              : double.tryParse((d["lng"] ?? "").toString());
-          final bool hasPin = lat != null && lng != null;
-          final LatLng? displayedPin =
-              _dragPreview ?? (hasPin ? LatLng(lat, lng) : null);
+            final String locStatus = (d["locationStatus"] ?? "")
+                .toString()
+                .trim();
+            final double? lat = (d["lat"] is num)
+                ? (d["lat"] as num).toDouble()
+                : double.tryParse((d["lat"] ?? "").toString());
+            final double? lng = (d["lng"] is num)
+                ? (d["lng"] as num).toDouble()
+                : double.tryParse((d["lng"] ?? "").toString());
+            final bool hasPin = lat != null && lng != null;
+            final LatLng? displayedPin =
+                _dragPreview ?? (hasPin ? LatLng(lat, lng) : null);
 
-          if (!exists) {
+            if (!exists) {
+              return ListView(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
+                children: [
+                  _infoCard(
+                    context,
+                    title: "Meetup not created yet",
+                    lines: const [
+                      "Agree to a meetup in chat before choosing a meeting point.",
+                      "Return to chat to send or accept the request.",
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () => Navigator.of(context).maybePop(),
+                    icon: const Icon(Icons.chat_bubble_outline),
+                    label: const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Text("Back to chat"),
+                    ),
+                  ),
+                ],
+              );
+            }
+
+            if (!meetupIsActive(d)) {
+              return ListView(
+                padding: const EdgeInsets.all(16),
+                children: [MeetupProgressCard(data: d, uid: myUid)],
+              );
+            }
+            if (d["status"] == "requested") {
+              return ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  MeetupProgressCard(data: d, uid: myUid),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pushReplacementNamed(
+                      "/chat",
+                      arguments: {
+                        "chatId": widget.chatId,
+                        "otherUid": widget.otherUid,
+                      },
+                    ),
+                    child: const Text("Respond in chat"),
+                  ),
+                ],
+              );
+            }
+            final canMovePin = iAmPlanner && locStatus != "confirmed";
             return ListView(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
               children: [
-                _infoCard(
-                  context,
-                  title: "Meetup not created yet",
-                  lines: const [
-                    "This chat may not have an active meetup doc yet.",
-                    "If the meetup request was accepted, the planner can create it by setting a pin.",
-                  ],
-                ),
+                MeetupProgressCard(data: d, uid: myUid),
                 const SizedBox(height: 12),
-                if (iAmPlanner)
+                if (displayedPin != null) ...[
+                  SizedBox(
+                    height: 330,
+                    child: MeetupMap(
+                      key: ValueKey<String>("meetup-map-${widget.chatId}"),
+                      center: displayedPin,
+                      onPinDrag: canMovePin
+                          ? (point) => setState(() => _dragPreview = point)
+                          : null,
+                      onPinDragEnd: canMovePin ? _saveMapPin : null,
+                      onLongPress: canMovePin ? _saveMapPin : null,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    canMovePin
+                        ? "Drag the orange pin or press and hold the map to move it. Release to share the new location."
+                        : "The meetup pin updates here when the planner moves it.",
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
+                if (canMovePin) ...[
                   FilledButton.icon(
                     onPressed: _busy ? null : _setPinToMyLocation,
                     icon: const Icon(Icons.my_location),
                     label: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       child: Text(
-                        _busy
-                            ? "Working..."
-                            : "Create meetup (use my location)",
+                        _busy ? "Working..." : "Set pin to my location",
+                        style: const TextStyle(fontWeight: FontWeight.w800),
                       ),
                     ),
                   ),
-                const SizedBox(height: 12),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : _promptMovePin,
+                    icon: const Icon(Icons.edit_location_alt),
+                    label: const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Text(
+                        "Enter coordinates instead",
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ),
+                ] else if (!iAmPlanner && locStatus != "confirmed") ...[
+                  _infoCard(
+                    context,
+                    title: "Review their meeting point",
+                    lines: const [
+                      "Wait for the planner to set the pin, then confirm it to unlock Live Meetup.",
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 14),
+                if (!iAmPlanner && hasPin && locStatus != "confirmed") ...[
+                  FilledButton.icon(
+                    onPressed: _busy ? null : _confirmLocation,
+                    icon: const Icon(Icons.verified),
+                    label: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: Text(_busy ? "Working..." : "Confirm location"),
+                    ),
+                  ),
+                ],
+                if (hasPin && locStatus == "confirmed") ...[
+                  const SizedBox(height: 10),
+                  FilledButton.icon(
+                    onPressed: () {
+                      Navigator.of(context).pushNamed(
+                        "/meetup_live",
+                        arguments: {
+                          "chatId": widget.chatId,
+                          "otherUid": widget.otherUid,
+                        },
+                      );
+                    },
+                    icon: const Icon(Icons.directions_walk),
+                    label: const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Text(
+                        "Continue to directions & arrival",
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ),
+                ] else if (!hasPin) ...[
+                  _infoCard(
+                    context,
+                    title: "Next step",
+                    lines: const ["Set a pin to start the live meetup flow."],
+                  ),
+                ] else if (!iAmPlanner && locStatus != "confirmed") ...[
+                  _infoCard(
+                    context,
+                    title: "Next step",
+                    lines: const ["Confirm the pin to unlock Live Meetup."],
+                  ),
+                ] else if (iAmPlanner && locStatus != "confirmed") ...[
+                  _infoCard(
+                    context,
+                    title: "Next step",
+                    lines: const [
+                      "Wait for the other person to confirm the pin.",
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 18),
                 OutlinedButton.icon(
-                  onPressed: () => Navigator.of(context).pop(),
+                  onPressed: () => Navigator.of(context).maybePop(),
                   icon: const Icon(Icons.chat_bubble_outline),
                   label: const Padding(
                     padding: EdgeInsets.symmetric(vertical: 12),
@@ -403,154 +542,8 @@ class _MeetupPlannerScreenState extends State<MeetupPlannerScreen> {
                 ),
               ],
             );
-          }
-
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
-            children: [
-              _infoCard(
-                context,
-                title: "Status",
-                lines: [
-                  "Pick a pin, then confirm together before heading out.",
-                  "Planner: ${plannerUid.isEmpty ? "(unset)" : plannerUid}",
-                  "Location: ${locStatus.isEmpty ? "none" : locStatus}",
-                  if (hasPin)
-                    "Pin: ${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}"
-                  else
-                    "Pin: (not set)",
-                ],
-                trailing: hasPin
-                    ? IconButton(
-                        tooltip: "Open in Maps",
-                        onPressed: () => _openMaps(lat, lng),
-                        icon: const Icon(Icons.map_outlined),
-                      )
-                    : null,
-              ),
-              const SizedBox(height: 12),
-              if (displayedPin != null) ...[
-                SizedBox(
-                  height: 330,
-                  child: MeetupMap(
-                    key: ValueKey<String>("meetup-map-${widget.chatId}"),
-                    center: displayedPin,
-                    onPinDrag: iAmPlanner
-                        ? (point) => setState(() => _dragPreview = point)
-                        : null,
-                    onPinDragEnd: iAmPlanner ? _saveMapPin : null,
-                    onLongPress: iAmPlanner ? _saveMapPin : null,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  iAmPlanner
-                      ? "Drag the orange pin or press and hold the map to move it. Release to share the new location."
-                      : "The meetup pin updates here when the planner moves it.",
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 14),
-              ],
-              if (iAmPlanner) ...[
-                FilledButton.icon(
-                  onPressed: _busy ? null : _setPinToMyLocation,
-                  icon: const Icon(Icons.my_location),
-                  label: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Text(
-                      _busy ? "Working..." : "Set pin to my location",
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                OutlinedButton.icon(
-                  onPressed: _busy ? null : _promptMovePin,
-                  icon: const Icon(Icons.edit_location_alt),
-                  label: const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Text(
-                      "Enter coordinates instead",
-                      style: TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                ),
-              ] else ...[
-                _infoCard(
-                  context,
-                  title: "You are not the planner",
-                  lines: const [
-                    "Wait for the planner to set the pin, then confirm it to unlock Live Meetup.",
-                  ],
-                ),
-              ],
-              const SizedBox(height: 14),
-              if (!iAmPlanner && hasPin && locStatus != "confirmed") ...[
-                FilledButton.icon(
-                  onPressed: _busy ? null : _confirmLocation,
-                  icon: const Icon(Icons.verified),
-                  label: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Text(_busy ? "Working..." : "Confirm location"),
-                  ),
-                ),
-              ],
-              if (hasPin && locStatus == "confirmed") ...[
-                const SizedBox(height: 10),
-                FilledButton.icon(
-                  onPressed: () {
-                    Navigator.of(context).pushNamed(
-                      "/meetup_live",
-                      arguments: {
-                        "chatId": widget.chatId,
-                        "otherUid": widget.otherUid,
-                      },
-                    );
-                  },
-                  icon: const Icon(Icons.directions_walk),
-                  label: const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Text(
-                      "Open live meetup",
-                      style: TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                  ),
-                ),
-              ] else if (!hasPin) ...[
-                _infoCard(
-                  context,
-                  title: "Next step",
-                  lines: const ["Set a pin to start the live meetup flow."],
-                ),
-              ] else if (!iAmPlanner && locStatus != "confirmed") ...[
-                _infoCard(
-                  context,
-                  title: "Next step",
-                  lines: const ["Confirm the pin to unlock Live Meetup."],
-                ),
-              ] else if (iAmPlanner && locStatus != "confirmed") ...[
-                _infoCard(
-                  context,
-                  title: "Next step",
-                  lines: const [
-                    "Wait for the other person to confirm the pin.",
-                  ],
-                ),
-              ],
-              const SizedBox(height: 18),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.of(context).pop(),
-                icon: const Icon(Icons.chat_bubble_outline),
-                label: const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12),
-                  child: Text("Back to chat"),
-                ),
-              ),
-            ],
-          );
-        },
+          },
+        ),
       ),
     );
   }

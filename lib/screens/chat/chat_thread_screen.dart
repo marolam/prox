@@ -692,7 +692,8 @@ class _ChatThreadScreenState extends State<ChatThreadScreen>
                       final bool declineCooling =
                           (declineLeft != null && declineLeft > Duration.zero);
 
-                      final bool chatOpen = gate.isAccepted || isParty;
+                      final bool ended = chatData?["closedAt"] != null;
+                      final bool chatOpen = !ended && (gate.isAccepted || isParty);
                       final bool canSend = chatOpen && !declineCooling;
 
                       return StreamBuilder<
@@ -707,13 +708,14 @@ class _ChatThreadScreenState extends State<ChatThreadScreen>
 
                           return Column(
                             children: [
-                              _chatGateBanner(gate, isParty: isParty),
+                              if (ended) const Padding(padding: EdgeInsets.all(12), child: Text("This chat has ended. New messages and meetup requests are disabled."))
+                              else _chatGateBanner(gate, isParty: isParty),
                               if (recap.isNotEmpty)
                                 _meetupRecapCard(recap,
                                     notePreview: notePreview),
                               if (declineCooling)
                                 _meetupDeclineLockBanner(declineLeft),
-                              MeetupRequestBar(
+                              if (!ended) MeetupRequestBar(
                                 chatId: widget.chatId,
                                 otherUid: widget.otherUid,
                                 isParty: isParty,

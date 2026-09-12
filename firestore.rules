@@ -18,8 +18,10 @@ service cloud.firestore {
 
     function isMutualPartyMember(uid) {
       return authed() && request.auth.uid != uid &&
-        exists(/databases/$(database)/documents/users/$(uid)/party/$(request.auth.uid)) &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)/party/$(uid));
+        !exists(/databases/$(database)/documents/users/$(uid)/blocks/$(request.auth.uid)) &&
+        !exists(/databases/$(database)/documents/users/$(request.auth.uid)/blocks/$(uid)) &&
+        get(/databases/$(database)/documents/users/$(uid)/party/$(request.auth.uid)).data.get('mutual', false) == true &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)/party/$(uid)).data.get('mutual', false) == true;
     }
 
     function hasParticipants(data) {
@@ -95,7 +97,7 @@ service cloud.firestore {
     }
 
     function validMessage(data, chat) {
-      return data.get('from', '') == request.auth.uid &&
+      return chat.get('closedAt', null) == null && data.get('from', '') == request.auth.uid &&
         data.get('text', '') is string && data.get('text', '').size() <= 10000 &&
         data.get('kind', 'text') in ['text', 'image', 'system'] &&
         data.get('to', '') in chat.participants &&
@@ -141,6 +143,24 @@ service cloud.firestore {
             "meetup_completed"
           ]
         );
+    }
+
+    function validMeetupProgress() {
+      let old = resource.data;
+      let next = request.resource.data;
+      let from = old.get('status', '');
+      let to = next.get('status', '');
+      let fresh = to == 'requested' && from in ['completed', 'expired', 'cancelled', 'auto_closed', 'declined'];
+      return !next.diff(old).affectedKeys().hasAny(['outcome', 'closedAt', 'cancelledAt', 'autoClosedAt']) &&
+        (fresh || from in ['requested', 'accepted', 'live'] || next.diff(old).affectedKeys().hasOnly(['sessionScreens', 'updatedAt', 'ratingStartedAt', 'ratingExpiresAt'])) &&
+        (from == to || fresh ||
+          (from == 'requested' && to in ['accepted', 'live', 'declined', 'expired']) ||
+          (from == 'accepted' && to in ['live', 'completed', 'expired']) ||
+          (from == 'live' && to in ['completed', 'expired'])) &&
+        (fresh || old.get('locationStatus', '') != 'confirmed' ||
+          (next.get('lat', null) == old.get('lat', null) && next.get('lng', null) == old.get('lng', null) && next.get('locationStatus', '') == 'confirmed')) &&
+        (fresh || (old.get('aArrived', false) != true || next.get('aArrived', false) == true)) &&
+        (fresh || (old.get('bArrived', false) != true || next.get('bArrived', false) == true));
     }
 
     function validArrivalUpdate() {
@@ -253,6 +273,11 @@ service cloud.firestore {
           ];
       }
 
+      match /meetupOutcomes/{outcomeId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+
       match /activityEvents/{eventId} {
         allow read: if isOwner(uid);
         allow create: if isOwner(uid) && request.resource.data.delta == 0 &&
@@ -327,6 +352,7 @@ service cloud.firestore {
     // --- CHATS + THREADS ---
     match /chats/{chatId} {
       allow create: if authed() && inParticipants(request.resource.data) &&
+        request.resource.data.get('closedAt', null) == null &&
         validChat(request.resource.data) &&
         request.resource.data.get('moderatorUid', request.auth.uid) == request.auth.uid &&
         request.resource.data.get('ownerUid', request.auth.uid) == request.auth.uid;
@@ -336,7 +362,8 @@ service cloud.firestore {
       // otherwise tx.get(chats/{id}) can fail before create on brand-new pairs.
       allow read: if authed() && (resource == null || request.auth.uid in resource.data.participants);
       allow update: if authed() && request.auth.uid in resource.data.participants &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['ownerUid', 'moderatorUid', 'isGroup']) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['ownerUid', 'moderatorUid', 'isGroup', 'closedAt']) &&
+        (resource.data.get('closedAt', null) == null || request.resource.data.get('chatGate', {}) == resource.data.get('chatGate', {})) &&
         (request.resource.data.participants == resource.data.participants ||
           (resource.data.get('isGroup', false) == true &&
             resource.data.get('moderatorUid', '') == request.auth.uid && validChat(request.resource.data) &&
@@ -402,6 +429,7 @@ service cloud.firestore {
 
     match /meetups/{meetupId} {
       allow create: if authed() && meetupParticipant(request.resource.data) && pairNotBlocked(request.resource.data) &&
+        (!exists(/databases/$(database)/documents/chats/$(meetupId)) || get(/databases/$(database)/documents/chats/$(meetupId)).data.get('closedAt', null) == null) &&
         request.resource.data.get('status', '') != 'completed' &&
         request.resource.data.get('aArrived', false) == false && request.resource.data.get('bArrived', false) == false;
       // Transaction preflight must be able to read a missing deterministic
@@ -409,12 +437,16 @@ service cloud.firestore {
       allow read: if authed() &&
         (resource == null || meetupParticipant(resource.data));
       allow update: if authed() && meetupParticipant(resource.data) &&
-        immutablePair() && validMeetupStatusEventUpdate() && validArrivalUpdate() &&
-        (request.resource.data.get('status', '') != 'requested' || pairNotBlocked(request.resource.data));
-      allow delete: if authed() && meetupParticipant(resource.data);
+        immutablePair() && validMeetupStatusEventUpdate() && validArrivalUpdate() && validMeetupProgress() &&
+        (request.resource.data.get('status', '') != 'requested' || (pairNotBlocked(request.resource.data) &&
+          (!exists(/databases/$(database)/documents/chats/$(meetupId)) || get(/databases/$(database)/documents/chats/$(meetupId)).data.get('closedAt', null) == null)));
+      allow delete: if authed() && meetupParticipant(resource.data) &&
+        resource.data.get('status', '') in ['completed', 'cancelled', 'declined', 'expired', 'auto_closed'];
 
       match /beacon/{docId} {
-        allow read, write: if authed() && meetupParticipant(get(/databases/$(database)/documents/meetups/$(meetupId)).data);
+        allow read, write: if authed() && meetupParticipant(get(/databases/$(database)/documents/meetups/$(meetupId)).data) &&
+          get(/databases/$(database)/documents/meetups/$(meetupId)).data.status == 'live' &&
+          pairNotBlocked(get(/databases/$(database)/documents/meetups/$(meetupId)).data);
       }
     }
 
@@ -465,13 +497,18 @@ service cloud.firestore {
       allow delete: if isAdmin() || (authed() && resource.data.get('referrerUid', ownerUid(resource.data)) == request.auth.uid);
     }
 
+    match /partyConnections/{connectionId} {
+      allow read: if authed() && request.auth.uid in resource.data.members;
+      allow write: if false;
+    }
+
     match /ratings/{ratingId} {
       allow create: if authed() && (isDocOwner(request.resource.data) || meetupParticipant(request.resource.data));
       allow read: if authed() && (isDocOwner(resource.data) || meetupParticipant(resource.data) || isAdmin());
       allow update, delete: if authed() && (isDocOwner(resource.data) || isAdmin());
 
       match /entries/{entryId} {
-        allow read: if ratingParticipant(ratingId) || isAdmin();
+        allow read: if (authed() && entryId == request.auth.uid && ratingParticipant(ratingId)) || isAdmin();
         allow create, update: if authed() && validRating(ratingId, entryId);
       }
     }
@@ -482,7 +519,7 @@ service cloud.firestore {
       allow update, delete: if authed() && (isDocOwner(resource.data) || isAdmin());
 
       match /entries/{entryId} {
-        allow read: if ratingParticipant(meetupId) || isAdmin();
+        allow read: if (authed() && entryId == request.auth.uid && ratingParticipant(meetupId)) || isAdmin();
         allow create, update: if authed() && validRating(meetupId, entryId);
       }
     }

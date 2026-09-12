@@ -62,6 +62,7 @@ export async function eraseUserData(uid: string): Promise<void> {
     await deleteQuery(db.collectionGroup(group).where('uid', '==', uid));
   }
   await deleteQuery(db.collection('trustFeedbackProjection').where('otherUid', '==', uid));
+  await deleteQuery(db.collection('partyConnections').where('members', 'array-contains', uid));
   await deleteQuery(db.collection('paymentReconciliation').where('uid', '==', uid));
   for (const collection of ['profiles', 'publicProfiles', 'partyNetworkRequests', 'partyNetworkRateLimits', 'keywordEnforcement', 'technician_profiles', 'referralAttributions']) {
     await db.recursiveDelete(db.collection(collection).doc(uid));

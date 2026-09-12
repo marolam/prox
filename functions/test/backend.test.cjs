@@ -23,6 +23,118 @@ beforeEach(async () => {
 });
 after(async () => { await admin.app().delete(); });
 
+const {endSafetySession, recordMeetupOutcome} = require('../lib/safety_sessions');
+const {closeExpiredMeetup, sweepExpiredMeetups} = require('../lib/lib/meetup_auto_close');
+const {onMeetupTransitionGuard} = require('../lib/lib/match_dashboard_enforcement');
+const {onMeetupInteractionLockProjection} = require('../lib/lib/match_dashboard_enforcement');
+
+test('delayed meetup lock projection cannot recreate a deleted account', async () => {
+  await db.doc('accountDeletions/alice').set({status: 'complete'});
+  await db.doc('users/bob').set({});
+  const meetup = db.doc('meetups/deleted-user');
+  await meetup.set({aUid: 'alice', bUid: 'bob', status: 'live'});
+  const after = await meetup.get();
+  await onMeetupInteractionLockProjection.run({before: {exists: false}, after}, {});
+  assert.equal((await db.doc('users/alice').get()).exists, false);
+  assert.equal((await db.doc('users/alice/presence/current').get()).exists, false);
+  assert.equal((await db.doc('users/bob').get()).data().interactionLock.busyInMeetup, true);
+});
+
+async function safetyFixture(status = 'live') {
+  await db.doc('users/alice').set({});
+  await db.doc('users/bob').set({});
+  await db.doc('chats/safe').set({participants: ['alice', 'bob'], chatGate: {status: 'accepted'}});
+  await db.doc('meetups/safe').set({aUid: 'alice', bUid: 'bob', status,
+    requestedAt: admin.firestore.Timestamp.fromMillis(1000),
+    expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() - 1000), aArrived: false, bArrived: false});
+}
+
+test('safety exit authenticates membership and atomically ends meetup and chat for either participant', async () => {
+  await safetyFixture();
+  await assert.rejects(endSafetySession('', {chatId: 'safe', endChat: true}), /Sign in/);
+  await assert.rejects(endSafetySession('mallory', {chatId: 'safe', endChat: true}), /Only participants/);
+  await endSafetySession('bob', {chatId: 'safe', endChat: true});
+  assert.equal((await db.doc('meetups/safe').get()).data().status, 'cancelled');
+  const first = (await db.doc('chats/safe').get()).data().closedAt;
+  await endSafetySession('bob', {chatId: 'safe', endChat: true});
+  assert.ok(first.isEqual((await db.doc('chats/safe').get()).data().closedAt));
+  assert.equal((await db.doc('users/bob/stats/trust').get()).exists, false);
+});
+
+test('meetup-only cancellation preserves chat and completion is never rewritten by a safety exit', async () => {
+  await safetyFixture();
+  await endSafetySession('alice', {chatId: 'safe', endChat: false});
+  assert.equal((await db.doc('chats/safe').get()).data().closedAt, undefined);
+  await db.doc('meetups/safe').update({status: 'completed'});
+  await endSafetySession('alice', {chatId: 'safe', endChat: true});
+  assert.equal((await db.doc('meetups/safe').get()).data().status, 'completed');
+});
+
+test('a group safety exit removes only the caller and transfers management when needed', async () => {
+  await db.doc('chats/group').set({participants: ['alice', 'bob', 'carol'], isGroup: true, moderatorUid: 'alice', ownerUid: 'alice'});
+  await endSafetySession('alice', {chatId: 'group', endChat: true});
+  const group = (await db.doc('chats/group').get()).data();
+  assert.deepEqual(group.participants, ['bob', 'carol']);
+  assert.equal(group.closedAt, undefined);
+  assert.equal(group.moderatorUid, 'bob');
+});
+
+test('expiry respects the deadline, preserves terminal outcomes, and records unfinished sessions', async () => {
+  await safetyFixture('accepted');
+  const ref = db.doc('meetups/safe');
+  await ref.update({expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() + 3600000)});
+  assert.equal(await closeExpiredMeetup(ref), false);
+  await ref.update({expiresAt: admin.firestore.Timestamp.fromMillis(0)});
+  assert.equal(await closeExpiredMeetup(ref), true);
+  assert.equal((await ref.get()).data().outcome, 'unfinished');
+  assert.equal(await closeExpiredMeetup(ref), false);
+  await ref.update({status: 'cancelled'});
+  assert.equal(await closeExpiredMeetup(ref), false);
+});
+
+test('expiry completes both saved arrivals and concurrent cancellation remains terminal', async () => {
+  await safetyFixture();
+  const ref = db.doc('meetups/safe');
+  await ref.update({aArrived: true, bArrived: true});
+  await Promise.all([closeExpiredMeetup(ref), endSafetySession('alice', {chatId: 'safe', endChat: true})]);
+  assert.ok(['cancelled', 'completed'].includes((await ref.get()).data().status));
+  assert.equal(await closeExpiredMeetup(ref), false);
+});
+
+test('expiry paginates beyond a full page of unexpired meetups', async () => {
+  const batch = db.batch();
+  for (let i = 0; i < 301; i++) batch.set(db.doc(`meetups/a${String(i).padStart(3, '0')}`), {status: 'live', expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() + 3600000)});
+  batch.set(db.doc('meetups/zexpired'), {status: 'live', expiresAt: admin.firestore.Timestamp.fromMillis(0)});
+  await batch.commit();
+  assert.equal(await sweepExpiredMeetups(), 1);
+  assert.equal((await db.doc('meetups/zexpired').get()).data().status, 'auto_closed');
+});
+
+test('outcome receipts are idempotent across cleanup and omit peer identity and safety details', async () => {
+  await safetyFixture();
+  const data = {...(await db.doc('meetups/safe').get()).data(), status: 'cancelled'};
+  await Promise.all([recordMeetupOutcome('safe', data, admin.firestore.Timestamp.now()), recordMeetupOutcome('safe', data, admin.firestore.Timestamp.now())]);
+  const receipts = await db.collection('users/alice/meetupOutcomes').get();
+  assert.equal(receipts.size, 1);
+  assert.deepEqual(Object.keys(receipts.docs[0].data()).sort(), ['outcome', 'recordedAt']);
+  assert.equal(receipts.docs[0].data().outcome, 'cancelled');
+});
+
+test('transition guard accepts cancellation and ignores stale events after a later write', async () => {
+  await safetyFixture();
+  const ref = db.doc('meetups/safe');
+  const before = await ref.get();
+  await endSafetySession('alice', {chatId: 'safe', endChat: false});
+  const after = await ref.get();
+  await onMeetupTransitionGuard.run({before, after}, {params: {meetupId: 'safe'}});
+  assert.equal((await ref.get()).data().status, 'cancelled');
+  await ref.update({status: 'accepted'});
+  const invalid = await ref.get();
+  await ref.update({status: 'cancelled'});
+  await onMeetupTransitionGuard.run({before: after, after: invalid}, {params: {meetupId: 'safe'}});
+  assert.equal((await ref.get()).data().status, 'cancelled');
+});
+
 async function seedPayment() {
   await db.doc('users/alice/billing/externalCheckout/items/checkout123').set({uid: 'alice', sessionId: 'checkout123', provider: 'square', sku: 'points_topup_250', amountUsd: 4.99, status: 'session_created'});
 }
@@ -365,4 +477,162 @@ test('mutual party projection is retry-safe and revokes after either membership 
   await db.doc('users/bob/party/alice').delete();
   await onPartyWrite.run(event);
   assert.equal((await db.doc('users/alice/party/bob').get()).data().mutual, false);
+});
+
+
+const {changePartyConnection, connectionId, expirePartyConnections, PARTY_INACTIVITY_MS, PARTY_REMINDER_MS, onPartyConnectionBlock} = require('../lib/party_connections');
+async function seedPartyMeetup() {
+  await Promise.all(['alice', 'bob', 'mallory'].map(uid => db.doc(`users/${uid}`).set({displayName: uid})));
+  await db.doc('meetups/party-test').set({aUid: 'alice', bUid: 'bob', status: 'completed', aArrived: true, bArrived: true});
+}
+const feedback = (otherUid, choice = 'add', thumb = true, comment = '') => ({action: 'feedback', otherUid, chatId: 'party-test', thumb, partyDecision: choice, comment});
+const partyPairRef = () => db.doc(`partyConnections/${connectionId('alice', 'bob')}`);
+async function assertPartyPair(connected) {
+  for (const [a,b] of [['alice','bob'],['bob','alice']]) {
+    const snap = await db.doc(`users/${a}/party/${b}`).get();
+    assert.equal(snap.exists, connected);
+    if (connected) assert.equal(snap.data().mutual, true);
+  }
+}
+test('Party: first yes is pending; second yes atomically adds both members', async () => {
+  await seedPartyMeetup();
+  assert.equal((await changePartyConnection('alice', feedback('bob'))).status, 'pending');
+  await assertPartyPair(false);
+  assert.equal((await changePartyConnection('bob', feedback('alice'))).status, 'connected');
+  await assertPartyPair(true);
+});
+test('Party: concurrent approvals are symmetric and retries do not duplicate or extend consent', async () => {
+  await seedPartyMeetup();
+  await Promise.all([changePartyConnection('alice', feedback('bob')), changePartyConnection('bob', feedback('alice'))]);
+  await assertPartyPair(true);
+  const before = (await partyPairRef().get()).data().updatedAt.toMillis();
+  await changePartyConnection('alice', feedback('bob'));
+  assert.equal((await partyPairRef().get()).data().updatedAt.toMillis(), before);
+  assert.equal((await db.collection('ratings/party-test/entries').get()).size, 2);
+});
+test('Party: either Not Right Now keeps both out until later consent', async () => {
+  for (const first of ['alice','bob']) {
+    await seedPartyMeetup();
+    const second = first === 'alice' ? 'bob' : 'alice';
+    await changePartyConnection(first, feedback(second, 'later'));
+    await changePartyConnection(second, feedback(first));
+    await assertPartyPair(false);
+    assert.equal((await changePartyConnection(first, {action: 'add', otherUid: second})).status, 'connected');
+    await assertPartyPair(true);
+    await db.recursiveDelete(db.doc('meetups/party-test'));
+    await partyPairRef().delete();
+    await db.doc('users/alice/party/bob').delete();
+    await db.doc('users/bob/party/alice').delete();
+  }
+});
+test('Party: negative feedback accepts blank or optional comments without creating membership', async () => {
+  await seedPartyMeetup();
+  assert.equal((await changePartyConnection('alice', feedback('bob', 'later', false, 'Did not feel comfortable'))).status, 'rated');
+  await changePartyConnection('bob', feedback('alice', 'later', false));
+  await assertPartyPair(false);
+  assert.equal((await db.doc('ratings/party-test/entries/alice').get()).data().reason, 'Did not feel comfortable');
+  assert.equal((await db.doc('ratings/party-test/entries/bob').get()).data().reason, null);
+});
+test('Party: outsiders, mismatched partners and unconfirmed meetups cannot be rated', async () => {
+  await seedPartyMeetup();
+  await assert.rejects(changePartyConnection('mallory', feedback('bob')), /participants/);
+  await assert.rejects(changePartyConnection('alice', feedback('mallory')), /participants/);
+  await db.doc('meetups/party-test').update({status: 'live', bArrived: false});
+  await assert.rejects(changePartyConnection('alice', feedback('bob')), /confirm arrival/);
+  await db.doc('meetups/party-test').update({bArrived: true});
+  await changePartyConnection('alice', feedback('bob'));
+  assert.equal((await db.doc('meetups/party-test').get()).data().status, 'completed');
+});
+test('Party: reminders are durable, rate limited and extend inactivity without granting consent', async () => {
+  await seedPartyMeetup();
+  await changePartyConnection('alice', feedback('bob'));
+  await assert.rejects(changePartyConnection('alice', {action: 'remind', otherUid: 'bob'}), /24 hours/);
+  await partyPairRef().update({'reminders.alice': admin.firestore.Timestamp.fromMillis(Date.now() - PARTY_REMINDER_MS - 1000)});
+  await changePartyConnection('alice', {action: 'remind', otherUid: 'bob'});
+  const d = (await partyPairRef().get()).data();
+  assert.ok(d.expiresAt.toMillis() > Date.now() + PARTY_INACTIVITY_MS - 5000);
+  assert.equal((await partyPairRef().collection('notifications').get()).size, 2);
+  await assertPartyPair(false);
+});
+test('Party: expired requests cannot be accepted or reminded and are swept', async () => {
+  await seedPartyMeetup();
+  await changePartyConnection('alice', feedback('bob'));
+  await partyPairRef().update({expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() - 1)});
+  await assert.rejects(changePartyConnection('bob', {action: 'add', otherUid: 'alice'}), /expired/);
+  await assert.rejects(changePartyConnection('alice', {action: 'remind', otherUid: 'bob'}), /expired/);
+  await expirePartyConnections();
+  assert.equal((await partyPairRef().get()).data().status, 'expired');
+  await assertPartyPair(false);
+});
+test('Party: blocking or removal clears both sides and stale retries cannot reconnect', async () => {
+  await seedPartyMeetup();
+  await changePartyConnection('alice', feedback('bob'));
+  await changePartyConnection('bob', feedback('alice'));
+  await changePartyConnection('alice', {action: 'remove', otherUid: 'bob'});
+  await changePartyConnection('bob', feedback('alice'));
+  await assertPartyPair(false);
+  await changePartyConnection('alice', {action: 'block', otherUid: 'bob'});
+  await assert.rejects(changePartyConnection('bob', {action: 'add', otherUid: 'alice'}), /unavailable/);
+  await db.doc('users/alice/party/bob').set({mutual: false});
+  await onPartyWrite.run({params: {uid:'alice', friendUid:'bob'}});
+  await assertPartyPair(false);
+});
+test('Party: external block writes clear pending requests and preserve blocks after stale events', async () => {
+  await seedPartyMeetup();
+  await changePartyConnection('alice', feedback('bob'));
+  await db.doc('users/bob/blocks/alice').set({uid:'alice'});
+  await onPartyConnectionBlock.run({params:{uid:'bob', otherUid:'alice'}});
+  assert.equal((await partyPairRef().get()).data().status, 'blocked');
+  await assert.rejects(changePartyConnection('alice', feedback('bob')), /unavailable/);
+  await assertPartyPair(false);
+});
+
+
+test('Party: rating an existing mutual member does not remove an established connection', async () => {
+  await seedPartyMeetup();
+  await db.doc('users/alice/party/bob').set({uid:'bob',mutual:true});
+  await db.doc('users/bob/party/alice').set({uid:'alice',mutual:true});
+  assert.equal((await changePartyConnection('alice', feedback('bob','later'))).status, 'connected');
+  await assertPartyPair(true);
+});
+test('Party: toggling consent cannot bypass the reminder cooldown', async () => {
+  await seedPartyMeetup();
+  await changePartyConnection('alice', feedback('bob'));
+  await changePartyConnection('alice', {action:'later',otherUid:'bob'});
+  await changePartyConnection('alice', {action:'add',otherUid:'bob'});
+  assert.equal((await partyPairRef().collection('notifications').get()).size, 1);
+  await assertPartyPair(false);
+});
+test('Party: a block racing with acceptance leaves neither membership', async () => {
+  await seedPartyMeetup();
+  await changePartyConnection('alice', feedback('bob'));
+  await Promise.allSettled([
+    changePartyConnection('bob', feedback('alice')),
+    changePartyConnection('alice', {action:'block',otherUid:'bob'}),
+  ]);
+  await assertPartyPair(false);
+  assert.equal((await partyPairRef().get()).data().status, 'blocked');
+});
+
+
+test('Party: delayed block triggers never resurrect a deleted account connection', async () => {
+  await seedPartyMeetup();
+  await db.doc('users/alice/blocks/bob').set({uid:'bob'});
+  await db.doc('accountDeletions/bob').set({status:'processing'});
+  await onPartyConnectionBlock.run({params:{uid:'alice',otherUid:'bob'}});
+  assert.equal((await partyPairRef().get()).exists, false);
+  await assertPartyPair(false);
+});
+
+
+test('Party: a new meetup in the same chat has a fresh rating receipt and consent', async () => {
+  await seedPartyMeetup();
+  await changePartyConnection('alice', feedback('bob'));
+  await changePartyConnection('bob', feedback('alice'));
+  await changePartyConnection('alice', {action:'remove',otherUid:'bob'});
+  await db.doc('meetups/party-test').update({completedAt:admin.firestore.Timestamp.fromMillis(Date.now()+10000)});
+  await changePartyConnection('alice', feedback('bob','later'));
+  assert.equal((await partyPairRef().get()).data().status, 'pending');
+  assert.equal((await db.collection('meetups/party-test/partyFeedback').get()).size, 3);
+  await assertPartyPair(false);
 });

@@ -1,4 +1,5 @@
 import "dart:async";
+import "widgets/safety_access_shell.dart";
 
 import "package:cloud_firestore/cloud_firestore.dart";
 import "package:app_links/app_links.dart";
@@ -32,6 +33,7 @@ import "screens/onboarding/onboarding_screen.dart";
 import "screens/onboarding/profile_setup_screen.dart";
 import "screens/policy/policy_hub_screen.dart";
 import "screens/rating/rating_screen.dart";
+import "screens/party/party_screen.dart";
 import "screens/referral/referrals_hub_screen.dart";
 import "screens/review/release_candidate_checklist_screen.dart";
 import "screens/review/tester_mission_screen.dart";
@@ -238,12 +240,16 @@ class _ProxAppState extends State<ProxApp> {
         Widget child;
 
         if (snap.connectionState != ConnectionState.done) {
-          child = const MaterialApp(
+          child = MaterialApp(
+            builder: (context, child) =>
+                SafetyAccessShell(child: child ?? const SizedBox.shrink()),
             debugShowCheckedModeBanner: false,
-            home: SplashScreen(),
+            home: const SplashScreen(),
           );
         } else if (snap.hasError) {
           child = MaterialApp(
+            builder: (context, child) =>
+                SafetyAccessShell(child: child ?? const SizedBox.shrink()),
             debugShowCheckedModeBanner: false,
             home: _InitErrorScreen(
               onRetry: () {
@@ -286,7 +292,9 @@ class _ProxAppState extends State<ProxApp> {
                   );
 
                   if (_suspendGlobalOverlaysForImeRecovery) {
-                    return UpdateEnforcementGate(child: scaledChild);
+                    return SafetyAccessShell(
+                      child: UpdateEnforcementGate(child: scaledChild),
+                    );
                   }
 
                   final Widget base = Stack(
@@ -298,7 +306,9 @@ class _ProxAppState extends State<ProxApp> {
                       ),
                     ],
                   );
-                  return UpdateEnforcementGate(child: base);
+                  return SafetyAccessShell(
+                    child: UpdateEnforcementGate(child: base),
+                  );
                 },
                 onGenerateRoute: (_) => null,
                 onUnknownRoute: (settings) {
@@ -320,6 +330,7 @@ class _ProxAppState extends State<ProxApp> {
                   "/inbox": (_) => const ChatThreadsScreen(),
                   "/chats": (_) => const ChatThreadsScreen(),
                   "/meetups": (_) => const MeetupHistoryScreen(),
+                  "/party": (_) => const PartyScreen(),
                   "/meetup": (_) => const MeetupHistoryScreen(),
                   "/business-mode": (_) => const BusinessModeEntryScreen(),
                   "/business-setup": AppRouter.buildBusinessSetup,

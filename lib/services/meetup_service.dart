@@ -99,7 +99,7 @@ class MeetupService {
   static const Duration requestWindow = Duration(minutes: 5);
   static const int expireMinutes = 15;
 
-  static const Duration arrivalWindow = Duration(hours: 2);
+  static const Duration arrivalWindow = TTLPolicy.meetupLiveState;
   static const Duration minConfirmAfterCreate = Duration(seconds: 20);
 
   static const Duration tapVerifyWindow = Duration(seconds: 12);
@@ -313,25 +313,49 @@ class MeetupService {
 
     final ref = meetupRef(chatId);
 
-    await ref.set(<String, Object?>{
-      "id": chatId,
-      "chatId": chatId,
-      "status": "requested",
-      "requestedBy": me.uid,
-      "requestedAt": FieldValue.serverTimestamp(),
-      "updatedAt": FieldValue.serverTimestamp(),
-      "aUid": me.uid,
-      "bUid": otherUid,
-      "plannerUid": me.uid,
-      "locationStatus": "none",
-      "expiresAt": TTLPolicy.expiresAtFromNow(requestWindow),
+    await _db.runTransaction((tx) async {
+      final previous = (await tx.get(ref)).data();
+      if (previous != null &&
+          <String>{
+            "requested",
+            "accepted",
+            "live",
+          }.contains(previous["status"])) {
+        throw StateError(
+          "This meetup is already active. Continue it or cancel first.",
+        );
+      }
+      tx.set(ref, <String, Object?>{
+        "id": chatId,
+        "chatId": chatId,
+        "status": "requested",
+        "requestedBy": me.uid,
+        "requestedAt": FieldValue.serverTimestamp(),
+        "updatedAt": FieldValue.serverTimestamp(),
+        "aUid": previous?["aUid"] ?? me.uid,
+        "bUid": previous?["bUid"] ?? otherUid,
+        "plannerUid": me.uid,
+        "locationStatus": "none",
+        "expiresAt": TTLPolicy.expiresAtFromNow(requestWindow),
 
-      // Clear any prior decision timestamps so UI doesn't get stuck.
-      "acceptedAt": FieldValue.delete(),
-      "acceptedBy": FieldValue.delete(),
-      "declinedAt": FieldValue.delete(),
-      "declinedBy": FieldValue.delete(),
-    }, SetOptions(merge: true));
+        "aArrived": false,
+        "bArrived": false,
+        "aArrivedAt": FieldValue.delete(),
+        "bArrivedAt": FieldValue.delete(),
+        "aOnMyWayAt": FieldValue.delete(),
+        "bOnMyWayAt": FieldValue.delete(),
+        "startedAt": FieldValue.delete(),
+        "completedAt": FieldValue.delete(),
+        "tap": FieldValue.delete(),
+        "lat": FieldValue.delete(),
+        "lng": FieldValue.delete(),
+        // Clear any prior decision timestamps so UI doesn't get stuck.
+        "acceptedAt": FieldValue.delete(),
+        "acceptedBy": FieldValue.delete(),
+        "declinedAt": FieldValue.delete(),
+        "declinedBy": FieldValue.delete(),
+      }, SetOptions(merge: true));
+    });
 
     // Best effort: normalize expiresAt from server timestamp.
     try {
@@ -409,6 +433,7 @@ class MeetupService {
         "status": "accepted",
         "acceptedBy": me.uid,
         "acceptedAt": FieldValue.serverTimestamp(),
+        "expiresAt": TTLPolicy.expiresAtFromNow(TTLPolicy.meetupLiveState),
         "plannerUid": plannerUid,
         "updatedAt": FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
@@ -529,6 +554,14 @@ class MeetupService {
       final exists = snap.exists;
       final d = snap.data() ?? <String, dynamic>{};
 
+      if (exists && !<String>{"accepted", "live"}.contains(d["status"])) {
+        throw StateError("Meetup is not active. Send a new request first.");
+      }
+      if (d["locationStatus"] == "confirmed") {
+        throw StateError(
+          "The agreed meeting point is locked. Cancel to choose a different place.",
+        );
+      }
       final String existingA = (d["aUid"] ?? "").toString().trim();
       final String existingB = (d["bUid"] ?? "").toString().trim();
       final bool existingPairValid =
@@ -548,6 +581,8 @@ class MeetupService {
       final String planner = (d["plannerUid"] ?? "").toString().trim();
       final String plannerUid = planner.isNotEmpty ? planner : cleanAUid;
       final bool callerIsPlanner = cleanAUid == plannerUid;
+      if (!callerIsPlanner)
+        throw StateError("Only the planner can move this pin.");
 
       final double writeLat = callerIsPlanner
           ? lat
@@ -694,10 +729,14 @@ class MeetupService {
     final uid = _auth.currentUser?.uid ?? "";
     final id = meetupId.trim();
     if (uid.isEmpty || id.isEmpty) return;
-    await meetupRef(id).set(<String, Object?>{
-      "sessionScreens": <String, Object?>{uid: screen.trim()},
-      "updatedAt": FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    try {
+      await meetupRef(id).update(<Object, Object?>{
+        FieldPath(<String>["sessionScreens", uid]): screen.trim(),
+        "updatedAt": FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      /* Navigation must not depend on telemetry writes. */
+    }
   }
 
   Future<String> lastSessionScreen(String meetupId) async {
@@ -1024,6 +1063,7 @@ class MeetupService {
 
         final String status = (d["status"] ?? "").toString();
         if (status == "completed") return;
+        if (status != "live") throw StateError("expired");
 
         final aUid = (d["aUid"] ?? "").toString();
         final bUid = (d["bUid"] ?? "").toString();
@@ -1032,7 +1072,7 @@ class MeetupService {
         final bool isParticipant = me.uid == aUid || me.uid == bUid;
         if (!isParticipant) throw StateError("not_participant");
 
-        final createdAt = d["createdAt"];
+        final createdAt = d["startedAt"] ?? d["createdAt"];
         if (createdAt is Timestamp) {
           final age = DateTime.now().difference(createdAt.toDate());
           if (age.isNegative || age < minConfirmAfterCreate)
@@ -1156,7 +1196,7 @@ class MeetupService {
       final bool both = a && b;
 
       final String status = (d["status"] ?? "").toString();
-      if (both && status != "completed") {
+      if (both && status == "live") {
         await ref.set(<String, Object?>{
           "status": "completed",
           "completedAt": FieldValue.serverTimestamp(),
@@ -1280,48 +1320,8 @@ class MeetupService {
   // Auto-expire helper (legacy meetup_live.dart)
   // -----------------------------
   Future<void> expireIfStale({required String meetupId}) async {
-    final id = meetupId.trim();
-    if (id.isEmpty) return;
-
-    final ref = meetupRef(id);
-
-    try {
-      await _db.runTransaction((tx) async {
-        final snap = await tx.get(ref);
-        if (!snap.exists) return;
-        final d = snap.data() ?? <String, dynamic>{};
-
-        final String status = (d["status"] ?? "").toString();
-        if (status != "live") return;
-
-        if (_isExpiredByExpiresAt(d)) {
-          tx.set(ref, <String, Object?>{
-            "status": "expired",
-            "updatedAt": FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
-          return;
-        }
-
-        final bool aArrived = (d["aArrived"] as bool?) ?? false;
-        final bool bArrived = (d["bArrived"] as bool?) ?? false;
-        if (aArrived || bArrived) return;
-
-        final startedAt = d["startedAt"];
-        if (startedAt is! Timestamp) return;
-
-        final int expMin = (d["expireMinutes"] as int?) ?? expireMinutes;
-        final DateTime deadline = startedAt.toDate().add(
-          Duration(minutes: expMin),
-        );
-        if (DateTime.now().isBefore(deadline)) return;
-
-        tx.set(ref, <String, Object?>{
-          "status": "expired",
-          "expiredAt": FieldValue.serverTimestamp(),
-          "updatedAt": FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-      });
-    } catch (_) {}
+    // The scheduled server transaction owns expiry, even when both phones are
+    // closed. Client clocks and old 15-minute timers must not end a live meetup.
   }
 
   // -----------------------------

@@ -31,8 +31,8 @@ class MeetupFocusLockState {
 class MeetupFocusLockService extends ChangeNotifier {
   MeetupFocusLockService._();
 
-  static const Duration _fallbackRequestWindow = Duration(minutes: 10);
-  static const Duration _fallbackLiveWindow = Duration(minutes: 15);
+  static const Duration _fallbackRequestWindow = Duration(minutes: 5);
+  static const Duration _fallbackLiveWindow = Duration(hours: 12);
 
   static final MeetupFocusLockService instance = MeetupFocusLockService._();
 

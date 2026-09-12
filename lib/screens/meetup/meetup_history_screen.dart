@@ -3,6 +3,8 @@ import "package:firebase_auth/firebase_auth.dart";
 import "package:flutter/material.dart";
 
 import "package:prox/services/now_feed_cleanup_service.dart";
+import "package:prox/services/safety_session_service.dart";
+import "package:prox/widgets/meetup_outcomes_list.dart";
 import "package:prox/services/party_service.dart";
 import "package:prox/services/simple_mode/simple_mode_policy.dart";
 import "package:prox/services/user_profile_service.dart";
@@ -17,11 +19,8 @@ class MeetupHistoryScreen extends StatefulWidget {
 class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
   static const Duration _completedRetention = Duration(hours: 24);
   static const Duration _staleRetention = Duration(hours: 12);
-  static const Duration _autoClosePendingAfter = Duration(hours: 12);
-  static const Duration _autoCloseLiveAfter = Duration(hours: 24);
 
   final Set<String> _deleteInFlight = <String>{};
-  final Set<String> _autoCloseInFlight = <String>{};
   final Set<String> _cancelInFlight = <String>{};
   bool _manualCleanupRunning = false;
   String _meetupStreamUid = "";
@@ -86,15 +85,6 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
   bool _isLive(String status) => status == "live" || status == "completed";
   bool _isCompleted(String status) => status == "completed";
   bool _isPending(String status) => status == "requested" || status == "accepted";
-
-  bool _nothingTranspired(String status) {
-    return status.isEmpty ||
-        status == "requested" ||
-        status == "pending" ||
-        status == "expired" ||
-        status == "declined" ||
-        status == "cancelled";
-  }
 
   DateTime? _dateFrom(dynamic v) {
     if (v is Timestamp) return v.toDate();
@@ -167,16 +157,7 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
 
     _cancelInFlight.add(meetupId);
     try {
-      final uid = FirebaseAuth.instance.currentUser?.uid ?? "";
-      await FirebaseFirestore.instance.collection("meetups").doc(meetupId).set(
-        <String, Object?>{
-          "status": "cancelled",
-          "cancelledBy": uid,
-          "cancelledAt": FieldValue.serverTimestamp(),
-          "updatedAt": FieldValue.serverTimestamp(),
-        },
-        SetOptions(merge: true),
-      );
+      await SafetySessionService.end(meetupId, endChat: false);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Pending meetup cancelled.")),
@@ -188,47 +169,6 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
       );
     } finally {
       _cancelInFlight.remove(meetupId);
-    }
-  }
-
-  Future<void> _autoCloseMeetupIfNeeded({
-    required String meetupId,
-    required Map<String, dynamic> d,
-  }) async {
-    if (_autoCloseInFlight.contains(meetupId)) return;
-
-    final String status = (d["status"] ?? "").toString().trim();
-    if (status == "completed" || status == "cancelled" || status == "expired" || status == "declined") {
-      return;
-    }
-
-    final DateTime now = DateTime.now();
-    final DateTime? createdAt = _dateFrom(d["createdAt"]);
-    final DateTime? requestedAt = _dateFrom(d["requestedAt"]);
-    final DateTime? startedAt = _dateFrom(d["startedAt"]);
-    final DateTime? updatedAt = _dateFrom(d["updatedAt"]);
-    final DateTime base = startedAt ?? requestedAt ?? createdAt ?? updatedAt ?? now;
-
-    final Duration age = now.difference(base);
-    final bool shouldAutoClose = _isPending(status)
-        ? age > _autoClosePendingAfter
-        : (status == "live" && age > _autoCloseLiveAfter);
-    if (!shouldAutoClose) return;
-
-    _autoCloseInFlight.add(meetupId);
-    try {
-      await FirebaseFirestore.instance.collection("meetups").doc(meetupId).set(
-        <String, Object?>{
-          "status": "auto_closed",
-          "autoClosedAt": FieldValue.serverTimestamp(),
-          "updatedAt": FieldValue.serverTimestamp(),
-        },
-        SetOptions(merge: true),
-      );
-    } catch (_) {
-      // Best-effort safety close.
-    } finally {
-      _autoCloseInFlight.remove(meetupId);
     }
   }
 
@@ -303,22 +243,6 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
                     final data = doc.data();
                     final other = _otherUid(data, uid);
                     final inParty = partyUids.contains(other);
-                    final status = (data["status"] ?? "").toString().trim();
-
-                    if (!inParty) {
-                      // History is Party-only. Clean up non-party stale/no-outcome meetups.
-                      final shouldDelete = _nothingTranspired(status) ||
-                          _shouldHideForPrivacy(
-                            d: data,
-                            partyLinked: false,
-                            now: now,
-                          );
-                      if (shouldDelete) {
-                        // ignore: discarded_futures
-                        _deleteStale(doc.id);
-                      }
-                      continue;
-                    }
 
                     final hide = _shouldHideForPrivacy(
                       d: data,
@@ -333,9 +257,6 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
                       continue;
                     }
 
-                    // Keep meetups from lingering forever when they are never completed.
-                    // ignore: discarded_futures
-                    _autoCloseMeetupIfNeeded(meetupId: doc.id, d: data);
 
                     visible.add(doc);
                   }
@@ -349,23 +270,11 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
                     return !_isCompleted(s);
                   }).toList(growable: false);
 
-                  if (visible.isEmpty) {
-                    return Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Text(
-                          "No meetups yet. Open a chat and request a meetup to start.",
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                      ),
-                    );
-                  }
-
                   return ListView(
                     padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
                     children: [
-                      _sectionHeader(context, "Incomplete Meetups", incomplete.length),
+                      MeetupOutcomesList(uid: uid),
+                      _sectionHeader(context, "Active & ended meetups", incomplete.length),
                       const SizedBox(height: 8),
                       if (incomplete.isEmpty)
                         _emptySectionCard(context, "No incomplete meetups right now.")
@@ -469,7 +378,7 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                _pill(context, "Status: ${status.isEmpty ? "unknown" : status}"),
+                _pill(context, "Status: ${status == "auto_closed" || status == "expired" ? "Unfinished" : status}"),
                 _pill(context, "Location: $locStatus"),
                 if (_isCompleted(status)) _myRatingFlag(context, meetupId: chatId, myUid: uid),
               ],
