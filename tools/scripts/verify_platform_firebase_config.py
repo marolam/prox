@@ -5,6 +5,10 @@ import re
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
+gradle_properties = (root / "android/gradle.properties").read_text(encoding="utf-8-sig")
+assert not re.search(r"^\s*org\.gradle\.java\.home\s*=", gradle_properties, re.M), (
+    "Do not commit a machine-specific Gradle Java home; select the JDK in the environment."
+)
 source = (root / "lib/firebase_options.dart").read_text(encoding="utf-8-sig")
 
 

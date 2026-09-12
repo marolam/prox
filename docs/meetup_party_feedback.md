@@ -1,6 +1,6 @@
 # Meetup feedback and mutual Party requests
 
-Build candidate: `0.19.0+22`. Uploaded iOS build 20 does not contain these changes. Build 21 stopped at a release-script test before package building/upload; build 22 retries with the same app code and a corrected test.
+Build candidate: `0.19.0+23`. Uploaded iOS build 20 does not contain these changes. Attempts 21 and 22 stopped before package upload; build 23 fixes release-test formatting and Java-path portability with the same app code.
 
 Thumbs-up reveals **Add to Party** and **Not Right Now**. Each choice has a
 confirmation explaining membership and Party-visible profile sharing. Thumbs-down

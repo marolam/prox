@@ -167,7 +167,9 @@ jobs:
 
       - name: Flutter pub get
         working-directory: ${{ env.PROJECT_DIR }}
-        run: flutter pub get
+        run: |
+          flutter config --jdk-dir="$JAVA_HOME"
+          flutter pub get
 
       - name: Analyze and test the complete application
         working-directory: ${{ env.PROJECT_DIR }}

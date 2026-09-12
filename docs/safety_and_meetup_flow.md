@@ -1,6 +1,6 @@
 # Safety access and definitive meetup outcomes
 
-Release candidate: `0.19.0+22`, including the meetup feedback/Party changes merged in PR #10. Required functions are deployed; rules activation and signed publication are pending. Build 21 stopped at a release-script test before building/uploading packages; build 22 fixes that test with the same app code.
+Release candidate: `0.19.0+23`, including the meetup feedback/Party changes merged in PR #10. Required functions are deployed; rules activation and signed publication are pending. Attempts 21 and 22 stopped before package upload; build 23 fixes release-test formatting and Java-path portability with the same app code.
 
 ## User experience
 

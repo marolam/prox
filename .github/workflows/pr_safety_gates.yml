@@ -23,6 +23,23 @@ jobs:
       - name: Test platform update policy preparation
         shell: pwsh
         run: ./tools/scripts/test_update_release_policy.ps1
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.41.1'
+          cache: true
+      - name: Compile Android on the release runner platform
+        run: |
+          flutter config --jdk-dir="$JAVA_HOME"
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          python3 tools/scripts/verify_platform_firebase_config.py
+          chmod +x android/gradlew
+          flutter build apk --debug
 
   backend-safety:
     uses: ./.github/workflows/backend_safety_checks.yml
