@@ -1,4 +1,5 @@
 import "package:flutter/foundation.dart";
+import "package:prox/release/release_channel.dart";
 
 /// ReleaseFlags
 /// Centralized toggles for tester builds vs production builds.
@@ -36,10 +37,15 @@ class ReleaseFlags {
   );
 
   /// Build-level Pro Mode availability. Account access is still preview-gated.
-  static const bool businessModeEnabled = bool.fromEnvironment(
-    "PROX_BUSINESS_MODE_ENABLED",
-    defaultValue: true,
+  static const bool _businessModeEnabled = bool.fromEnvironment(
+    "PROX_ENABLE_BUSINESS_MODE",
+    defaultValue: false,
   );
+
+  static bool get businessModeEnabled {
+    if (ReleaseChannel.isProduction) return false;
+    return _businessModeEnabled && !businessModeForceOff;
+  }
 
   /// Emergency build-time off switch for Pro Mode surfaces.
   static const bool businessModeForceOff = bool.fromEnvironment(

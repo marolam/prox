@@ -50,4 +50,11 @@ class MatchSettingsService {
       cur.copyWith(listenRole: role),
     );
   }
+
+  void setAgeBracket(MatchAgeBracket bracket) {
+    final cur = current;
+    UserSettingsService.instance.updateMatchDiscovery(
+      cur.copyWith(ageBracket: bracket),
+    );
+  }
 }

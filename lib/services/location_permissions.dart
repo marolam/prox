@@ -1,9 +1,2 @@
-class LocationPermissions {
-  LocationPermissions._();
-
-  static final LocationPermissions instance = LocationPermissions._();
-
-  Future<bool> isGranted() async => true;
-
-  Future<bool> requestFromUserAction() async => true;
-}
+// All routes must use the same real OS permission check on Android and iOS.
+export "package:prox/screens/services/location_permissions.dart";

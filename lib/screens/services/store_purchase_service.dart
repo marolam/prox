@@ -1,6 +1,8 @@
 import "package:cloud_firestore/cloud_firestore.dart";
 
-import "package:prox/services/monetization_service.dart";
+import "package:firebase_auth/firebase_auth.dart";
+import "package:cloud_functions/cloud_functions.dart";
+import "package:shared_preferences/shared_preferences.dart";
 import "package:prox/services/points_service.dart";
 
 class StoreItemDefinition {
@@ -175,193 +177,76 @@ class StorePurchaseService {
     }
   }
 
-  static const Map<String, String> _boolEntitlements = <String, String>{
-    "cosmetic_profile_glow": "cosmeticProfileGlowEnabled",
-    "cosmetic_beacon_palette": "cosmeticBeaconPaletteEnabled",
-    "cosmetic_chat_bubble_themes": "cosmeticChatBubbleThemesEnabled",
-    "cosmetic_profile_frames": "cosmeticProfileFramesEnabled",
-    "cosmetic_app_icon_pack": "cosmeticAppIconPackEnabled",
-    "service_priority_support_pass": "servicePrioritySupportPassEnabled",
-    "service_profile_spotlight_week": "serviceProfileSpotlightWeekEnabled",
-    "service_message_boost_pack": "serviceMessageBoostPackEnabled",
-    "service_single_keyword_match_unlock": "singleKeywordMatchModeUnlocked",
-    "service_reciprocal_match_unlock": "reciprocalKeywordMatchModeUnlocked",
-    "service_keyword_chain_unlock": "keywordChainMatchModeUnlocked",
-    "biz_boost_visibility": "bizBoostVisibilityEnabled",
-    "biz_provider_tools": "bizProviderToolsEnabled",
-    "biz_discount_author": "bizDiscountAuthorEnabled",
-    "biz_flash_sale_scheduler": "bizFlashSaleSchedulerEnabled",
-    "biz_promo_code_builder": "bizPromoCodeBuilderEnabled",
-    "biz_lead_filters_pro": "bizLeadFiltersProEnabled",
-    "biz_auto_reply_templates": "bizAutoReplyTemplatesEnabled",
-    "biz_campaign_analytics": "bizCampaignAnalyticsEnabled",
-    "biz_priority_listing_bundle": "bizPriorityListingBundleEnabled",
-    "biz_multi_location_profile": "bizMultiLocationProfileEnabled",
-    "biz_customer_recovery_tools": "bizCustomerRecoveryToolsEnabled",
-  };
+  final Map<String, Future<StorePurchaseResult>> _inFlight = {};
 
-  Future<StorePurchaseResult> purchase({
-    required String uid,
-    required String sku,
-    required bool businessUnlocked,
-  }) async {
+  Future<StorePurchaseResult> purchase({required String uid, required String sku,
+      required bool businessUnlocked}) {
+    final key = "$uid:$sku";
+    final existing = _inFlight[key];
+    if (existing != null) return existing;
+    final next = _purchase(uid: uid, sku: sku, businessUnlocked: businessUnlocked);
+    _inFlight[key] = next;
+    return next.whenComplete(() { if (identical(_inFlight[key], next)) _inFlight.remove(key); });
+  }
+
+  Future<StorePurchaseResult> _purchase({required String uid, required String sku,
+      required bool businessUnlocked}) async {
+    if (FirebaseAuth.instance.currentUser?.uid != uid) throw StateError("Sign in to purchase.");
+    final item = _catalog[sku];
+    if (item == null) return const StorePurchaseResult(StorePurchaseStatus.unknownSku);
+    if (item.requiresBusiness && !businessUnlocked) return const StorePurchaseResult(StorePurchaseStatus.locked);
+    final preferences = await SharedPreferences.getInstance();
+    final key = "pending_purchase:$uid:$sku";
+    // Retain the request after an ambiguous timeout so retry cannot debit twice.
+    final requestId = preferences.getString(key) ?? _fs.collection("purchaseIds").doc().id;
+    await preferences.setString(key, requestId);
     try {
-      final cleanUid = uid.trim();
-      if (cleanUid.isEmpty) {
-        return const StorePurchaseResult(StorePurchaseStatus.unknownSku);
+      final response = await FirebaseFunctions.instanceFor(region: "us-central1")
+          .httpsCallable("purchaseWithPoints", options: HttpsCallableOptions(timeout: const Duration(seconds: 20)))
+          .call<dynamic>({"sku": sku, "requestId": requestId});
+      final data = response.data;
+      if (data is! Map || data["purchased"] != true) throw StateError("Purchase has not been confirmed.");
+      await preferences.remove(key);
+      // A refresh failure cannot turn a confirmed purchase into a failed purchase.
+      try { await PointsService.instance.refreshMeta(uid); } catch (_) {}
+      return StorePurchaseResult(data["alreadyOwned"] == true
+          ? StorePurchaseStatus.alreadyOwned : StorePurchaseStatus.purchased,
+          pointsSpent: (data["pointsSpent"] as num?)?.toInt() ?? 0);
+    } on FirebaseFunctionsException catch (error) {
+      if (error.code == "failed-precondition" &&
+          (error.message ?? "").toLowerCase().contains("not enough points")) {
+        await preferences.remove(key);
+        return const StorePurchaseResult(StorePurchaseStatus.insufficientPoints);
       }
-
-      final item = _catalog[sku];
-      if (item == null) {
-        return const StorePurchaseResult(StorePurchaseStatus.unknownSku);
-      }
-
-      bool debited = false;
-      bool committed = false;
-
-      final purchaseRef = _fs
-          .collection("users")
-          .doc(cleanUid)
-          .collection("store")
-          .doc("purchases")
-          .collection("items")
-          .doc(sku);
-
-      final existing = await purchaseRef.get();
-      if (existing.exists) {
-        // Self-heal: if purchase doc exists but entitlement flags drifted,
-        // re-apply SKU effects so runtime behavior remains consistent.
-        await _applyEntitlementsForSku(uid: cleanUid, sku: sku);
-        return const StorePurchaseResult(StorePurchaseStatus.alreadyOwned);
-      }
-
-      // Business lock applies only to first-time purchases.
-      if (item.requiresBusiness && !businessUnlocked) {
+      if (error.code == "permission-denied") {
+        await preferences.remove(key);
         return const StorePurchaseResult(StorePurchaseStatus.locked);
       }
-
-      debited = await PointsService.instance.spendPoints(
-        uid: cleanUid,
-        amount: item.costPoints,
-        reason: "Store purchase: $sku",
-        category: "store",
-        contextId: sku,
-        contextType: "store_purchase",
-      );
-
-      if (!debited) {
-        return const StorePurchaseResult(
-            StorePurchaseStatus.insufficientPoints);
-      }
-
-      try {
-        await purchaseRef.set(<String, Object?>{
-          "sku": sku,
-          "costPoints": item.costPoints,
-          "requiresBusiness": item.requiresBusiness,
-          "purchasedAt": FieldValue.serverTimestamp(),
-        });
-
-        await _applyEntitlementsForSku(uid: cleanUid, sku: sku);
-        committed = true;
-      } catch (_) {
-        if (debited && !committed) {
-          await PointsService.instance.addPoints(
-            uid: cleanUid,
-            amount: item.costPoints,
-            reason: "Store purchase rollback: $sku",
-            category: "store_rollback",
-            contextId: sku,
-            contextType: "store_purchase_rollback",
-          );
-        }
-        rethrow;
-      }
-
-      return StorePurchaseResult(
-        StorePurchaseStatus.purchased,
-        pointsSpent: item.costPoints,
-      );
-    } catch (_) {
-      return const StorePurchaseResult(StorePurchaseStatus.unknownSku);
+      rethrow;
     }
   }
 
-  Future<StorePurchaseResult> purchaseWithExternalCheckout({
-    required String uid,
-    required String sku,
-    required bool businessUnlocked,
-    required String sessionId,
+  Future<StorePurchaseResult> purchaseWithExternalCheckout({required String uid,
+    required String sku, required bool businessUnlocked, required String sessionId,
     required String paymentMethodId,
-  }) {
-    return purchase(
-      uid: uid,
-      sku: sku,
-      businessUnlocked: businessUnlocked,
-    );
-  }
-
-  Future<void> _applyEntitlementsForSku({
-    required String uid,
-    required String sku,
   }) async {
-    if (sku == "biz_high_radius_unlock") {
-      await MonetizationService.instance.setHighRadiusUnlocked(
-        uid: uid,
-        unlocked: true,
-        sku: sku,
-      );
-      return;
+    // Provider payment verification is authoritative. Never charge points as a card fallback.
+    if (FirebaseAuth.instance.currentUser?.uid != uid || sessionId.trim().isEmpty) {
+      throw StateError("A verified checkout session is required.");
     }
-
-    final entitlementKey = _boolEntitlements[sku];
-    if (entitlementKey == null) return;
-
-    await MonetizationService.instance.setEntitlementBool(
-      uid: uid,
-      key: entitlementKey,
-      value: true,
-      sku: sku,
-    );
+    final session = await _fs.doc("users/$uid/billing/externalCheckout/items/$sessionId")
+        .get(const GetOptions(source: Source.server));
+    final data = session.data();
+    if (data?["sku"] != sku || data?["status"] != "paid") {
+      throw StateError("Payment is awaiting verification. Check your receipt and try again.");
+    }
+    if (!await isOwned(uid: uid, sku: sku)) {
+      throw StateError("Payment was received; the item is awaiting fulfillment.");
+    }
+    return const StorePurchaseResult(StorePurchaseStatus.alreadyOwned);
   }
 
   Future<void> resetStoreStateForUser({required String uid}) async {
-    final cleanUid = uid.trim();
-    if (cleanUid.isEmpty) return;
-
-    final itemsRef = _fs
-        .collection("users")
-        .doc(cleanUid)
-        .collection("store")
-        .doc("purchases")
-        .collection("items");
-
-    final entitlementRef = _fs
-        .collection("users")
-        .doc(cleanUid)
-        .collection("billing")
-        .doc("entitlements");
-
-    final snaps = await itemsRef.get();
-    final batch = _fs.batch();
-    for (final doc in snaps.docs) {
-      batch.delete(doc.reference);
-    }
-
-    final resetPayload = <String, Object?>{
-      "businessPurchased": false,
-      "businessSubscriptionActive": false,
-      "subscriptionRenewsAt": null,
-      "subscriptionStartedAt": null,
-      "highRadiusUnlocked": false,
-      "lastSku": "tester_store_reset",
-      "updatedAt": FieldValue.serverTimestamp(),
-    };
-    for (final key in _boolEntitlements.values) {
-      resetPayload[key] = false;
-    }
-
-    batch.set(entitlementRef, resetPayload, SetOptions(merge: true));
-    await batch.commit();
+    throw StateError("Store resets require an administrator and cannot run from the app.");
   }
 }

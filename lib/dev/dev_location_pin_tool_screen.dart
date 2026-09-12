@@ -1,3 +1,4 @@
+import "package:prox/services/location_privacy_service.dart";
 import "package:cloud_firestore/cloud_firestore.dart";
 import "package:flutter/material.dart";
 import "package:flutter_map/flutter_map.dart";
@@ -31,16 +32,23 @@ class _DevLocationPinToolScreenState extends State<DevLocationPinToolScreen> {
   Future<void> _bootstrap() async {
     await DevLocationPinLabService.instance.ensureLoaded();
 
-    final selfPin = DevLocationPinLabService.instance
-        .pinFor(DevLocationPinKind.selfDemoLocation);
-    final treasurePin = DevLocationPinLabService.instance
-        .pinFor(DevLocationPinKind.treasureTarget);
+    final selfPin = DevLocationPinLabService.instance.pinFor(
+      DevLocationPinKind.selfDemoLocation,
+    );
+    final treasurePin = DevLocationPinLabService.instance.pinFor(
+      DevLocationPinKind.treasureTarget,
+    );
     final candidate = selfPin ?? treasurePin;
     if (candidate != null) {
       _center = LatLng(candidate.lat, candidate.lng);
     }
 
     try {
+      await LocationPrivacyService.instance.ensureLoaded();
+      if (!LocationPrivacyService.instance.mayReadLocation) {
+        if (mounted) setState(() => _booting = false);
+        return;
+      }
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.low,
@@ -48,7 +56,9 @@ class _DevLocationPinToolScreenState extends State<DevLocationPinToolScreen> {
           distanceFilter: 25,
         ),
       );
-      _center = LatLng(pos.latitude, pos.longitude);
+      if (LocationPrivacyService.instance.mayReadLocation) {
+        _center = LatLng(pos.latitude, pos.longitude);
+      }
     } catch (_) {}
 
     if (!mounted) return;
@@ -76,9 +86,9 @@ class _DevLocationPinToolScreenState extends State<DevLocationPinToolScreen> {
 
     if (!mounted) return;
     setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Assigned pin to ${_label(kind)}.")),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text("Assigned pin to ${_label(kind)}.")));
   }
 
   Future<void> _clear(DevLocationPinKind kind) async {
@@ -138,7 +148,9 @@ class _DevLocationPinToolScreenState extends State<DevLocationPinToolScreen> {
           width: 50,
           height: 50,
           child: const _PinDot(
-              color: Color(0xFF6A1B9A), icon: Icons.add_location_alt),
+            color: Color(0xFF6A1B9A),
+            icon: Icons.add_location_alt,
+          ),
         ),
     ];
 
@@ -183,10 +195,10 @@ class _DevLocationPinToolScreenState extends State<DevLocationPinToolScreen> {
                     color: Theme.of(context).colorScheme.surface,
                     border: Border(
                       top: BorderSide(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .outline
-                              .withValues(alpha: 0.2)),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.outline.withValues(alpha: 0.2),
+                      ),
                     ),
                   ),
                   child: Column(
@@ -207,23 +219,26 @@ class _DevLocationPinToolScreenState extends State<DevLocationPinToolScreen> {
                             onPressed: _draftPin == null
                                 ? null
                                 : () => _assign(
-                                    DevLocationPinKind.simulatedNearbyUser),
+                                    DevLocationPinKind.simulatedNearbyUser,
+                                  ),
                             icon: const Icon(Icons.person_pin_circle_outlined),
                             label: const Text("Assign: Sim User"),
                           ),
                           FilledButton.icon(
                             onPressed: _draftPin == null
                                 ? null
-                                : () =>
-                                    _assign(DevLocationPinKind.meetupLocation),
+                                : () => _assign(
+                                    DevLocationPinKind.meetupLocation,
+                                  ),
                             icon: const Icon(Icons.handshake_outlined),
                             label: const Text("Assign: Meetup"),
                           ),
                           FilledButton.icon(
                             onPressed: _draftPin == null
                                 ? null
-                                : () =>
-                                    _assign(DevLocationPinKind.treasureTarget),
+                                : () => _assign(
+                                    DevLocationPinKind.treasureTarget,
+                                  ),
                             icon: const Icon(Icons.radar_outlined),
                             label: const Text("Assign: Treasure"),
                           ),
@@ -273,8 +288,10 @@ class _PinDot extends StatelessWidget {
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.9),
           shape: BoxShape.circle,
-          border:
-              Border.all(color: Colors.white.withValues(alpha: 0.8), width: 2),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.8),
+            width: 2,
+          ),
           boxShadow: const [
             BoxShadow(
               blurRadius: 10,

@@ -20,12 +20,12 @@ class BuildInfoService {
 
   final BuildInfo info = BuildInfo(
     version: const String.fromEnvironment(
-      "PROX_VERSION",
-      defaultValue: "0.18.0",
+      "PROX_APP_VERSION_SHORT",
+      defaultValue: "unknown",
     ),
     build: const String.fromEnvironment(
-      "PROX_BUILD",
-      defaultValue: "dev",
+      "PROX_APP_VERSION",
+      defaultValue: "unknown",
     ),
     builtAt: DateTime.fromMillisecondsSinceEpoch(
       const int.fromEnvironment(

@@ -2,6 +2,24 @@
 
 Flutter app + Firebase backend for Prox.
 
+## Current audit candidate: 0.19.0+19
+
+See [the September 8 audit report](docs/prox_audit_20260908.md),
+[completed app destinations](docs/frontend_audit_20260908.md), and
+[paired update policy and migration guide](docs/update_policy_and_platform_release.md).
+The candidate requires the coordinated backend, public-profile, geographic-index
+and rules rollout described there. Local validation does not activate production
+updates or constitute Android/iOS device release signoff.
+
+## iOS Device Testing
+
+The iOS host project is scaffolded under `ios/` for bundle ID `com.prox-us.prox`. See `docs/ios_device_testing.md` for:
+
+- Mac/Xcode first-run checklist
+- Firebase iOS app details
+- App Check notes
+- Windows no-Mac cloud compile workflow (`.github/workflows/ios_cloud_compile.yml`)
+
 ## Creator Announcements + Broadcasts
 
 HQ Announcements are now Firestore-backed and can be published from the in-app Creator Panel (admin claim required).
@@ -37,7 +55,7 @@ Environment variable required for webhook delivery:
 
 If not configured, export is skipped safely and logged.
 
-## External Payment Scaffold (Card Checkout)
+## External Card Checkout
 
 Cloud Functions endpoints:
 
@@ -52,7 +70,7 @@ Purpose:
 
 Environment variables:
 
-- `EXTERNAL_PAYMENT_CHECKOUT_BASE_URL` (optional; defaults to `https://example.com/checkout`)
+- `EXTERNAL_PAYMENT_CHECKOUT_BASE_URL` (use the reviewed provider configuration; unconfigured checkout fails explicitly)
 - `PROX_PAYMENT_CALLBACK_SECRET` (required for callback verification)
 - `PROX_CHECKOUT_SUCCESS_URL` (required; checkout success redirect URL)
 - `PROX_CHECKOUT_CANCEL_URL` (required; checkout cancel redirect URL)
@@ -176,6 +194,25 @@ Common tasks are available in `.vscode/tasks.json`, including:
 - `Flutter Build APK`
 - `Flutter Build iOS`
 - `Flutter Build Release APK`
+
+## Paired Android + iOS release
+
+The `Paired Android + iOS Release` workflow now runs automatically on version-tag
+pushes and also supports manual dispatch. It builds a signed Android APK and iOS
+IPA from the same commit/version, uploads to TestFlight by default, and publishes
+both packages plus a checksum manifest to public `marolam/prox`.
+
+Follow [Automatic paired releases](docs/automatic_paired_releases.md) for the
+required signing secrets, TestFlight link, rollback access, channel rules and
+optional automatic Android update-policy activation. After the reviewed source
+is committed on `main`, push a tag matching `pubspec.yaml`, such as
+`v0.19.0+20`. Tester/staging tags have `-tester`/`-staging` suffixes and do not
+replace production latest.
+
+Published versions cannot be clobbered: use a new build number for each release.
+Unpublished drafts can be resumed only for the same commit. An accepted TestFlight
+upload must not be repeated on retry; see the runbook for recovery. iOS update
+policy remains separate until the exact build is available to its intended users.
 
 ## APK Download Endpoint Gate
 

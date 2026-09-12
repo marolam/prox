@@ -1,4 +1,5 @@
 import "package:firebase_auth/firebase_auth.dart";
+import "package:cloud_firestore/cloud_firestore.dart";
 import "package:flutter/material.dart";
 
 import "package:prox/models/dashboard_metrics.dart";
@@ -8,8 +9,8 @@ import "package:prox/screens/profile/profile_edit_screen.dart";
 import "package:prox/services/help/context_help_service.dart";
 import "package:prox/screens/services/points_service.dart";
 import "package:prox/services/dashboard_metrics_service.dart";
-import "package:prox/services/match_events_service.dart";
 import "package:prox/services/user_profile_service.dart";
+import "package:prox/screens/store/feature_example_screen.dart";
 
 class BusinessDashboardScreen extends StatelessWidget {
   const BusinessDashboardScreen({super.key});
@@ -25,38 +26,48 @@ class BusinessDashboardScreen extends StatelessWidget {
     }
 
     Widget card({required Widget child}) => Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: cs.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: cs.outline.withValues(alpha: 0.22)),
-          ),
-          child: child,
-        );
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: cs.outline.withValues(alpha: 0.22)),
+      ),
+      child: child,
+    );
 
     Widget metricChip(String label, String value, IconData icon) => Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: cs.surface,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: cs.outline.withValues(alpha: 0.25)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: cs.outline.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: cs.primary),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(icon, size: 16, color: cs.primary),
-              const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(value, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900)),
-                  const SizedBox(height: 2),
-                  Text(label, style: theme.textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
-                ],
+              Text(
+                value,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
               ),
             ],
           ),
-        );
+        ],
+      ),
+    );
 
     void openProfileEdit() {
       final previous = ContextHelpService.instance.contextKey.value;
@@ -64,11 +75,13 @@ class BusinessDashboardScreen extends StatelessWidget {
       // ignore: discarded_futures
       Navigator.of(context)
           .push(
-        MaterialPageRoute<void>(builder: (_) => const ProfileEditScreen(fromOnboarding: false)),
-      )
+            MaterialPageRoute<void>(
+              builder: (_) => const ProfileEditScreen(fromOnboarding: false),
+            ),
+          )
           .then((_) {
-        ContextHelpService.instance.setContext(previous);
-      });
+            ContextHelpService.instance.setContext(previous);
+          });
     }
 
     void shareProfile() {
@@ -79,15 +92,16 @@ class BusinessDashboardScreen extends StatelessWidget {
     }
 
     void postOffer() {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Offer posting is coming next.")),
+      Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) =>
+              const FeatureExampleScreen(title: 'Promotion example'),
+        ),
       );
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Business HQ"),
-      ),
+      appBar: AppBar(title: const Text("Business HQ")),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
         children: [
@@ -110,12 +124,16 @@ class BusinessDashboardScreen extends StatelessWidget {
               children: [
                 Text(
                   "Run your local business on Prox",
-                  style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   "Be reachable, respond fast, and close meetups with clarity.",
-                  style: theme.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 14),
                 Wrap(
@@ -147,20 +165,41 @@ class BusinessDashboardScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("Pipeline snapshot", style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                Text(
+                  "Pipeline snapshot",
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
                 const SizedBox(height: 12),
                 StreamBuilder<PointsMeta>(
                   stream: PointsService.instance.watchMeta(uid),
                   builder: (context, snap) {
-                    final meta = snap.data ?? PointsService.instance.peekMeta(uid);
-                    final leads = MatchEventsService.instance.readEvents().length;
+                    final meta =
+                        snap.data ?? PointsService.instance.peekMeta(uid);
                     return Wrap(
                       spacing: 12,
                       runSpacing: 12,
                       children: [
-                        metricChip("Leads", leads.toString(), Icons.auto_graph_outlined),
-                        metricChip("Meetups", meta.completedMeetups.toString(), Icons.handshake_outlined),
-                        metricChip("Trust", meta.trustPercent.toStringAsFixed(0), Icons.verified_outlined),
+                        _SavedLeadCount(
+                          key: ValueKey(uid),
+                          uid: uid,
+                          buildMetric: (value) => metricChip(
+                            "Saved leads",
+                            value,
+                            Icons.auto_graph_outlined,
+                          ),
+                        ),
+                        metricChip(
+                          "Meetups",
+                          meta.completedMeetups.toString(),
+                          Icons.handshake_outlined,
+                        ),
+                        metricChip(
+                          "Trust",
+                          meta.trustPercent.toStringAsFixed(0),
+                          Icons.verified_outlined,
+                        ),
                       ],
                     );
                   },
@@ -178,19 +217,37 @@ class BusinessDashboardScreen extends StatelessWidget {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text("Market pulse", style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                    Text(
+                      "Market pulse",
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                     const SizedBox(height: 12),
                     Wrap(
                       spacing: 12,
                       runSpacing: 12,
                       children: [
-                        metricChip("Total users", metrics?.totalUsers.toString() ?? "-", Icons.groups_outlined),
-                        metricChip("New today", metrics?.newUsersToday.toString() ?? "-", Icons.trending_up),
+                        metricChip(
+                          "Total users",
+                          metrics?.totalUsers.toString() ?? "-",
+                          Icons.groups_outlined,
+                        ),
+                        metricChip(
+                          "New today",
+                          metrics?.newUsersToday.toString() ?? "-",
+                          Icons.trending_up,
+                        ),
                       ],
                     ),
                     if (top.isNotEmpty) ...[
                       const SizedBox(height: 12),
-                      Text("Top keywords", style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800)),
+                      Text(
+                        "Top keywords",
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
                       const SizedBox(height: 8),
                       Wrap(
                         spacing: 8,
@@ -200,7 +257,10 @@ class BusinessDashboardScreen extends StatelessWidget {
                             .map(
                               (k) => Chip(
                                 label: Text("${k.keyword}  ${k.count}"),
-                                avatar: const Icon(Icons.local_fire_department_outlined, size: 16),
+                                avatar: const Icon(
+                                  Icons.local_fire_department_outlined,
+                                  size: 16,
+                                ),
                               ),
                             )
                             .toList(growable: false),
@@ -226,11 +286,20 @@ class BusinessDashboardScreen extends StatelessWidget {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text("Availability", style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                    Text(
+                      "Availability",
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                     const SizedBox(height: 6),
                     Text(
-                      name.isNotEmpty ? "$name is $availabilityLabel" : "You are $availabilityLabel",
-                      style: theme.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+                      name.isNotEmpty
+                          ? "$name is $availabilityLabel"
+                          : "You are $availabilityLabel",
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 );
@@ -241,4 +310,81 @@ class BusinessDashboardScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SavedLeadCount extends StatefulWidget {
+  const _SavedLeadCount({
+    super.key,
+    required this.uid,
+    required this.buildMetric,
+  });
+  final String uid;
+  final Widget Function(String value) buildMetric;
+
+  @override
+  State<_SavedLeadCount> createState() => _SavedLeadCountState();
+}
+
+class _SavedLeadCountState extends State<_SavedLeadCount> {
+  late Future<int> _count;
+
+  @override
+  void initState() {
+    super.initState();
+    _count = _loadCount();
+  }
+
+  @override
+  void didUpdateWidget(_SavedLeadCount oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.uid != widget.uid) _count = _loadCount();
+  }
+
+  Future<int> _loadCount() async {
+    final uid = widget.uid;
+    if (FirebaseAuth.instance.currentUser?.uid != uid)
+      throw StateError('Account changed');
+    final result = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('business')
+        .doc('leads')
+        .collection('items')
+        .count()
+        .get()
+        .timeout(const Duration(seconds: 15));
+    if (FirebaseAuth.instance.currentUser?.uid != uid)
+      throw StateError('Account changed');
+    final count = result.count;
+    if (count == null) throw StateError('Saved lead count unavailable');
+    return count;
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<int>(
+    future: _count,
+    builder: (context, snapshot) {
+      final loading = snapshot.connectionState != ConnectionState.done;
+      final value = loading
+          ? '…'
+          : snapshot.hasError
+          ? 'Unavailable'
+          : '${snapshot.data}';
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          widget.buildMetric(value),
+          IconButton(
+            tooltip: snapshot.hasError
+                ? 'Retry saved lead count'
+                : 'Refresh saved lead count',
+            onPressed: loading
+                ? null
+                : () => setState(() => _count = _loadCount()),
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      );
+    },
+  );
 }

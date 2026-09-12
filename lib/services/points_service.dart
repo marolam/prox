@@ -1,4 +1,5 @@
-import "dart:async";
+import "package:firebase_auth/firebase_auth.dart";
+import "package:cloud_functions/cloud_functions.dart";
 
 import "package:cloud_firestore/cloud_firestore.dart";
 
@@ -47,56 +48,46 @@ class PointsMeta {
   }
 }
 
+/// The server is the sole authority for balances, rewards and spending.
 class PointsService {
   PointsService._();
   static final PointsService instance = PointsService._();
-
   final FirebaseFirestore _fs = FirebaseFirestore.instance;
-  final Map<String, PointsMeta> _cache = <String, PointsMeta>{};
-  final Map<String, StreamController<PointsMeta>> _controllers =
-      <String, StreamController<PointsMeta>>{};
+  final Map<String, PointsMeta> _cache = {};
 
-  StreamController<PointsMeta> _controllerFor(String uid) {
-    return _controllers.putIfAbsent(
-      uid,
-      () => StreamController<PointsMeta>.broadcast(),
-    );
-  }
+  DocumentReference<Map<String, dynamic>> _ref(String uid) =>
+      _fs.collection("users").doc(uid).collection("meta").doc("points");
+
+  static PointsMeta fromData(Map<String, dynamic> data) => PointsMeta(
+    currentPoints: (data["currentPoints"] as num?)?.toInt() ?? 0,
+    totalPoints: (data["totalPoints"] as num?)?.toInt() ?? 0,
+    completedMeetups: (data["completedMeetups"] as num?)?.toInt() ?? 0,
+    trustPercent: (data["trustPercent"] as num?)?.toDouble() ?? 0,
+    referrals: (data["referrals"] as num?)?.toInt() ?? 0,
+    supportSessions: (data["supportSessions"] as num?)?.toInt() ?? 0,
+  );
 
   PointsMeta peekMeta(String uid) => _cache[uid] ?? PointsMeta.empty;
 
-  Stream<PointsMeta> watchMeta(String uid) async* {
-    yield peekMeta(uid);
-    yield* _controllerFor(uid).stream;
+  Stream<PointsMeta> watchMeta(String uid) {
+    final clean = uid.trim();
+    if (clean.isEmpty) return Stream.value(PointsMeta.empty);
+    return _ref(clean).snapshots().map((snapshot) {
+      final meta = fromData(snapshot.data() ?? {});
+      if (FirebaseAuth.instance.currentUser?.uid == clean) _cache[clean] = meta;
+      return meta;
+    });
   }
 
-  Stream<PointsMeta> streamMySnapshot() {
-    return _controllerFor("__me__").stream;
-  }
+  Stream<PointsMeta> streamMySnapshot() =>
+      watchMeta(FirebaseAuth.instance.currentUser?.uid ?? "");
 
   Future<void> refreshMeta(String uid) async {
     final clean = uid.trim();
     if (clean.isEmpty) return;
-
-    try {
-      final snap = await _fs
-          .collection("users")
-          .doc(clean)
-          .collection("points")
-          .doc("meta")
-          .get();
-      final data = snap.data() ?? const <String, dynamic>{};
-      final next = PointsMeta(
-        currentPoints: (data["currentPoints"] as num?)?.toInt() ?? 0,
-        totalPoints: (data["totalPoints"] as num?)?.toInt() ?? 0,
-        completedMeetups: (data["completedMeetups"] as num?)?.toInt() ?? 0,
-        trustPercent: (data["trustPercent"] as num?)?.toDouble() ?? 0,
-        referrals: (data["referrals"] as num?)?.toInt() ?? 0,
-        supportSessions: (data["supportSessions"] as num?)?.toInt() ?? 0,
-      );
-      _emit(clean, next);
-    } catch (_) {
-      _emit(clean, peekMeta(clean));
+    final snapshot = await _ref(clean).get().timeout(const Duration(seconds: 10));
+    if (FirebaseAuth.instance.currentUser?.uid == clean) {
+      _cache[clean] = fromData(snapshot.data() ?? {});
     }
   }
 
@@ -105,121 +96,40 @@ class PointsService {
     return peekMeta(uid);
   }
 
-  Future<void> addPoints({
-    required String uid,
-    required int amount,
-    String? reason,
-    String? sourceId,
-    String category = "",
-    String contextId = "",
-    String contextType = "",
+  void clearSession() => _cache.clear();
+
+  Future<void> addPoints({required String uid, required int amount,
+    String? reason, String? sourceId, String category = "",
+    String contextId = "", String contextType = "",
   }) async {
-    final current = peekMeta(uid);
-    final safe = amount < 0 ? 0 : amount;
-    final next = current.copyWith(
-      currentPoints: current.currentPoints + safe,
-      totalPoints: current.totalPoints + safe,
-    );
-    await _persist(uid, next);
-  }
-
-  Future<void> award({
-    required String uid,
-    required int points,
-    String? reason,
-    String category = "",
-  }) {
-    return addPoints(
-      uid: uid,
-      amount: points,
-      reason: reason,
-      category: category,
-    );
-  }
-
-  Future<bool> spendPoints({
-    required String uid,
-    required int amount,
-    String? reason,
-    String? sourceId,
-    String category = "",
-    String contextId = "",
-    String contextType = "",
-  }) async {
-    final current = peekMeta(uid);
-    final safe = amount < 0 ? 0 : amount;
-    if (current.currentPoints < safe) return false;
-
-    final next = current.copyWith(currentPoints: current.currentPoints - safe);
-    await _persist(uid, next);
-    return true;
-  }
-
-  Future<void> touchActivity({required String uid}) async {
+    if (FirebaseAuth.instance.currentUser?.uid != uid) throw StateError("Sign in again to continue.");
+    final source = contextId.isNotEmpty ? contextId : sourceId ?? contextType;
+    if (source.isEmpty || !{"policy_ack", "support", "feedback"}.contains(category)) {
+      throw StateError("Points are awarded only for activity verified by Prox.");
+    }
+    // Amount is deliberately not sent: rewards are calculated and deduplicated by the server.
+    await FirebaseFunctions.instanceFor(region: "us-central1")
+        .httpsCallable("claimVerifiedReward").call<dynamic>({"category": category, "contextId": source});
     await refreshMeta(uid);
   }
 
-  Future<void> recordMeetupOutcome({
-    required String uid,
-    required String meetupId,
-    required bool onTime,
+  Future<void> award({required String uid, required int points,
+    String? reason, String category = "", String contextId = "",
+  }) => addPoints(uid: uid, amount: points, reason: reason,
+      category: category, contextId: contextId);
+
+  Future<bool> spendPoints({required String uid, required int amount,
+    String? reason, String? sourceId, String category = "",
+    String contextId = "", String contextType = "",
   }) async {
-    final current = peekMeta(uid);
-    final next = current.copyWith(
-      completedMeetups: current.completedMeetups + 1,
-      trustPercent: onTime
-          ? (current.trustPercent < 100 ? current.trustPercent + 1 : 100)
-          : current.trustPercent,
-    );
-    await _persist(uid, next);
+    throw StateError("Use a verified store purchase to spend points.");
   }
 
-  Future<void> recordMeetupRating({
-    required String uid,
-    required String chatId,
-    required bool thumbsUp,
-  }) async {
-    final current = peekMeta(uid);
-    final double delta = thumbsUp ? 0.5 : -0.5;
-    final trust = (current.trustPercent + delta).clamp(0, 100).toDouble();
-    await _persist(uid, current.copyWith(trustPercent: trust));
-  }
+  Future<void> touchActivity({required String uid}) => refreshMeta(uid);
 
-  Future<void> _persist(String uid, PointsMeta meta) async {
-    final clean = uid.trim();
-    if (clean.isEmpty) return;
-
-    _emit(clean, meta);
-
-    try {
-      await _fs
-          .collection("users")
-          .doc(clean)
-          .collection("points")
-          .doc("meta")
-          .set(<String, dynamic>{
-        "currentPoints": meta.currentPoints,
-        "totalPoints": meta.totalPoints,
-        "completedMeetups": meta.completedMeetups,
-        "trustPercent": meta.trustPercent,
-        "referrals": meta.referrals,
-        "supportSessions": meta.supportSessions,
-        "updatedAt": FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    } catch (_) {
-      // Keep local cache in sync even when persistence fails.
-    }
-  }
-
-  void _emit(String uid, PointsMeta meta) {
-    _cache[uid] = meta;
-    final c = _controllerFor(uid);
-    if (!c.isClosed) {
-      c.add(meta);
-    }
-    final me = _controllerFor("__me__");
-    if (!me.isClosed) {
-      me.add(meta);
-    }
-  }
+  // Rewards follow server-validated meetup/rating documents; these methods only refresh.
+  Future<void> recordMeetupOutcome({required String uid, required String meetupId,
+    required bool onTime}) => refreshMeta(uid);
+  Future<void> recordMeetupRating({required String uid, required String chatId,
+    required bool thumbsUp}) => refreshMeta(uid);
 }

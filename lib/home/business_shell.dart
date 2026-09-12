@@ -3,7 +3,7 @@ import "package:flutter/material.dart";
 import "package:prox/screens/business/business_dashboard_screen.dart";
 import "package:prox/screens/business/business_leads_screen.dart";
 import "package:prox/screens/business/business_profile_screen.dart";
-import "package:prox/screens/matches/matches_screen.dart";
+import "package:prox/screens/chats/chat_threads_screen.dart";
 import "package:prox/screens/settings/settings_screen.dart";
 
 class BusinessShell extends StatefulWidget {
@@ -30,7 +30,7 @@ class _BusinessShellState extends State<BusinessShell> {
     _BizTab(
       label: "Inbox",
       icon: Icons.forum_outlined,
-      child: MatchesScreen(),
+      child: ChatThreadsScreen(),
     ),
     _BizTab(
       label: "Profile",

@@ -12,7 +12,7 @@ import "package:prox/widgets/onboarding/business_intro_sheet.dart";
 /// Central place for early testers to adjust how discovery works:
 /// - radius
 /// - Business Mode filters (All / Business / Immediate)
-/// - Party scope (All / Extended / Direct (placeholder))
+/// - Party scope (All / Extended / Direct)
 class DiscoverySettingsScreen extends StatelessWidget {
   const DiscoverySettingsScreen({super.key});
 
@@ -24,9 +24,7 @@ class DiscoverySettingsScreen extends StatelessWidget {
     final userSettings = UserSettingsService.instance;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Discovery settings"),
-      ),
+      appBar: AppBar(title: const Text("Discovery settings")),
       body: StreamBuilder<MatchDiscoverySettings>(
         stream: matchSettings.watchDiscovery(),
         initialData: matchSettings.current,
@@ -37,12 +35,13 @@ class DiscoverySettingsScreen extends StatelessWidget {
           final businessOnly = settings.businessOnly;
           final immediateOnly = settings.immediateOnly;
           final scope = settings.partyScope;
+          final ageBracket = settings.ageBracket;
 
           // One-time intro: first time they arrive here with any Business
           // filter active, show a short explainer sheet.
           final shouldShowIntro =
               !userSettings.current.hasSeenBusinessIntro &&
-                  (businessOnly || immediateOnly);
+              (businessOnly || immediateOnly);
 
           if (shouldShowIntro) {
             WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -78,10 +77,7 @@ class DiscoverySettingsScreen extends StatelessWidget {
               ),
 
               const SizedBox(height: 18),
-              Text(
-                "Party scope",
-                style: theme.textTheme.titleMedium,
-              ),
+              Text("Party scope", style: theme.textTheme.titleMedium),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
@@ -90,17 +86,21 @@ class DiscoverySettingsScreen extends StatelessWidget {
                   MatchFilterChip(
                     label: "All nearby",
                     selected: scope == MatchPartyScope.all,
-                    onTap: () => matchSettings.setPartyScope(MatchPartyScope.all),
+                    onTap: () =>
+                        matchSettings.setPartyScope(MatchPartyScope.all),
                   ),
                   MatchFilterChip(
                     label: "Extended party",
                     selected: scope == MatchPartyScope.extendedOnly,
-                    onTap: () => matchSettings.setPartyScope(MatchPartyScope.extendedOnly),
+                    onTap: () => matchSettings.setPartyScope(
+                      MatchPartyScope.extendedOnly,
+                    ),
                   ),
                   MatchFilterChip(
-                    label: "Direct party (soon)",
+                    label: "Direct party",
                     selected: scope == MatchPartyScope.partyOnly,
-                    onTap: () => matchSettings.setPartyScope(MatchPartyScope.partyOnly),
+                    onTap: () =>
+                        matchSettings.setPartyScope(MatchPartyScope.partyOnly),
                   ),
                 ],
               ),
@@ -114,10 +114,32 @@ class DiscoverySettingsScreen extends StatelessWidget {
               ),
 
               const SizedBox(height: 24),
-              Text(
-                "Business Mode filters",
-                style: theme.textTheme.titleMedium,
+              Text("Age preference", style: theme.textTheme.titleMedium),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: MatchAgeBracket.values
+                    .map(
+                      (bracket) => MatchFilterChip(
+                        label: bracket.label,
+                        selected: ageBracket == bracket,
+                        onTap: () => matchSettings.setAgeBracket(bracket),
+                      ),
+                    )
+                    .toList(growable: false),
               ),
+              const SizedBox(height: 10),
+              Text(
+                "Use this to narrow Nearby results to a preferred age bracket. "
+                "Profiles without age data are excluded when a bracket is selected.",
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+
+              const SizedBox(height: 24),
+              Text("Business Mode filters", style: theme.textTheme.titleMedium),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
@@ -161,14 +183,12 @@ class DiscoverySettingsScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
               Text(
-                "Support helpers (coming soon)",
+                "Get help with discovery",
                 style: theme.textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
               Text(
-                "A future update will let some users opt into Support Mode, where they can "
-                "volunteer to help others with questions or issues and earn Prox Points. "
-                "Support Mode will work alongside these discovery filters so helpers are easy to find when you need them.",
+                "Open Support & feedback for help with these filters. The User's Guide includes a walkthrough, and Tester tools includes an isolated discovery simulator to practice with example profiles.",
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: cs.onSurfaceVariant,
                 ),

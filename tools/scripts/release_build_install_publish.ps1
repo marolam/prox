@@ -24,6 +24,9 @@ $repoRoot = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
 
 Set-Location $repoRoot
 
+& (Join-Path $repoRoot 'tools/scripts/check_release_guard.ps1') -ReleaseChannel $ReleaseChannel -RepoPath $repoRoot
+if ($LASTEXITCODE -ne 0) { throw 'Release branch/feature guard failed.' }
+
 $buildScript = Join-Path $repoRoot "tools/scripts/build_release_apk.ps1"
 $publishScript = Join-Path $repoRoot "tools/scripts/publish_github_release.ps1"
 
@@ -79,7 +82,15 @@ if (-not $SkipBuildInstall) {
 
 if (-not $SkipPublish) {
   Write-Host "`nStep 2/2: Publish GitHub release assets" -ForegroundColor Cyan
-  & powershell -ExecutionPolicy Bypass -File $publishScript -Repo $Repo
+  $publishParams = @{ Repo = $Repo }
+  if ($ReleaseChannel -ne 'prod') {
+    $versionLine = Get-Content -LiteralPath (Join-Path $repoRoot 'pubspec.yaml') | Where-Object { $_ -match '^version:\s*' } | Select-Object -First 1
+    $version = ($versionLine -replace '^version:\s*', '').Trim()
+    $publishParams.Tag = "v$version-$ReleaseChannel"
+    $publishParams.Prerelease = $true
+    $publishParams.SetLatest = $false
+  }
+  & $publishScript @publishParams
   if ($LASTEXITCODE -ne 0) {
     throw "Publish step failed with exit code $LASTEXITCODE"
   }

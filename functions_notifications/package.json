@@ -1,0 +1,17 @@
+{
+  "name": "prox-notifications-functions",
+  "private": true,
+  "engines": {
+    "node": "22"
+  },
+  "main": "index.js",
+  "scripts": {"build": "node --check index.js"},
+  "dependencies": {
+    "firebase-admin": "^13.7.0",
+    "firebase-functions": "^7.1.0"
+  },
+  "overrides": {
+    "qs": "^6.16.0",
+    "uuid": "^11.1.1"
+  }
+}

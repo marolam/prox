@@ -1,0 +1,268 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "items",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        {
+          "fieldPath": "state",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "scheduledAt",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "incidents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "reporterUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "bugReports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "ownerUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "supportTickets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "uid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "bugReports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "actor",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "feedbackScoredAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "support_tickets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "testerUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "feedbackScoredAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "chats",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "participants",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "matches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "participants",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "presence",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        {
+          "fieldPath": "kind",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "latitude",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "longitude",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "items",
+      "fieldPath": "state",
+      "indexes": [
+        {
+          "queryScope": "COLLECTION_GROUP",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "presence",
+      "fieldPath": "kind",
+      "indexes": [
+        {
+          "queryScope": "COLLECTION_GROUP",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "items",
+      "fieldPath": "sessionId",
+      "indexes": [
+        {
+          "queryScope": "COLLECTION_GROUP",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "items",
+      "fieldPath": "providerSessionId",
+      "indexes": [
+        {
+          "queryScope": "COLLECTION_GROUP",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "party",
+      "fieldPath": "uid",
+      "indexes": [
+        {
+          "queryScope": "COLLECTION_GROUP",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "blocks",
+      "fieldPath": "uid",
+      "indexes": [
+        {
+          "queryScope": "COLLECTION_GROUP",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "referrals",
+      "fieldPath": "uid",
+      "indexes": [
+        {
+          "queryScope": "COLLECTION_GROUP",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "billing",
+      "fieldPath": "businessSubscriptionActive",
+      "indexes": [
+        {
+          "queryScope": "COLLECTION_GROUP",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "order": "DESCENDING"
+        }
+      ]
+    }
+  ]
+}

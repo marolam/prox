@@ -17,8 +17,7 @@ class BusinessEntitlementSnapshot {
   final bool testerUnlocked;
   final bool businessModeActive;
 
-  bool get canOperateBusiness =>
-      (paidUnlocked || testerUnlocked) && businessModeActive;
+  bool get canOperateBusiness => paidUnlocked && businessModeActive;
 }
 
 class BusinessEntitlementGuard {
@@ -29,7 +28,7 @@ class BusinessEntitlementGuard {
 
   String requireSignedInUid({String? uid}) {
     final String resolved = (uid ?? _auth.currentUser?.uid ?? "").trim();
-    if (resolved.isEmpty) {
+    if (resolved.isEmpty || _auth.currentUser?.uid != resolved) {
       throw StateError("You must be signed in to use Pro Mode.");
     }
     return resolved;
@@ -46,33 +45,35 @@ class BusinessEntitlementGuard {
     if (!ProModePreviewAccess.instance.isAllowedForCurrentUser()) {
       throw StateError("Pro Mode preview is not available for this account.");
     }
-    final bool paidUnlocked =
-        await MonetizationService.instance.isBusinessUnlocked(resolvedUid);
-    final bool testerUnlocked =
-        await BusinessModeStateService.instance.isTesterUnlocked(resolvedUid);
-    final bool active =
-        await BusinessModeStateService.instance.isActive(resolvedUid);
+    final bool paidUnlocked = await MonetizationService.instance
+        .isBusinessUnlocked(resolvedUid);
+    final bool active = await BusinessModeStateService.instance.isActive(
+      resolvedUid,
+    );
 
+    requireSignedInUid(uid: resolvedUid);
     return BusinessEntitlementSnapshot(
       uid: resolvedUid,
       paidUnlocked: paidUnlocked,
-      testerUnlocked: testerUnlocked,
+      testerUnlocked: false,
       businessModeActive: active,
     );
   }
 
-  Future<BusinessEntitlementSnapshot> ensureCanOperateBusiness(
-      {String? uid}) async {
+  Future<BusinessEntitlementSnapshot> ensureCanOperateBusiness({
+    String? uid,
+  }) async {
     ensureWriteRolloutEnabled();
     final snapshot = await loadSnapshot(uid: uid);
     if (!snapshot.canOperateBusiness) {
-      if (!snapshot.paidUnlocked && !snapshot.testerUnlocked) {
+      if (!snapshot.paidUnlocked) {
         throw StateError(
-          "Pro Mode subscription required. Personal mode can discover Pros but cannot operate as a Pro.",
+          "Pro Mode access is required. Personal mode can discover Pros but cannot operate as a Pro.",
         );
       }
       throw StateError(
-          "Pro Mode is unlocked but not active. Activate Pro Mode to continue.");
+        "Pro Mode is unlocked but not active. Activate Pro Mode to continue.",
+      );
     }
     return snapshot;
   }

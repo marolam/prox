@@ -1,5 +1,5 @@
 import "package:flutter/material.dart";
-import "package:prox/screens/post_meetup_flow.dart";
+import "package:prox/screens/rating/rating_screen.dart";
 import "package:prox/services/help/context_help_service.dart";
 
 class PostMeetupFlow {
@@ -14,15 +14,14 @@ class PostMeetupFlow {
   }) async {
     final previous = ContextHelpService.instance.contextKey.value;
     ContextHelpService.instance.setContext("meetup:post_flow");
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => PostMeetupFlowScreen(
-          chatId: chatId,
-          otherUid: otherUid,
-          autoThumbDelay: Duration(milliseconds: autoDefaultMs),
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => RatingScreen(chatId: chatId, otherUid: otherUid),
         ),
-      ),
-    );
-    ContextHelpService.instance.setContext(previous);
+      );
+    } finally {
+      ContextHelpService.instance.setContext(previous);
+    }
   }
 }

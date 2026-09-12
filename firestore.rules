@@ -4,44 +4,51 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     function authed() {
-      return request.auth != null;
+      return request.auth != null &&
+        !exists(/databases/$(database)/documents/accountDeletions/$(request.auth.uid));
     }
 
     function isAdmin() {
-      return authed() && request.auth.token.admin == true;
+      return authed() && request.auth.token.get('admin', false) == true;
     }
 
     function isOwner(uid) {
       return authed() && request.auth.uid == uid;
     }
 
+    function isMutualPartyMember(uid) {
+      return authed() && request.auth.uid != uid &&
+        exists(/databases/$(database)/documents/users/$(uid)/party/$(request.auth.uid)) &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)/party/$(uid));
+    }
+
     function hasParticipants(data) {
-      return data.participants is list;
+      return data.get('participants', []) is list;
     }
 
     function inParticipants(data) {
-      return hasParticipants(data) && request.auth.uid in data.participants;
+      return authed() && request.auth.uid in data.get('participants', []);
     }
 
     function inPair(data) {
       return authed() && (
-        (data.aUid is string && request.auth.uid == data.aUid) ||
-        (data.bUid is string && request.auth.uid == data.bUid) ||
-        (data.requesterUid is string && request.auth.uid == data.requesterUid) ||
-        (data.recipientUid is string && request.auth.uid == data.recipientUid)
+        request.auth.uid == data.get('aUid', '') ||
+        request.auth.uid == data.get('bUid', '') ||
+        request.auth.uid == data.get('requesterUid', '') ||
+        request.auth.uid == data.get('recipientUid', '')
       );
     }
 
     function ownerUid(data) {
-      return data.ownerUid is string
+      return data.get('ownerUid', null) is string
         ? data.ownerUid
-        : data.userId is string
+        : data.get('userId', null) is string
           ? data.userId
-          : data.uid is string
+          : data.get('uid', null) is string
             ? data.uid
-            : data.createdBy is string
+            : data.get('createdBy', null) is string
               ? data.createdBy
-              : data.reporterUid is string
+              : data.get('reporterUid', null) is string
                 ? data.reporterUid
                 : "";
     }
@@ -52,8 +59,8 @@ service cloud.firestore {
 
     function supportCanRead(data) {
       return isDocOwner(data) ||
-        (data.technicianId is string && request.auth.uid == data.technicianId) ||
-        (data.managerId is string && request.auth.uid == data.managerId) ||
+        request.auth.uid == data.get('technicianId', '') ||
+        request.auth.uid == data.get('managerId', '') ||
         isAdmin();
     }
 
@@ -61,10 +68,113 @@ service cloud.firestore {
       return inParticipants(data) || inPair(data);
     }
 
+    function noBlock(a, b) {
+      return a is string && b is string && a != '' && b != '' &&
+        !exists(/databases/$(database)/documents/users/$(a)/blocks/$(b)) &&
+        !exists(/databases/$(database)/documents/users/$(b)/blocks/$(a));
+    }
+
+    function validChat(data) {
+      return data.participants is list && data.participants.size() >= 2 &&
+        data.participants.size() <= 50 &&
+        data.participants.toSet().size() == data.participants.size() &&
+        (data.participants.size() != 2 || noBlock(data.participants[0], data.participants[1]));
+    }
+
+    function immutablePair() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'participants', 'aUid', 'bUid', 'requesterUid', 'recipientUid'
+      ]);
+    }
+
+    function pairNotBlocked(data) {
+      return data.get('participants', []).size() == 2
+        ? noBlock(data.participants[0], data.participants[1])
+        : noBlock(data.get('aUid', data.get('requesterUid', '')),
+                  data.get('bUid', data.get('recipientUid', '')));
+    }
+
+    function validMessage(data, chat) {
+      return data.get('from', '') == request.auth.uid &&
+        data.get('text', '') is string && data.get('text', '').size() <= 10000 &&
+        data.get('kind', 'text') in ['text', 'image', 'system'] &&
+        data.get('to', '') in chat.participants &&
+        data.get('to', '') != request.auth.uid &&
+        noBlock(request.auth.uid, data.get('to', '')) &&
+        data.get('read', false) == false;
+    }
+
+    function safeSupportCreate(data) {
+      return isDocOwner(data) && !data.keys().hasAny([
+        'technicianId', 'managerId', 'payoutGranted', 'payoutCredited',
+        'doneDealConfirmed', 'rewardGranted', 'rewardCredited'
+      ]) && data.get('status', 'open') in ['open', 'new', 'submitted', 0];
+    }
+
+    function ownerReportUpdate() {
+      return isDocOwner(resource.data) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'title', 'description', 'subject', 'message', 'body', 'note',
+          'detail', 'reason', 'route', 'updatedAt', 'createdAt'
+        ]);
+    }
+
+    function validMeetupStatusEventUpdate() {
+      return (
+          !request.resource.data.keys().hasAny(["lastStatusEvent"]) &&
+          !resource.data.keys().hasAny(["lastStatusEvent"])
+        ) || (
+          request.resource.data.keys().hasAny(["lastStatusEvent"]) &&
+          resource.data.keys().hasAny(["lastStatusEvent"]) &&
+          request.resource.data.lastStatusEvent == resource.data.lastStatusEvent
+        ) ||
+        (
+          request.resource.data.keys().hasAny(["lastStatusEvent"]) &&
+          request.resource.data.lastStatusEvent is map &&
+          request.resource.data.lastStatusEvent.actorUid == request.auth.uid &&
+          request.resource.data.lastStatusEvent.id is string &&
+          request.resource.data.lastStatusEvent.type in [
+            "location_confirmed",
+            "on_my_way",
+            "ready_to_verify",
+            "arrived",
+            "meetup_completed"
+          ]
+        );
+    }
+
+    function validArrivalUpdate() {
+      let old = resource.data;
+      let next = request.resource.data;
+      let peer = request.auth.uid == old.get('aUid', '') ? 'bArrived' : 'aArrived';
+      let reset = old.get('status', '') in ['completed', 'expired', 'cancelled', 'auto_closed', 'declined'] &&
+        next.get('status', '') in ['requested', 'live'] &&
+        next.get('aArrived', false) == false && next.get('bArrived', false) == false;
+      return (next.get(peer, false) == old.get(peer, false) || reset) &&
+        (old.get('status', '') != 'completed' || next.get('status', '') != 'completed' ||
+          next.get('completedAt', null) == old.get('completedAt', null)) &&
+        (next.get('status', '') != 'completed' ||
+          (next.get('aArrived', false) == true && next.get('bArrived', false) == true));
+    }
+
+    function ratingParticipant(meetupId) {
+      return authed() && meetupParticipant(get(/databases/$(database)/documents/meetups/$(meetupId)).data);
+    }
+
+    function validRating(meetupId, entryId) {
+      return entryId == request.auth.uid && ratingParticipant(meetupId) &&
+        get(/databases/$(database)/documents/meetups/$(meetupId)).data.status == 'completed' &&
+        request.resource.data.thumb is bool &&
+        request.resource.data.keys().hasOnly(['thumb', 'reason', 'ts']);
+    }
+
     // --- USER ROOT + NESTED OWNER DATA ---
     match /users/{uid} {
-      allow read: if authed();
-      allow write: if isOwner(uid);
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(uid) && request.resource.data.get('referrer', '') in ['', null] && request.resource.data.get('root_referrer', '') in ['', null];
+      allow update: if isOwner(uid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['referrer', 'root_referrer']);
+      allow delete: if false;
 
       match /presence/{docId} {
         allow read: if authed();
@@ -80,21 +190,39 @@ service cloud.firestore {
       }
 
       match /meta/{docId} {
-        allow read: if authed();
-        allow write: if isOwner(uid);
+        allow read: if isOwner(uid);
+        allow write: if isOwner(uid) && !(docId in ['points', 'progression', 'inPartyMatchMetrics', 'matching']);
 
         match /events/{eventId} {
           allow read: if isOwner(uid);
-          allow write: if isOwner(uid);
+          allow write: if isOwner(uid) && !(docId in ['points', 'inPartyMatchMetrics']);
         }
       }
 
       match /party/{partyUid} {
-        allow read: if authed();
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && request.resource.data.get('mutual', false) == false &&
+          request.resource.data.get('uid', partyUid) == partyUid;
+        allow update: if isOwner(uid) && request.resource.data.get('uid', partyUid) == partyUid &&
+          request.resource.data.get('mutual', false) == resource.data.get('mutual', false);
+        allow delete: if isOwner(uid);
+      }
+
+      match /partyProfile/{docId} {
+        allow read: if isOwner(uid) || isMutualPartyMember(uid);
         allow write: if isOwner(uid);
       }
 
+      // Location/points cache used by runtime presence and bootstrap flows.
+      match /points/{docId} {
+        allow read, write: if isOwner(uid);
+      }
+
       match /notes/{otherUid} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /hiddenKeywords/{reportId} {
         allow read, write: if isOwner(uid);
       }
 
@@ -104,24 +232,63 @@ service cloud.firestore {
 
       match /blocks/{blockedUid} {
         allow read: if isOwner(uid);
-        allow write: if isOwner(uid);
+        allow create, update: if isOwner(uid) && blockedUid != uid &&
+          request.resource.data.keys().hasOnly(['uid', 'createdAt']) &&
+          request.resource.data.uid == blockedUid;
+        allow delete: if isOwner(uid);
+      }
+
+      match /trustFeedback/{meetupId} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) &&
+          request.resource.data.keys().hasOnly(['meetupId', 'otherUid', 'wouldMeetAgain', 'updatedAt']) &&
+          request.resource.data.meetupId == meetupId &&
+          request.resource.data.wouldMeetAgain is bool &&
+          request.resource.data.otherUid != uid &&
+          get(/databases/$(database)/documents/meetups/$(meetupId)).data.status == 'completed' &&
+          meetupParticipant(get(/databases/$(database)/documents/meetups/$(meetupId)).data) &&
+          request.resource.data.otherUid in [
+            get(/databases/$(database)/documents/meetups/$(meetupId)).data.aUid,
+            get(/databases/$(database)/documents/meetups/$(meetupId)).data.bUid
+          ];
+      }
+
+      match /activityEvents/{eventId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && request.resource.data.delta == 0 &&
+          request.resource.data.keys().hasOnly(['kind', 'title', 'delta', 'meta', 'createdAt']) &&
+          request.resource.data.kind is string && request.resource.data.kind.size() <= 80 &&
+          request.resource.data.title is string && request.resource.data.title.size() <= 200 &&
+          request.resource.data.meta is string && request.resource.data.meta.size() <= 2000 &&
+          request.resource.data.createdAt == request.time;
       }
 
       match /referrals/{inviteeUid} {
-        allow read: if isOwner(uid);
-        allow write: if isOwner(uid);
+        allow read: if isOwner(uid) ||
+          (authed() && request.auth.uid == inviteeUid) ||
+          (authed() && resource.data.uid is string && request.auth.uid == resource.data.uid);
+        allow create: if isOwner(uid) && !request.resource.data.keys().hasAny([
+          'rewardGranted', 'rewardCredited', 'inPersonVerified', 'rewardEligible', 'meetupsCompleted', 'referralsCompleted'
+        ]);
+        allow update: if isOwner(uid) &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'rewardGranted', 'rewardCredited', 'inPersonVerified', 'rewardEligible', 'meetupsCompleted', 'referralsCompleted'
+          ]);
+        allow delete: if false;
       }
 
       match /stats/{docId} {
-        allow read: if authed();
-        allow write: if isOwner(uid);
+        allow read: if isOwner(uid) || (authed() && docId == 'trust');
+        allow write: if false;
       }
 
       match /billing/{docId} {
-        allow read, write: if isOwner(uid);
+        allow read: if isOwner(uid);
+        allow write: if false;
 
         match /items/{itemId} {
-          allow read, write: if isOwner(uid);
+          allow read: if isOwner(uid);
+          allow write: if false;
         }
       }
 
@@ -134,32 +301,59 @@ service cloud.firestore {
       }
 
       match /store/{docId} {
-        allow read, write: if isOwner(uid);
+        allow read: if isOwner(uid);
+        allow write: if false;
 
         match /items/{itemId} {
-          allow read, write: if isOwner(uid);
+          allow read: if isOwner(uid);
+          allow write: if false;
         }
       }
     }
 
     // --- PROFILE MIRROR ---
     match /profiles/{uid} {
-      allow read: if authed();
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
       allow write: if isOwner(uid);
+    }
+
+    match /publicProfiles/{uid} {
+      allow get: if authed();
+      allow list: if isAdmin();
+      allow write: if false;
     }
 
     // --- CHATS + THREADS ---
     match /chats/{chatId} {
-      allow create: if authed() && inParticipants(request.resource.data);
+      allow create: if authed() && inParticipants(request.resource.data) &&
+        validChat(request.resource.data) &&
+        request.resource.data.get('moderatorUid', request.auth.uid) == request.auth.uid &&
+        request.resource.data.get('ownerUid', request.auth.uid) == request.auth.uid;
       // Keep this predicate direct (no helper indirection) so query analysis
       // can validate `where('participants', arrayContains: uid)` listeners.
       // Important for transaction preflight: allow reads when doc is missing,
       // otherwise tx.get(chats/{id}) can fail before create on brand-new pairs.
       allow read: if authed() && (resource == null || request.auth.uid in resource.data.participants);
-      allow update, delete: if authed() && request.auth.uid in resource.data.participants;
+      allow update: if authed() && request.auth.uid in resource.data.participants &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['ownerUid', 'moderatorUid', 'isGroup']) &&
+        (request.resource.data.participants == resource.data.participants ||
+          (resource.data.get('isGroup', false) == true &&
+            resource.data.get('moderatorUid', '') == request.auth.uid && validChat(request.resource.data) &&
+            request.auth.uid in request.resource.data.participants));
+      allow delete: if isAdmin();
 
       match /messages/{messageId} {
-        allow read, write: if authed() && inParticipants(get(/databases/$(database)/documents/chats/$(chatId)).data);
+        allow read: if authed() && inParticipants(get(/databases/$(database)/documents/chats/$(chatId)).data);
+        allow create: if authed() &&
+          inParticipants(get(/databases/$(database)/documents/chats/$(chatId)).data) &&
+          validMessage(request.resource.data, get(/databases/$(database)/documents/chats/$(chatId)).data);
+        allow update: if authed() &&
+          inParticipants(get(/databases/$(database)/documents/chats/$(chatId)).data) &&
+          resource.data.get('to', '') == request.auth.uid &&
+          request.resource.data.read == true &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt']);
+        allow delete: if isAdmin();
       }
 
       match /typing/{uid} {
@@ -174,17 +368,29 @@ service cloud.firestore {
     }
 
     match /threads/{threadId} {
-      allow read, write: if authed();
+      allow read: if authed() && inParticipants(resource.data);
+      allow create: if authed() && inParticipants(request.resource.data) && validChat(request.resource.data);
+      allow update: if authed() && inParticipants(resource.data) && immutablePair();
       match /messages/{messageId} {
-        allow read, write: if authed();
+        allow read: if authed() && inParticipants(get(/databases/$(database)/documents/threads/$(threadId)).data);
+        allow create: if authed() && inParticipants(get(/databases/$(database)/documents/threads/$(threadId)).data) &&
+          validMessage(request.resource.data, get(/databases/$(database)/documents/threads/$(threadId)).data);
       }
     }
 
     // --- MATCHES + MEETUPS ---
     match /matches/{matchId} {
-      allow create: if authed() && inParticipants(request.resource.data);
-      allow read: if authed() && inParticipants(resource.data);
-      allow update, delete: if authed() && inParticipants(resource.data);
+      allow create: if authed() && inParticipants(request.resource.data) &&
+        validChat(request.resource.data) && request.resource.data.participants.size() == 2;
+      // Keep read predicate query-simple for arrayContains listeners.
+      allow read: if authed() && request.auth.uid in resource.data.participants;
+      allow update: if authed() && immutablePair() && (
+        (resource.data.participants is list && request.auth.uid in resource.data.participants) ||
+        (resource.data.aUid is string && request.auth.uid == resource.data.aUid) ||
+        (resource.data.bUid is string && request.auth.uid == resource.data.bUid) ||
+        (resource.data.requesterUid is string && request.auth.uid == resource.data.requesterUid) ||
+        (resource.data.recipientUid is string && request.auth.uid == resource.data.recipientUid)
+      );
     }
 
     // Collection-group presence listeners need an explicit recursive match.
@@ -195,8 +401,17 @@ service cloud.firestore {
     }
 
     match /meetups/{meetupId} {
-      allow create: if authed() && meetupParticipant(request.resource.data);
-      allow read, update, delete: if authed() && meetupParticipant(resource.data);
+      allow create: if authed() && meetupParticipant(request.resource.data) && pairNotBlocked(request.resource.data) &&
+        request.resource.data.get('status', '') != 'completed' &&
+        request.resource.data.get('aArrived', false) == false && request.resource.data.get('bArrived', false) == false;
+      // Transaction preflight must be able to read a missing deterministic
+      // pair document before creating it. Existing meetups stay participant-only.
+      allow read: if authed() &&
+        (resource == null || meetupParticipant(resource.data));
+      allow update: if authed() && meetupParticipant(resource.data) &&
+        immutablePair() && validMeetupStatusEventUpdate() && validArrivalUpdate() &&
+        (request.resource.data.get('status', '') != 'requested' || pairNotBlocked(request.resource.data));
+      allow delete: if authed() && meetupParticipant(resource.data);
 
       match /beacon/{docId} {
         allow read, write: if authed() && meetupParticipant(get(/databases/$(database)/documents/meetups/$(meetupId)).data);
@@ -204,22 +419,50 @@ service cloud.firestore {
     }
 
     match /meetupRequests/{requestId} {
-      allow create: if authed() && meetupParticipant(request.resource.data);
-      allow read, update, delete: if authed() && meetupParticipant(resource.data);
+      allow create: if authed() && meetupParticipant(request.resource.data) && pairNotBlocked(request.resource.data);
+      allow read, delete: if authed() && meetupParticipant(resource.data);
+      allow update: if authed() && meetupParticipant(resource.data) && immutablePair();
+    }
+
+    // Owner-visible aggregate request/result. The backend computes results and
+    // never returns second-degree user identities.
+    match /partyNetworkRequests/{uid} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) &&
+        request.resource.data.ownerUid == request.auth.uid &&
+        request.resource.data.status == 'requested' &&
+        request.resource.data.requestedAt == request.time &&
+        request.resource.data.keys().hasOnly([
+          'ownerUid', 'requestNonce', 'requestedAt', 'status'
+        ]);
+      allow update: if isOwner(uid) &&
+        request.resource.data.ownerUid == request.auth.uid &&
+        request.resource.data.status == 'requested' &&
+        request.resource.data.requestedAt == request.time &&
+        request.time > resource.data.requestedAt + duration.value(1, 'm') &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'ownerUid', 'requestNonce', 'requestedAt', 'status'
+        ]);
+      allow delete: if isOwner(uid);
     }
 
     // --- SUPPORT / REFERRALS / INCIDENTS / REPORTING ---
     match /support_tickets/{ticketId} {
-      allow create: if authed() && isDocOwner(request.resource.data);
+      allow create: if authed() && safeSupportCreate(request.resource.data);
       allow read: if authed() && supportCanRead(resource.data);
-      allow update: if authed() && (supportCanRead(resource.data) || supportCanRead(request.resource.data));
+      allow update: if isAdmin() || ownerReportUpdate();
       allow delete: if isAdmin();
     }
 
     match /referralCodes/{code} {
       allow read: if authed();
-      allow create: if authed() && isDocOwner(request.resource.data);
-      allow update, delete: if authed() && (isDocOwner(resource.data) || isAdmin());
+      allow create: if authed() && request.resource.data.get('referrerUid', ownerUid(request.resource.data)) == request.auth.uid &&
+        request.resource.data.get('ownerUid', request.auth.uid) == request.auth.uid &&
+        request.resource.data.get('uid', request.auth.uid) == request.auth.uid &&
+        request.resource.data.get('userId', request.auth.uid) == request.auth.uid;
+      allow update: if isAdmin() || (authed() && resource.data.get('referrerUid', ownerUid(resource.data)) == request.auth.uid &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['referrerUid', 'rootReferrerUid', 'ownerUid', 'uid', 'userId', 'blocked', 'flagged']));
+      allow delete: if isAdmin() || (authed() && resource.data.get('referrerUid', ownerUid(resource.data)) == request.auth.uid);
     }
 
     match /ratings/{ratingId} {
@@ -228,11 +471,8 @@ service cloud.firestore {
       allow update, delete: if authed() && (isDocOwner(resource.data) || isAdmin());
 
       match /entries/{entryId} {
-        allow read, write: if authed() && (
-          isDocOwner(get(/databases/$(database)/documents/ratings/$(ratingId)).data) ||
-          meetupParticipant(get(/databases/$(database)/documents/ratings/$(ratingId)).data) ||
-          isAdmin()
-        );
+        allow read: if ratingParticipant(ratingId) || isAdmin();
+        allow create, update: if authed() && validRating(ratingId, entryId);
       }
     }
 
@@ -242,24 +482,53 @@ service cloud.firestore {
       allow update, delete: if authed() && (isDocOwner(resource.data) || isAdmin());
 
       match /entries/{entryId} {
-        allow read, write: if authed() && (
-          isDocOwner(get(/databases/$(database)/documents/ratings_meetups/$(meetupId)).data) ||
-          meetupParticipant(get(/databases/$(database)/documents/ratings_meetups/$(meetupId)).data) ||
-          isAdmin()
-        );
+        allow read: if ratingParticipant(meetupId) || isAdmin();
+        allow create, update: if authed() && validRating(meetupId, entryId);
       }
     }
 
     match /incidents/{incidentId} {
-      allow create: if authed() && isDocOwner(request.resource.data);
+      allow create: if authed() && isDocOwner(request.resource.data) && request.resource.data.get('status', 'open') == 'open';
       allow read: if authed() && (isDocOwner(resource.data) || isAdmin());
-      allow update, delete: if authed() && (isDocOwner(resource.data) || isAdmin());
+      allow update: if isAdmin() || ownerReportUpdate();
+      allow delete: if isAdmin();
     }
 
     match /bugReports/{reportId} {
-      allow create: if authed() && isDocOwner(request.resource.data);
+      allow create: if authed() && isDocOwner(request.resource.data) && request.resource.data.get('status', 'open') == 'open';
       allow read: if authed() && (isDocOwner(resource.data) || isAdmin());
-      allow update, delete: if authed() && (isDocOwner(resource.data) || isAdmin());
+      allow update: if isAdmin() || ownerReportUpdate();
+      allow delete: if isAdmin();
+    }
+
+    match /supportTickets/{ticketId} {
+      allow create: if authed() && safeSupportCreate(request.resource.data);
+      allow read: if authed() && supportCanRead(resource.data);
+      allow update: if isAdmin() || ownerReportUpdate();
+      allow delete: if isAdmin();
+    }
+
+    match /keywordReports/{reportId} {
+      allow create: if authed() &&
+        request.resource.data.reporterUid == request.auth.uid &&
+        request.resource.data.targetUid is string &&
+        request.resource.data.normalizedKeyword is string &&
+        request.resource.data.normalizedKeyword.size() > 0 &&
+        request.resource.data.normalizedKeyword.size() <= 50 &&
+        isMutualPartyMember(request.resource.data.targetUid);
+      allow read: if authed() &&
+        (resource.data.reporterUid == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    match /keywordModeration/{keywordId} {
+      allow read: if authed();
+      allow write: if false;
+    }
+
+    match /keywordEnforcement/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if false;
     }
 
     match /feedback/{feedbackId} {
@@ -270,7 +539,9 @@ service cloud.firestore {
 
     // --- APP METRICS / UTIL ---
     match /metricsEvents/{eventId} {
-      allow read, write: if authed();
+      allow create: if authed() && isDocOwner(request.resource.data);
+      allow read: if isAdmin() || isDocOwner(resource.data);
+      allow update, delete: if false;
     }
 
     match /dashboard/{docId} {
@@ -294,7 +565,7 @@ service cloud.firestore {
     }
 
     match /devPush/{docId} {
-      allow read, write: if authed();
+      allow read, write: if isAdmin();
     }
 
     match /cells/{cellId} {
@@ -305,6 +576,12 @@ service cloud.firestore {
     match /_bridges/{docId} {
       allow read: if authed();
       allow write: if false;
+    }
+
+    match /paymentReconciliation/{eventId} {
+      allow read: if isAdmin();
+      allow update: if isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['operatorStatus', 'operatorNote', 'operatorUpdatedAt']);
+      allow create, delete: if false;
     }
 
     // Deny unknown paths by default.

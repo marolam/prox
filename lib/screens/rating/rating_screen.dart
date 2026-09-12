@@ -7,16 +7,14 @@ import "package:prox/services/referral/referral_verification_service.dart";
 import "package:prox/services/prox_points/prox_points_events_service.dart";
 import "package:prox/services/help/context_help_service.dart";
 import "package:prox/services/trust/trust_service.dart";
+import "package:prox/services/simple_mode/simple_mode_policy.dart";
+import "package:prox/services/user_settings_service.dart";
 
 class RatingScreen extends StatefulWidget {
   final String chatId;
   final String otherUid;
 
-  const RatingScreen({
-    super.key,
-    required this.chatId,
-    required this.otherUid,
-  });
+  const RatingScreen({super.key, required this.chatId, required this.otherUid});
 
   static RatingScreen fromArgs(Object? args) {
     final m = (args is Map) ? args : <String, dynamic>{};
@@ -33,11 +31,38 @@ class _RatingScreenState extends State<RatingScreen> {
   bool _busy = false;
   bool _addToParty = true;
 
+  Future<bool> _offerPartyUnlock() async {
+    final switchAndAdd = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.groups_outlined),
+        title: const Text("Keep this connection in Party"),
+        content: const Text(
+          "You completed the core meetup flow. To add this person to your Party and communicate after the meetup, switch to Normal Mode. The Party icon will be highlighted for you.",
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text("Not now"),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).pop(true),
+            icon: const Icon(Icons.lock_open_outlined),
+            label: const Text("Switch and add"),
+          ),
+        ],
+      ),
+    );
+    return switchAndAdd == true;
+  }
+
   Future<void> _rate(bool up) async {
     if (_busy) return;
 
     final me = FirebaseAuth.instance.currentUser;
     if (me == null) return;
+    final wasSimpleMode = SimpleModePolicy.isActive;
 
     setState(() => _busy = true);
 
@@ -52,15 +77,21 @@ class _RatingScreenState extends State<RatingScreen> {
 
       // Suggestion #1: quiet post-meet receipt
       // For now: thumbs-up => "would meet again = yes", thumbs-down => "not now".
-      // ignore: discarded_futures
-      TrustService.instance.recordWouldMeetAgain(yes: up);
+      await TrustService.instance.recordWouldMeetAgain(
+        yes: up,
+        meetupId: widget.chatId,
+        otherUid: widget.otherUid,
+      );
 
-      await MetricsEventService.instance.log("rating_submitted", meta: {
-        "chatId": widget.chatId,
-        "otherUid": widget.otherUid,
-        "thumb": up ? "up" : "down",
-        "addToParty": _addToParty,
-      });
+      await MetricsEventService.instance.log(
+        "rating_submitted",
+        meta: {
+          "chatId": widget.chatId,
+          "otherUid": widget.otherUid,
+          "thumb": up ? "up" : "down",
+          "addToParty": _addToParty,
+        },
+      );
 
       // Local points feed (visibility + future awarding)
       await ProxPointsEventsService.instance.log(
@@ -76,12 +107,19 @@ class _RatingScreenState extends State<RatingScreen> {
         otherUid: widget.otherUid,
       );
 
-      await MetricsEventService.instance.log("referral_verify_attempted", meta: {
-        "chatId": widget.chatId,
-        "otherUid": widget.otherUid,
-      });
+      await MetricsEventService.instance.log(
+        "referral_verify_attempted",
+        meta: {"chatId": widget.chatId, "otherUid": widget.otherUid},
+      );
 
-      if (up && _addToParty) {
+      var shouldAddToParty = up && _addToParty && !wasSimpleMode;
+      if (up && wasSimpleMode && mounted) {
+        shouldAddToParty = await _offerPartyUnlock();
+        if (shouldAddToParty) {
+          UserSettingsService.instance.unlockPartyFromSimpleMode();
+        }
+      }
+      if (shouldAddToParty) {
         await MeetupService.instance.addToParty(
           meUid: me.uid,
           friendUid: widget.otherUid,
@@ -93,8 +131,8 @@ class _RatingScreenState extends State<RatingScreen> {
     }
 
     if (!mounted) return;
-    ContextHelpService.instance.setContext("home:matches");
-    Navigator.of(context).pushReplacementNamed("/matches");
+    ContextHelpService.instance.setContext("home:nearby");
+    Navigator.of(context).pushNamedAndRemoveUntil("/home", (route) => false);
   }
 
   @override
@@ -121,17 +159,31 @@ class _RatingScreenState extends State<RatingScreen> {
                   Text(
                     "How was it?",
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                   const SizedBox(height: 12),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text("Add to your Party?"),
-                    subtitle: const Text("If you thumbs-up, this will add them to Party immediately."),
-                    value: _addToParty,
-                    onChanged: _busy ? null : (v) => setState(() => _addToParty = v),
-                  ),
+                  if (SimpleModePolicy.isActive)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.lock_outline),
+                      title: const Text("Party unlocks in Normal Mode"),
+                      subtitle: const Text(
+                        "After a successful rating, you can switch modes and add this person to your Party.",
+                      ),
+                    )
+                  else
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text("Add to your Party?"),
+                      subtitle: const Text(
+                        "If you thumbs-up, this will add them to Party immediately.",
+                      ),
+                      value: _addToParty,
+                      onChanged: _busy
+                          ? null
+                          : (v) => setState(() => _addToParty = v),
+                    ),
                   const SizedBox(height: 8),
                   Row(
                     mainAxisSize: MainAxisSize.min,

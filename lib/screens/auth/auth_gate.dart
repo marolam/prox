@@ -5,7 +5,6 @@ import "package:firebase_auth/firebase_auth.dart";
 import "package:flutter/foundation.dart";
 import "package:flutter/material.dart";
 
-import "package:prox/models/user_settings.dart";
 import "package:prox/screens/auth/sign_in_screen.dart";
 import "package:prox/screens/location/location_permission_blocked_screen.dart";
 import "package:prox/screens/location/location_permission_explainer_screen.dart";
@@ -98,12 +97,12 @@ class _AuthGateState extends State<AuthGate> {
       return const SignInScreen();
     }
 
-    return _ProfileGate(uid: user.uid);
+    return _ProfileGate(key: ValueKey(user.uid), uid: user.uid);
   }
 }
 
 class _ProfileGate extends StatefulWidget {
-  const _ProfileGate({required this.uid});
+  const _ProfileGate({super.key, required this.uid});
 
   final String uid;
 
@@ -143,11 +142,13 @@ class _ProfileGateState extends State<_ProfileGate> {
 
       final bool seen = (data["presenceRehearsalSeen"] as bool?) ?? false;
       return _ProfileGateDecision(
-        route: seen ? _ProfileGateRoute.home : _ProfileGateRoute.presenceRehearsal,
+        route:
+            seen ? _ProfileGateRoute.home : _ProfileGateRoute.presenceRehearsal,
       );
     } catch (e) {
       if (kDebugMode) {
-        debugPrint("[AuthGate] profile gate fallback for uid=${widget.uid}: $e");
+        debugPrint(
+            "[AuthGate] profile gate fallback for uid=${widget.uid}: $e");
       }
       return const _ProfileGateDecision.home();
     }
@@ -215,7 +216,8 @@ class _ProfileGateDecision {
 
   const _ProfileGateDecision({required this.route});
 
-  const _ProfileGateDecision.onboarding() : route = _ProfileGateRoute.onboarding;
+  const _ProfileGateDecision.onboarding()
+      : route = _ProfileGateRoute.onboarding;
   const _ProfileGateDecision.home() : route = _ProfileGateRoute.home;
 }
 
@@ -233,7 +235,8 @@ class _PostAuthBootstrapShell extends StatefulWidget {
   final String uid;
 
   @override
-  State<_PostAuthBootstrapShell> createState() => _PostAuthBootstrapShellState();
+  State<_PostAuthBootstrapShell> createState() =>
+      _PostAuthBootstrapShellState();
 }
 
 class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
@@ -269,6 +272,10 @@ class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
   void dispose() {
     _bootEscapeTimer?.cancel();
     _grantedPulseTimer?.cancel();
+    if (_globalBootUid == widget.uid) {
+      _globalBootUid = "";
+      _globalBootFuture = null;
+    }
     super.dispose();
   }
 
@@ -299,11 +306,10 @@ class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
         return;
       }
 
-      final bool seenExplainer =
-          await LocalFlags.instance
+      final bool seenExplainer = await LocalFlags.instance
               .getBool(LocalFlags.kSeenLocationExplainer)
               .timeout(const Duration(seconds: 5), onTimeout: () => false) ??
-              false;
+          false;
       if (!mounted) return;
 
       setState(() => _loc = seenExplainer
@@ -355,7 +361,8 @@ class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
       _globalBootFuture = _runPostAuthBootstrap();
       // Never block home shell rendering on warm services.
       _globalBootFuture!.catchError((Object e, StackTrace st) {
-        if (kDebugMode) debugPrint("[AuthGate] background post-auth bootstrap failed: $e");
+        if (kDebugMode)
+          debugPrint("[AuthGate] background post-auth bootstrap failed: $e");
       });
     }
 
@@ -365,6 +372,7 @@ class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
   }
 
   Future<void> _runPostAuthBootstrap() async {
+    if (!mounted || FirebaseAuth.instance.currentUser?.uid != widget.uid) return;
     // Force-refresh token so early Firestore requests are authed immediately (Android race fix).
     try {
       await FirebaseAuth.instance.currentUser
@@ -384,12 +392,14 @@ class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
     }
 
     Future<void>.delayed(const Duration(seconds: 6), () async {
+      if (!mounted || FirebaseAuth.instance.currentUser?.uid != widget.uid) return;
       try {
         await PartyService.instance
             .syncReferralInPersonAutoJoins()
             .timeout(const Duration(seconds: 8));
       } catch (e) {
-        if (kDebugMode) debugPrint("[AuthGate] referral party auto-join sync failed: $e");
+        if (kDebugMode)
+          debugPrint("[AuthGate] referral party auto-join sync failed: $e");
       }
     });
 
@@ -398,41 +408,41 @@ class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
           .ensureLoaded()
           .timeout(const Duration(seconds: 5));
       final settingsSvc = UserSettingsService.instance;
-        final entitlements = await MonetizationService.instance
+      final entitlements = await MonetizationService.instance
           .getEntitlementsMap(uid: widget.uid)
-          .timeout(const Duration(seconds: 6), onTimeout: () => const <String, dynamic>{});
-        final highRadiusUnlocked = entitlements["highRadiusUnlocked"] == true;
-        final singleKeywordUnlocked = entitlements["singleKeywordMatchModeUnlocked"] == true;
-        final reciprocalUnlocked = entitlements["reciprocalKeywordMatchModeUnlocked"] == true;
-        final keywordChainUnlocked = entitlements["keywordChainMatchModeUnlocked"] == true;
+          .timeout(const Duration(seconds: 6),
+              onTimeout: () => const <String, dynamic>{});
+      if (!mounted || FirebaseAuth.instance.currentUser?.uid != widget.uid) return;
+      final highRadiusUnlocked = entitlements["highRadiusUnlocked"] == true;
+      final singleKeywordUnlocked =
+          entitlements["singleKeywordMatchModeUnlocked"] == true;
+      final reciprocalUnlocked =
+          entitlements["reciprocalKeywordMatchModeUnlocked"] == true;
+      final keywordChainUnlocked =
+          entitlements["keywordChainMatchModeUnlocked"] == true;
       settingsSvc.setHighRadiusUnlocked(highRadiusUnlocked);
-        settingsSvc.setSingleKeywordMatchUnlocked(singleKeywordUnlocked);
-        settingsSvc.setReciprocalMatchUnlocked(reciprocalUnlocked);
-        settingsSvc.setKeywordChainUnlocked(keywordChainUnlocked);
+      settingsSvc.setSingleKeywordMatchUnlocked(singleKeywordUnlocked);
+      settingsSvc.setReciprocalMatchUnlocked(reciprocalUnlocked);
+      settingsSvc.setKeywordChainUnlocked(keywordChainUnlocked);
 
-      final current = settingsSvc.current.matchDiscovery;
-      final maxAllowed = MatchDiscoverySettings.allowedMaxRadiusMiles(
-        highRadiusUnlocked: current.highRadiusUnlocked,
-        businessOnly: current.businessOnly,
-        modeKind: MatchingModeKind.normal,
-        normalMode: NormalMatchMode.passive,
-      );
-      final defaults = current.copyWith(
-        modeKind: MatchingModeKind.normal,
-        normalMode: NormalMatchMode.passive,
-        radiusMiles: maxAllowed,
-      );
-      settingsSvc.updateMatchDiscovery(defaults);
+      // Respect saved discovery preferences. Entitlement setters clamp access.
+    } catch (e) {
+      if (kDebugMode) debugPrint("[AuthGate] entitlement preload failed: $e");
+    }
 
-        await PushNotifications.instance
-          .initForUser(widget.uid)
-          .timeout(const Duration(seconds: 8));
+    if (!mounted || FirebaseAuth.instance.currentUser?.uid != widget.uid) return;
+    try {
+      await PushNotifications.instance.initForUser(widget.uid).timeout(const Duration(seconds: 12));
+    } catch (e) {
+      if (kDebugMode) debugPrint("[AuthGate] notification preload failed: $e");
+    }
 
+    if (!mounted || FirebaseAuth.instance.currentUser?.uid != widget.uid) return;
+    try {
       // Presence: start live writing after location is granted.
-      final bool ok =
-          await PresenceWriter.instance
-              .startLive(reason: "post_auth")
-              .timeout(const Duration(seconds: 8), onTimeout: () => false);
+      final bool ok = await PresenceWriter.instance
+          .startLive(reason: "post_auth")
+          .timeout(const Duration(seconds: 8), onTimeout: () => false);
 
       if (mounted) {
         // ignore: discarded_futures
@@ -459,7 +469,8 @@ class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
   Widget build(BuildContext context) {
     switch (_loc) {
       case _LocGateState.loading:
-        return const _GateLoadingScreen(message: "Checking location permissions...");
+        return const _GateLoadingScreen(
+            message: "Checking location permissions...");
 
       case _LocGateState.needsExplainer:
         return LocationPermissionExplainerScreen(
@@ -497,8 +508,81 @@ class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
         }
         return _GrantedLocationShell(
           showPulse: _showGrantedPulse,
-          child: const HomeRootShell(),
+          child: const _ExperienceModeGate(
+            child: HomeRootShell(),
+          ),
         );
+    }
+  }
+}
+
+enum _ExperienceGateView {
+  loading,
+  home,
+}
+
+class _ExperienceModeGate extends StatefulWidget {
+  const _ExperienceModeGate({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_ExperienceModeGate> createState() => _ExperienceModeGateState();
+}
+
+class _ExperienceModeGateState extends State<_ExperienceModeGate> {
+  _ExperienceGateView _view = _ExperienceGateView.loading;
+
+  @override
+  void initState() {
+    super.initState();
+    // ignore: discarded_futures
+    _resolve();
+  }
+
+  Future<void> _resolve() async {
+    await UserSettingsService.instance.ensureLoaded();
+    final settings = UserSettingsService.instance.current;
+
+    if (settings.alwaysUseNormalMode) {
+      UserSettingsService.instance.setSimpleModeEnabled(false);
+      UserSettingsService.instance.setSimpleModeCompleted(true);
+      UserSettingsService.instance.setSimpleModeStageIndex(5);
+      if (!mounted) return;
+      setState(() => _view = _ExperienceGateView.home);
+      return;
+    }
+
+    if (settings.simpleModeEnabled) {
+      if (!settings.simpleModeCompleted) {
+        UserSettingsService.instance.setSimpleModeCompleted(true);
+        UserSettingsService.instance.setSimpleModeStageIndex(0);
+      }
+      if (!mounted) return;
+      setState(() => _view = _ExperienceGateView.home);
+      return;
+    }
+
+    // A completed non-Simple state is an explicit Normal Mode preference.
+    // An incomplete state is fresh/legacy data and defaults to Simple Mode.
+    if (!settings.simpleModeCompleted) {
+      UserSettingsService.instance.setAlwaysUseNormalMode(false);
+      UserSettingsService.instance.setSimpleModeEnabled(true);
+      UserSettingsService.instance.setSimpleModeCompleted(true);
+      UserSettingsService.instance.setSimpleModeStageIndex(0);
+    }
+    if (!mounted) return;
+    setState(() => _view = _ExperienceGateView.home);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    switch (_view) {
+      case _ExperienceGateView.loading:
+        return const _GateLoadingScreen(
+            message: "Preparing your mode setup...");
+      case _ExperienceGateView.home:
+        return widget.child;
     }
   }
 }
@@ -599,7 +683,8 @@ List<String> _readStringList(dynamic raw) {
   return const <String>[];
 }
 
-List<String> _keywordsFromAllShapes(Map<String, dynamic> data, List<String> keys) {
+List<String> _keywordsFromAllShapes(
+    Map<String, dynamic> data, List<String> keys) {
   for (final k in keys) {
     final v = data[k];
     final list = _readStringList(v);
@@ -608,7 +693,8 @@ List<String> _keywordsFromAllShapes(Map<String, dynamic> data, List<String> keys
   return const <String>[];
 }
 
-List<String> _keywordsFromKeywordsMap(Map<String, dynamic> data, List<String> keys) {
+List<String> _keywordsFromKeywordsMap(
+    Map<String, dynamic> data, List<String> keys) {
   final dynamic raw = data["keywords"];
   if (raw is! Map) return const <String>[];
   final Map<String, dynamic> m = Map<String, dynamic>.from(raw);
@@ -630,14 +716,14 @@ bool _isProfileComplete(Map<String, dynamic> data) {
 
   // Searching For
   final List<String> searching = _keywordsFromAllShapes(
-        data,
-        const <String>[
-          "searchingForKeywords",
-          "searchingFor",
-          "SearchingFor",
-          "Searching For",
-        ],
-      ).isNotEmpty
+    data,
+    const <String>[
+      "searchingForKeywords",
+      "searchingFor",
+      "SearchingFor",
+      "Searching For",
+    ],
+  ).isNotEmpty
       ? _keywordsFromAllShapes(
           data,
           const <String>[
@@ -659,14 +745,14 @@ bool _isProfileComplete(Map<String, dynamic> data) {
 
   // Can Provide
   final List<String> providing = _keywordsFromAllShapes(
-        data,
-        const <String>[
-          "canProvideKeywords",
-          "canProvide",
-          "CanProvide",
-          "Can Provide",
-        ],
-      ).isNotEmpty
+    data,
+    const <String>[
+      "canProvideKeywords",
+      "canProvide",
+      "CanProvide",
+      "Can Provide",
+    ],
+  ).isNotEmpty
       ? _keywordsFromAllShapes(
           data,
           const <String>[

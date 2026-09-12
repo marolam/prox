@@ -54,14 +54,16 @@ class MatchSignalService {
     }
 
     if (!settings.matchSoundEnabled) return;
-    if (_lastAnySignalAt != null && now.difference(_lastAnySignalAt!) < _minAnyGap) {
+    if (_lastAnySignalAt != null &&
+        now.difference(_lastAnySignalAt!) < _minAnyGap) {
       return;
     }
     _lastAnySignalAt = now;
 
     final bool rare = scorePercent >= 82;
     if (rare && settings.rareMatchSoundEnabled) {
-      if (_lastRareSignalAt != null && now.difference(_lastRareSignalAt!) < _minRareGap) {
+      if (_lastRareSignalAt != null &&
+          now.difference(_lastRareSignalAt!) < _minRareGap) {
         _playSimple();
         return;
       }
@@ -91,7 +93,10 @@ class MatchSignalService {
     try {
       final played = await _soundChannel.invokeMethod<bool>(
         "play",
-        <String, bool>{"rare": rare},
+        <String, dynamic>{
+          "rare": rare,
+          "volume": UserSettingsService.instance.current.matchSoundVolume,
+        },
       );
       if (played == true) return;
     } catch (_) {
@@ -103,6 +108,12 @@ class MatchSignalService {
     } else {
       await SystemSound.play(SystemSoundType.alert);
     }
+  }
+
+  Future<void> preview({required bool rare}) async {
+    final settings = UserSettingsService.instance.current;
+    if (!settings.matchSoundEnabled || settings.matchSoundVolume <= 0) return;
+    await _playMatchSound(rare: rare);
   }
 
   Future<void> _playRareFallback() async {

@@ -1,6 +1,7 @@
 import "package:cloud_firestore/cloud_firestore.dart";
 import "package:flutter/material.dart";
 import "package:flutter_test/flutter_test.dart";
+import "package:shared_preferences/shared_preferences.dart";
 
 import "package:prox/models/user_settings.dart";
 import "package:prox/screens/services/geoquery_service.dart";
@@ -11,6 +12,7 @@ import "package:prox/services/user_settings_service.dart";
 void main() {
   group("Treasure runtime behavior", () {
     setUp(() {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
       UserSettingsService.instance.updateMatchDiscovery(
         const MatchDiscoverySettings.defaults(),
       );
@@ -26,7 +28,7 @@ void main() {
       expect(radius, 3.25);
     });
 
-    test("travel mode filters out stale presence", () async {
+    test("travel mode keeps presence active within recency window", () async {
       UserSettingsService.instance.setMatchingMode(MatchingModeKind.travel);
 
       final now = DateTime.now();
@@ -35,12 +37,14 @@ void main() {
           uid: "recent",
           loc: const GeoPoint(37.0, -122.0),
           data: <String, dynamic>{"ts": Timestamp.fromDate(now.subtract(const Duration(minutes: 2)))},
+          presenceTs: now.subtract(const Duration(minutes: 2)),
           distanceMiles: 1.0,
         ),
         NearbyDoc(
           uid: "stale",
           loc: const GeoPoint(37.1, -122.1),
           data: <String, dynamic>{"ts": Timestamp.fromDate(now.subtract(const Duration(minutes: 6)))},
+          presenceTs: now.subtract(const Duration(minutes: 6)),
           distanceMiles: 1.5,
         ),
         NearbyDoc(
@@ -52,7 +56,7 @@ void main() {
       ];
 
       final filtered = await MatchingRuntimeService.instance.filterByMode(docs);
-      expect(filtered.map((d) => d.uid).toList(), <String>["recent"]);
+      expect(filtered.map((d) => d.uid).toList(), <String>["recent", "stale"]);
     });
   });
 

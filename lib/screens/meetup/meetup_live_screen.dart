@@ -1,12 +1,18 @@
+import "package:prox/services/location_privacy_service.dart";
 import "dart:async";
 
 import "package:cloud_firestore/cloud_firestore.dart";
 import "package:firebase_auth/firebase_auth.dart";
 import "package:flutter/material.dart";
+import "package:geolocator/geolocator.dart";
+import "package:latlong2/latlong.dart";
 import "package:url_launcher/url_launcher.dart";
 
 import "package:prox/services/meetup_service.dart";
+import "package:prox/services/meetup_coordination_service.dart";
 import "package:prox/widgets/color_match_button.dart";
+import "package:prox/widgets/meetup_map.dart";
+import "package:prox/widgets/meetup_session_bar.dart";
 
 class MeetupLiveScreen extends StatefulWidget {
   final String chatId;
@@ -35,8 +41,117 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
   String _busyAction = "";
   bool _pushedRate = false;
   bool _ensuredRating = false;
+  Timer? _locationTimer;
+  bool _positionInFlight = false;
+  LatLng? _myLocation;
+  double? _targetLat;
+  double? _targetLng;
+  MeetupCoordinationInfo? _coordination;
 
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? "";
+
+  @override
+  void initState() {
+    super.initState();
+    MeetupService.instance.recordSessionScreen(
+      meetupId: widget.chatId,
+      screen: "live",
+    );
+    _startLocationUpdates();
+  }
+
+  @override
+  void dispose() {
+    _locationTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _startLocationUpdates() async {
+    await _updateMyPosition();
+    if (!mounted) return;
+    _locationTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => _updateMyPosition(),
+    );
+  }
+
+  Future<void> _updateMyPosition() async {
+    if (!mounted || _positionInFlight) return;
+    _positionInFlight = true;
+    final uid = _myUid;
+    try {
+      await LocationPrivacyService.instance.ensureLoaded();
+      if (!mounted || !LocationPrivacyService.instance.mayReadLocation) {
+        if (mounted && _myLocation != null) {
+          setState(() {
+            _myLocation = null;
+            _coordination = null;
+          });
+        }
+        return;
+      }
+      final permission = await Geolocator.checkPermission();
+      if (permission != LocationPermission.always &&
+          permission != LocationPermission.whileInUse)
+        return;
+      if (!await Geolocator.isLocationServiceEnabled()) return;
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 8),
+        ),
+      );
+      if (!mounted ||
+          uid != _myUid ||
+          !LocationPrivacyService.instance.mayReadLocation)
+        return;
+      final targetLat = _targetLat;
+      final targetLng = _targetLng;
+      setState(() {
+        _myLocation = LatLng(position.latitude, position.longitude);
+        _coordination = targetLat == null || targetLng == null
+            ? null
+            : MeetupCoordinationInfo.between(
+                fromLat: position.latitude,
+                fromLng: position.longitude,
+                toLat: targetLat,
+                toLng: targetLng,
+              );
+      });
+    } catch (_) {
+      // The meetup stays usable when a location fix is unavailable.
+    } finally {
+      _positionInFlight = false;
+    }
+  }
+
+  void _setTarget(double lat, double lng) {
+    if (_targetLat == lat && _targetLng == lng) return;
+    _targetLat = lat;
+    _targetLng = lng;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _updateMyPosition());
+  }
+
+  Future<bool> _confirmStatus(String title, String message) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(title),
+            content: Text("$message The other person will be notified."),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text("Not yet"),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text("Confirm"),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
 
   void _snack(String msg) {
     if (!mounted) return;
@@ -67,8 +182,9 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
   }
 
   Future<void> _openMaps(double lat, double lng) async {
-    final uri =
-        Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lng");
+    final uri = Uri.parse(
+      "https://www.google.com/maps/search/?api=1&query=$lat,$lng",
+    );
     try {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } catch (_) {
@@ -77,6 +193,11 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
   }
 
   Future<void> _confirmLocation() async {
+    if (!await _confirmStatus(
+      "Confirm this meetup location?",
+      "You are agreeing to meet at the displayed pin.",
+    ))
+      return;
     await _runBusyAction(
       action: "confirm_location",
       task: () async {
@@ -91,6 +212,11 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
   }
 
   Future<void> _onMyWay() async {
+    if (!await _confirmStatus(
+      "Mark yourself on the way?",
+      "Only confirm when you have started traveling to the meetup.",
+    ))
+      return;
     await _runBusyAction(
       action: "on_my_way",
       task: () async {
@@ -105,15 +231,23 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
   }
 
   Future<void> _tapToVerify() async {
+    if (!await _confirmStatus(
+      "Ready to verify?",
+      "Confirm when you are with the other participant and ready to verify each other.",
+    ))
+      return;
     await _runBusyAction(
       action: "tap_verify",
       task: () async {
         try {
-          final ok =
-              await MeetupService.instance.tapToVerify(meetupId: widget.chatId);
-          _snack(ok
-              ? "Tap-to-Verify: success"
-              : "Tap-to-Verify: waiting for other tap");
+          final ok = await MeetupService.instance.tapToVerify(
+            meetupId: widget.chatId,
+          );
+          _snack(
+            ok
+                ? "Tap-to-Verify: success"
+                : "Tap-to-Verify: waiting for other tap",
+          );
         } catch (_) {
           _snack("Tap-to-Verify failed.");
         }
@@ -122,12 +256,18 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
   }
 
   Future<void> _imHerePrivacyFirst() async {
+    if (!await _confirmStatus(
+      "Confirm that you arrived?",
+      "Only confirm when you are physically at the agreed meetup point.",
+    ))
+      return;
     await _runBusyAction(
       action: "im_here",
       task: () async {
         try {
-          final res = await MeetupService.instance
-              .confirmArrivalPrivacyFirst(meetupId: widget.chatId);
+          final res = await MeetupService.instance.confirmArrivalPrivacyFirst(
+            meetupId: widget.chatId,
+          );
           _snack(res.message);
           if (!res.isOk) {
             await _codeFallbackDialog();
@@ -157,11 +297,13 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text("Cancel")),
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text("Cancel"),
+            ),
             FilledButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text("Confirm")),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text("Confirm"),
+            ),
           ],
         );
       },
@@ -192,8 +334,9 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text("Close")),
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text("Close"),
+          ),
         ],
       ),
     );
@@ -245,6 +388,14 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
           ),
         ],
       ),
+      bottomNavigationBar: MeetupSessionBar(
+        meetupId: widget.chatId,
+        otherUid: widget.otherUid,
+        currentScreen: "live",
+        helpTitle: "Complete the live meetup",
+        helpMessage:
+            "Confirm the location first. Mark On my way when you leave, verify together in person, then mark I'm here. Each confirmed status is shared with the other participant.",
+      ),
       body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
         stream: MeetupService.instance.watchMeetup(widget.chatId),
         builder: (context, snap) {
@@ -280,11 +431,13 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
           final bool completed = status == "completed";
 
           final String plannerUid = (d["plannerUid"] ?? "").toString().trim();
-          final bool iAmPlanner =
-              plannerUid.isEmpty ? true : plannerUid == myUid;
+          final bool iAmPlanner = plannerUid.isEmpty
+              ? true
+              : plannerUid == myUid;
 
-          final String locStatus =
-              (d["locationStatus"] ?? "").toString().trim();
+          final String locStatus = (d["locationStatus"] ?? "")
+              .toString()
+              .trim();
           final double? lat = (d["lat"] is num)
               ? (d["lat"] as num).toDouble()
               : double.tryParse((d["lat"] ?? "").toString());
@@ -292,6 +445,7 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
               ? (d["lng"] as num).toDouble()
               : double.tryParse((d["lng"] ?? "").toString());
           final bool hasPin = lat != null && lng != null;
+          if (hasPin) _setTarget(lat, lng);
 
           final bool aArrived = (d["aArrived"] as bool?) ?? false;
           final bool bArrived = (d["bArrived"] as bool?) ?? false;
@@ -301,14 +455,18 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
           final bool isA = myUid.isNotEmpty && myUid == aUid;
           final bool isB = myUid.isNotEmpty && myUid == bUid;
 
-          final String onMyWayField =
-              isA ? "aOnMyWayAt" : (isB ? "bOnMyWayAt" : "");
-          final String otherOnMyWayField =
-              isA ? "bOnMyWayAt" : (isB ? "aOnMyWayAt" : "");
-          final String onMyWayAt =
-              (onMyWayField.isEmpty) ? "" : _fmtTs(d[onMyWayField]);
-          final String otherOnMyWayAt =
-              (otherOnMyWayField.isEmpty) ? "" : _fmtTs(d[otherOnMyWayField]);
+          final String onMyWayField = isA
+              ? "aOnMyWayAt"
+              : (isB ? "bOnMyWayAt" : "");
+          final String otherOnMyWayField = isA
+              ? "bOnMyWayAt"
+              : (isB ? "aOnMyWayAt" : "");
+          final String onMyWayAt = (onMyWayField.isEmpty)
+              ? ""
+              : _fmtTs(d[onMyWayField]);
+          final String otherOnMyWayAt = (otherOnMyWayField.isEmpty)
+              ? ""
+              : _fmtTs(d[otherOnMyWayField]);
 
           final bool needConfirm =
               (!iAmPlanner && locStatus != "confirmed" && hasPin);
@@ -345,6 +503,50 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
                     : null,
               ),
               const SizedBox(height: 12),
+              if (hasPin) ...[
+                SizedBox(
+                  height: 280,
+                  child: MeetupMap(
+                    center: LatLng(lat, lng),
+                    myLocation: _myLocation,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                if (_coordination != null)
+                  _infoCard(
+                    context,
+                    title: "Your distance to the meetup",
+                    lines: <String>[
+                      "Straight-line distance: ${_coordination!.distanceLabel}",
+                      "Direction from you: ${_coordination!.cardinalDirection} (${_coordination!.bearingDegrees.round()} degrees)",
+                      "Rough walking time: about ${_coordination!.roughWalkingMinutes} min",
+                      "Walking time is an estimate and does not account for roads, buildings, or entrances.",
+                    ],
+                    trailing: IconButton(
+                      tooltip: "Refresh my location",
+                      onPressed: _updateMyPosition,
+                      icon: const Icon(Icons.my_location),
+                    ),
+                  )
+                else
+                  _infoCard(
+                    context,
+                    title: "Distance unavailable",
+                    lines: const <String>[
+                      "Enable phone location to see your distance and direction to the meetup pin.",
+                    ],
+                  ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => _openMaps(lat, lng),
+                    icon: const Icon(Icons.directions_outlined),
+                    label: const Text("Open turn-by-turn directions"),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
               if (completed) ...[
                 FilledButton.icon(
                   onPressed: () {
@@ -352,7 +554,7 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
                       "/rate",
                       arguments: {
                         "chatId": widget.chatId,
-                        "otherUid": widget.otherUid
+                        "otherUid": widget.otherUid,
                       },
                     );
                   },
@@ -386,7 +588,7 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
                     context,
                     title: "Heads up",
                     lines: const [
-                      "Confirming the pin prevents surprises. Once confirmed, proceed with On my way / Tap-to-Verify / I'm here."
+                      "Confirming the pin prevents surprises. Once confirmed, proceed with On my way / Tap-to-Verify / I'm here.",
                     ],
                   ),
                 if (canRunLiveActions) ...[
@@ -397,7 +599,8 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
                     label: Padding(
                       padding: EdgeInsets.symmetric(vertical: 12),
                       child: Text(
-                          _isBusy("on_my_way") ? "Updating..." : "On my way"),
+                        _isBusy("on_my_way") ? "Updating..." : "On my way",
+                      ),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -406,9 +609,11 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
                     icon: const Icon(Icons.touch_app),
                     label: Padding(
                       padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text(_isBusy("tap_verify")
-                          ? "Verifying..."
-                          : "Tap-to-Verify"),
+                      child: Text(
+                        _isBusy("tap_verify")
+                            ? "Verifying..."
+                            : "Tap-to-Verify",
+                      ),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -425,7 +630,8 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
                     label: Padding(
                       padding: EdgeInsets.symmetric(vertical: 12),
                       child: Text(
-                          _isBusy("im_here") ? "Confirming..." : "I'm here"),
+                        _isBusy("im_here") ? "Confirming..." : "I'm here",
+                      ),
                     ),
                   ),
                 ] else if (hasPin && !confirmed) ...[
@@ -485,18 +691,22 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w800)),
+                  Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                   const SizedBox(height: 6),
                   for (final l in lines)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 2),
-                      child: Text(l,
-                          style: TextStyle(
-                              color: cs.onSurface.withValues(alpha: 0.80))),
+                      child: Text(
+                        l,
+                        style: TextStyle(
+                          color: cs.onSurface.withValues(alpha: 0.80),
+                        ),
+                      ),
                     ),
                 ],
               ),

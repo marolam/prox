@@ -18,7 +18,6 @@ class DashboardAnnouncementsService {
       final out = <DashboardAnnouncement>[];
       for (final d in snap.docs) {
         final item = DashboardAnnouncement.fromDoc(d);
-        if (item == null) continue;
         if (!item.active || item.isExpired) continue;
         out.add(item);
       }

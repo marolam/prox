@@ -2,6 +2,14 @@
  * Prox Cloud Functions entry
  */
 import * as admin from "firebase-admin";
+export { deleteMyAccount, onAuthDelete, onTrustFeedbackWrite } from './account_lifecycle';
+export { purchaseWithPoints } from './points_purchases';
+export { claimVerifiedReward, cancelMySubscription } from './verified_rewards';
+export { onMeetupCompletedAccounting, syncCompletedMeetup } from './meetup_accounting';
+export { onPartyWrite } from './lib/party';
+export { onPublicProfileProjection, onPublicMatchingProjection } from './public_profiles';
+export { setBusinessModeActive } from './business_mode';
+export { onPresenceCoordinates } from './presence_projection';
 
 if (admin.apps.length === 0) {
   admin.initializeApp();
@@ -23,3 +31,9 @@ export { onInPartyMatchMetrics } from "./lib/in_party_match_metrics";
 export { sweepMeetupAutoClose } from "./lib/meetup_auto_close";
 export { sweepKeywordHygiene } from "./lib/keyword_hygiene";
 export { onBugReportScoreFeedback, onSupportTicketScoreFeedback } from "./lib/tester_feedback_scoring";
+export {
+  createReferralSingleUseToken,
+  referralApkDownload,
+  finalizeReferralSingleUseToken,
+  linkReferralCode,
+} from "./referral_downloads";

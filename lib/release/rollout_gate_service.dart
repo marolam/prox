@@ -27,7 +27,7 @@ class RolloutGateService {
       return "Pro Mode has been force-disabled for this build.";
     }
     if (!ReleaseFlags.businessModeEnabled) {
-      return "Pro Mode is coming soon.";
+      return "Live Pro Mode is limited to approved preview accounts. You can try the Pro tools examples.";
     }
     return "Pro Mode is available.";
   }

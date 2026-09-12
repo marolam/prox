@@ -84,6 +84,7 @@ class MatchingModeService extends ChangeNotifier {
   void registerActiveNoResponsePenalty() {
     _settings.recordActiveModePenalty(
         lockDuration: const Duration(minutes: 10));
+    _syncModeToServer();
     notifyListeners();
   }
 

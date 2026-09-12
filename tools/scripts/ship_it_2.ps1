@@ -3,6 +3,7 @@ Param(
   [string]$Repo = "marolam/prox-us",
   [string]$PublicRepo = "marolam/prox",
   [string]$PublicApkUrl = "",
+  [string]$IosUpdateUrl = "https://www.prox-us.com/tester-portal.html",
   [string]$FirebaseProjectId = "prox-42bef",
   [string]$ReferralDownloadUrl = "https://us-central1-prox-42bef.cloudfunctions.net/referralApkDownload",
   [string]$ReferralCode = "",
@@ -25,6 +26,7 @@ Param(
   [switch]$EnableBusinessMode,
   [switch]$SkipVersionBump,
   [switch]$MarkImportantUpdate,
+  [switch]$IncludeLegacyAndroidPolicy,
   [string]$ImportantMinVersion = "",
   [ValidateRange(5, 240)]
   [int]$UpdatePollMinutes = 20
@@ -149,7 +151,12 @@ Write-Host "Repo root: $repoRoot"
 Write-Host "Repo slug: $Repo"
 Write-Host "Public repo: $PublicRepo"
 Write-Host "Channel:   $ReleaseChannel"
+Write-Host "iOS update URL: $IosUpdateUrl"
 Write-Host "Business Mode build enabled: $($EnableBusinessMode.IsPresent)"
+
+if ($SkipBuildInstall -and -not $SkipPublish -and -not $SkipVersionBump) {
+  throw 'Publishing an existing APK requires -SkipVersionBump so its package version is not relabeled.'
+}
 
 if (-not $SkipVersionBump) {
   $versionUpdate = Update-PubspecVersionForShip -Root $repoRoot
@@ -202,11 +209,15 @@ if ([string]::IsNullOrWhiteSpace($PublicApkUrl)) {
   $PublicApkUrl = "https://github.com/$PublicRepo/releases/latest/download/app-release.apk"
 }
 $latestApkUrl = $PublicApkUrl
+$releaseVersion = Get-PubspecVersion -Root $repoRoot
+$releaseTag = "v$releaseVersion"
+if ($ReleaseChannel -ne 'prod') { $releaseTag += "-$ReleaseChannel" }
+$releaseApkUrl = "https://github.com/$PublicRepo/releases/download/$([Uri]::EscapeDataString($releaseTag))/app-release.apk"
 
 $pipelineParams = @{
   DeviceIds = $DeviceIds
   Repo = $Repo
-  PublicApkUrl = $latestApkUrl
+  PublicApkUrl = $releaseApkUrl
   ReleaseChannel = $ReleaseChannel
 }
 
@@ -240,7 +251,17 @@ if (-not $SkipPublish -and -not $SkipPublicMirror) {
     }
 
     Write-Host "Mirroring release asset to public updater repo $PublicRepo..." -ForegroundColor Cyan
-    & powershell -ExecutionPolicy Bypass -File $publishScript -Repo $PublicRepo -Tag "v$version" -Title "Prox $version" -Notes "Public APK mirror for tester update delivery."
+    $mirrorParams = @{
+      Repo = $PublicRepo
+      Tag = $releaseTag
+      Title = "Prox $version"
+      Notes = "Public Android APK mirror ($ReleaseChannel)."
+    }
+    if ($ReleaseChannel -ne 'prod') {
+      $mirrorParams.Prerelease = $true
+      $mirrorParams.SetLatest = $false
+    }
+    & $publishScript @mirrorParams
     if ($LASTEXITCODE -ne 0) {
       throw "Public mirror publish failed with exit code $LASTEXITCODE"
     }
@@ -253,11 +274,14 @@ if (-not $SkipPublish -and -not $SkipPublicMirror) {
   Write-Host "Skipped public APK mirror because publish was skipped." -ForegroundColor Yellow
 }
 
-if (-not $SkipPublish -and -not $SkipDownloadTargetSync) {
+if ($ReleaseChannel -ne 'prod') {
+  Write-Host 'Tester/staging release: production website and referral targets are unchanged.'
+} elseif (-not $SkipPublish -and -not $SkipDownloadTargetSync) {
   $syncParams = @{
     Repo = $PublicRepo
     ProjectId = $FirebaseProjectId
     PublicApkUrl = $latestApkUrl
+    IosUpdateUrl = $IosUpdateUrl
     ReferralDownloadUrl = $ReferralDownloadUrl
   }
   if (-not [string]::IsNullOrWhiteSpace($ReferralCode)) {
@@ -274,14 +298,32 @@ if (-not $SkipPublish -and -not $SkipDownloadTargetSync) {
   Write-Host "Skipped download target sync because publish was skipped." -ForegroundColor Yellow
 }
 
-if (-not $SkipPublish -and -not $SkipRemoteConfigSync) {
+if ($ReleaseChannel -ne 'prod') {
+  Write-Host 'Tester/staging release: global Remote Config policy is unchanged.'
+} elseif (-not $SkipPublish -and -not $SkipRemoteConfigSync) {
+  $verifyUpdateUrlScript = Join-Path $repoRoot "tools/scripts/check_referral_qr_release_link.ps1"
+  if (-not (Test-Path $verifyUpdateUrlScript)) {
+    throw "Missing updater URL verification script: $verifyUpdateUrlScript"
+  }
+
+  Write-Host "Verifying published updater APK before advancing Remote Config..." -ForegroundColor Cyan
+  & powershell -ExecutionPolicy Bypass -File $verifyUpdateUrlScript -PublicApkUrl $releaseApkUrl -AllowNonLatestGithubPath
+  if ($LASTEXITCODE -ne 0) {
+    throw "Published updater APK verification failed. Remote Config was not advanced."
+  }
+
   $latestVersion = Get-PubspecVersion -Root $repoRoot
+  Write-Host 'This script builds Android only; iOS update policy is never advanced here.'
+
   $rcParams = @{
     ProjectId = $FirebaseProjectId
     LatestVersion = $latestVersion
-    DownloadUrl = $latestApkUrl
+    Platform = 'android'
+    DownloadUrl = $releaseApkUrl
+    IosDownloadUrl = $IosUpdateUrl
     UpdatePollMinutes = $UpdatePollMinutes
   }
+  if ($IncludeLegacyAndroidPolicy) { $rcParams.IncludeLegacyAndroidPolicy = $true }
   if ($MarkImportantUpdate) {
     $rcParams["MarkImportantUpdate"] = $true
   }
@@ -301,6 +343,6 @@ if (-not $SkipPublish -and -not $SkipRemoteConfigSync) {
 
 Write-Host "Ship It #2 complete." -ForegroundColor Green
 Write-Host "Private asset URL: $privateLatestApkUrl" -ForegroundColor Green
-Write-Host "Public update URL: $latestApkUrl" -ForegroundColor Green
+Write-Host "Public update URL: $releaseApkUrl" -ForegroundColor Green
 
 exit 0

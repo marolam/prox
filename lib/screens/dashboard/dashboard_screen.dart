@@ -68,7 +68,8 @@ class DashboardScreen extends StatelessWidget {
           padding: const EdgeInsets.only(bottom: 8),
           child: Text(
             t,
-            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+            style: theme.textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.w900),
           ),
         );
 
@@ -88,7 +89,8 @@ class DashboardScreen extends StatelessWidget {
               ],
               Text(
                 t,
-                style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w800),
+                style: theme.textTheme.labelSmall
+                    ?.copyWith(fontWeight: FontWeight.w800),
               ),
             ],
           ),
@@ -98,7 +100,8 @@ class DashboardScreen extends StatelessWidget {
       DashboardAnnouncement(
         id: 'fallback',
         title: 'Platform layer live',
-        body: 'Dashboard, Store shell, Support hub, and Referrals are available for testers.',
+        body:
+            'Dashboard, Store shell, Support hub, and Referrals are available for testers.',
         active: true,
         pinned: false,
         broadcast: false,
@@ -123,7 +126,8 @@ class DashboardScreen extends StatelessWidget {
 
     void go(String r) {
       final ev = _eventForRoute(r);
-      UiTelemetryService.instance.log(ev, meta: {"route": r, "source": "dashboard"});
+      UiTelemetryService.instance
+          .log(ev, meta: {"route": r, "source": "dashboard"});
       Navigator.of(context).pushNamed(r);
     }
 
@@ -131,7 +135,8 @@ class DashboardScreen extends StatelessWidget {
       required String sku,
       required bool businessUnlocked,
     }) async {
-      UiTelemetryService.instance.log("dashboard_business_item_tap", meta: {"sku": sku});
+      UiTelemetryService.instance
+          .log("dashboard_business_item_tap", meta: {"sku": sku});
 
       if (businessUnlocked) {
         go("/store");
@@ -141,8 +146,7 @@ class DashboardScreen extends StatelessWidget {
       await StoreLockedSheet.show(
         context,
         title: "Locked: Business Mode required",
-        body:
-            "This item is reserved for Business Mode.\n\n"
+        body: "This item is reserved for Business Mode.\n\n"
             "Business Mode is earned through trust, reliability, and meetups. Open Account & Billing to see your progress.",
         onGoToAccount: () => go("/account"),
       );
@@ -165,9 +169,13 @@ class DashboardScreen extends StatelessWidget {
                 Row(
                   children: [
                     Expanded(
-                      child: Text(label, style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+                      child: Text(label,
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: cs.onSurfaceVariant)),
                     ),
-                    Text(valueText, style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w800)),
+                    Text(valueText,
+                        style: theme.textTheme.labelSmall
+                            ?.copyWith(fontWeight: FontWeight.w800)),
                   ],
                 ),
                 const SizedBox(height: 6),
@@ -183,7 +191,8 @@ class DashboardScreen extends StatelessWidget {
       );
     }
 
-    Widget metricChip({required String label, required String value, IconData? icon}) {
+    Widget metricChip(
+        {required String label, required String value, IconData? icon}) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
@@ -203,12 +212,14 @@ class DashboardScreen extends StatelessWidget {
               children: [
                 Text(
                   value,
-                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w900),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   label,
-                  style: theme.textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                  style: theme.textTheme.labelSmall
+                      ?.copyWith(color: cs.onSurfaceVariant),
                 ),
               ],
             ),
@@ -234,13 +245,15 @@ class DashboardScreen extends StatelessWidget {
             ],
             Text(
               label,
-              style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w800),
+              style: theme.textTheme.labelSmall
+                  ?.copyWith(fontWeight: FontWeight.w800),
             ),
             if (meta != null && meta.isNotEmpty) ...[
               const SizedBox(width: 8),
               Text(
                 meta,
-                style: theme.textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                style: theme.textTheme.labelSmall
+                    ?.copyWith(color: cs.onSurfaceVariant),
               ),
             ],
           ],
@@ -253,8 +266,12 @@ class DashboardScreen extends StatelessWidget {
         stream: DashboardMetricsService.instance.watchMetrics(),
         builder: (context, snap) {
           final metrics = snap.data;
-          final top = metrics?.topKeywords.isNotEmpty == true ? metrics!.topKeywords : fallbackTop;
-          final trending = metrics?.trendingKeywords.isNotEmpty == true ? metrics!.trendingKeywords : fallbackTrending;
+          final top = metrics?.topKeywords.isNotEmpty == true
+              ? metrics!.topKeywords
+              : fallbackTop;
+          final trending = metrics?.trendingKeywords.isNotEmpty == true
+              ? metrics!.trendingKeywords
+              : fallbackTrending;
           final geofenceCovered = metrics?.geofenceUsersCovered ?? 0;
           final geofenceRatio = _ratio(
             metrics?.geofenceCoverageRatio ?? 0.0,
@@ -262,7 +279,8 @@ class DashboardScreen extends StatelessWidget {
           );
           final totalUsersForCoverage = metrics?.totalUsers ?? 0;
           final totalPointsPaidOut = metrics?.totalPointsPaidOut ?? 0;
-          final referralPointsPaidOut = metrics?.totalReferralPointsPaidOut ?? 0;
+          final referralPointsPaidOut =
+              metrics?.totalReferralPointsPaidOut ?? 0;
           final supportPointsPaidOut = metrics?.totalSupportPointsPaidOut ?? 0;
           final totalBusinessUsers = metrics?.totalBusinessModeUsers ?? 0;
           final newBusinessUsersToday = metrics?.newBusinessModeUsersToday ?? 0;
@@ -278,12 +296,15 @@ class DashboardScreen extends StatelessWidget {
                   children: [
                     metricChip(
                       label: "Total users",
-                      value: metrics != null ? _fmtInt(metrics.totalUsers) : "-",
+                      value:
+                          metrics != null ? _fmtInt(metrics.totalUsers) : "-",
                       icon: Icons.groups_outlined,
                     ),
                     metricChip(
                       label: "New today",
-                      value: metrics != null ? _fmtInt(metrics.newUsersToday) : "-",
+                      value: metrics != null
+                          ? _fmtInt(metrics.newUsersToday)
+                          : "-",
                       icon: Icons.trending_up,
                     ),
                     metricChip(
@@ -313,17 +334,20 @@ class DashboardScreen extends StatelessWidget {
                 const SizedBox(height: 10),
                 Text(
                   "Points paid out from referrals and support tickets: ${_fmtInt(referralPointsPaidOut)} referral + ${_fmtInt(supportPointsPaidOut)} support.",
-                  style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: cs.onSurfaceVariant),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   "Grow the community by referring friends or helping in support. You can cover Business Mode with Prox Points instead of paying out-of-pocket.",
-                  style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: cs.onSurfaceVariant),
                 ),
                 const SizedBox(height: 14),
                 Text(
                   "Trending keywords",
-                  style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800),
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 8),
                 Wrap(
@@ -333,7 +357,7 @@ class DashboardScreen extends StatelessWidget {
                       .map(
                         (k) => keywordChip(
                           label: k.keyword,
-                          meta: k.delta != null ? "+${k.delta}" : null,
+                          meta: "+${k.delta}",
                           icon: Icons.arrow_upward,
                         ),
                       )
@@ -342,7 +366,8 @@ class DashboardScreen extends StatelessWidget {
                 const SizedBox(height: 12),
                 Text(
                   "Top keywords",
-                  style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800),
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 8),
                 Wrap(
@@ -362,7 +387,8 @@ class DashboardScreen extends StatelessWidget {
                   const SizedBox(height: 10),
                   Text(
                     "Updated ${metrics!.updatedAt!.toLocal().toString().substring(0, 16)}",
-                    style: theme.textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                    style: theme.textTheme.labelSmall
+                        ?.copyWith(color: cs.onSurfaceVariant),
                   ),
                 ],
               ],
@@ -390,24 +416,30 @@ class DashboardScreen extends StatelessWidget {
               children: [
                 Text(
                   "Onboarding conversion (session)",
-                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w900),
                 ),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 10,
                   runSpacing: 10,
                   children: [
-                    pill("Guided selected: $guidedSelected", i: Icons.alt_route_outlined),
-                    pill("Quick selected: $quickSelected", i: Icons.route_outlined),
-                    pill("Quick success: $quickSuccess", i: Icons.check_circle_outline),
+                    pill("Guided selected: $guidedSelected",
+                        i: Icons.alt_route_outlined),
+                    pill("Quick selected: $quickSelected",
+                        i: Icons.route_outlined),
+                    pill("Quick success: $quickSuccess",
+                        i: Icons.check_circle_outline),
                     pill("Quick failed: $quickFailed", i: Icons.error_outline),
-                    pill("Quick blocked: $quickBlocked", i: Icons.warning_amber_outlined),
+                    pill("Quick blocked: $quickBlocked",
+                        i: Icons.warning_amber_outlined),
                   ],
                 ),
                 const SizedBox(height: 8),
                 Text(
                   "Session-local telemetry for tuning onboarding UX. Use for rapid iteration and tester reviews.",
-                  style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: cs.onSurfaceVariant),
                 ),
               ],
             ),
@@ -424,163 +456,181 @@ class DashboardScreen extends StatelessWidget {
           return FutureBuilder<BusinessGateState>(
             future: BusinessModeEligibility.gateForUser(uid: uid, meta: m),
             builder: (context, gateSnap) {
-              final gate = gateSnap.data ?? BusinessModeEligibility.gateFromMeta(m);
-              final businessUnlocked =
-                  gate == BusinessGateState.eligible || gate == BusinessGateState.active;
+              final gate =
+                  gateSnap.data ?? BusinessModeEligibility.gateFromMeta(m);
+              final businessUnlocked = gate == BusinessGateState.eligible ||
+                  gate == BusinessGateState.active;
 
-              final trustRatio = _ratio(m.trustPercent, BusinessModeEligibility.minTrustPercent);
-              final pointsRatio = _ratio(m.totalPoints, BusinessModeEligibility.minPoints);
-              final meetRatio = _ratio(m.completedMeetups, BusinessModeEligibility.minCompletedMeetups);
+              final trustRatio = _ratio(
+                  m.trustPercent, BusinessModeEligibility.minTrustPercent);
+              final pointsRatio =
+                  _ratio(m.totalPoints, BusinessModeEligibility.minPoints);
+              final meetRatio = _ratio(m.completedMeetups,
+                  BusinessModeEligibility.minCompletedMeetups);
 
               return card(
                 child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Row(
+                      children: [
+                        Text(
+                          "Business Mode",
+                          style: theme.textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w900),
+                        ),
+                        const SizedBox(width: 8),
+                        TesterBadge(label: "Preview"),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    BusinessModeGate(
+                      state: gate,
+                      onLearnMore: () {
+                        UiTelemetryService.instance.log("business_gate_viewed",
+                            meta: {"source": "dashboard"});
+                        go("/account");
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        pill("Trust: ${m.trustPercent.toStringAsFixed(0)}%",
+                            i: Icons.verified_outlined),
+                        pill("Points: ${m.totalPoints}", i: Icons.bolt),
+                        pill("Meetups: ${m.completedMeetups}",
+                            i: Icons.handshake_outlined),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
                     Text(
-                      "Business Mode",
-                      style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                      "Unlock progress",
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(fontWeight: FontWeight.w800),
                     ),
-                    const SizedBox(width: 8),
-                    TesterBadge(label: "Preview"),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                BusinessModeGate(
-                  state: gate,
-                  onLearnMore: () {
-                    UiTelemetryService.instance.log("business_gate_viewed", meta: {"source": "dashboard"});
-                    go("/account");
-                  },
-                ),
-                const SizedBox(height: 10),
-
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    pill("Trust: ${m.trustPercent.toStringAsFixed(0)}%", i: Icons.verified_outlined),
-                    pill("Points: ${m.totalPoints}", i: Icons.bolt),
-                    pill("Meetups: ${m.completedMeetups}", i: Icons.handshake_outlined),
-                  ],
-                ),
-                const SizedBox(height: 12),
-
-                Text(
-                  "Unlock progress",
-                  style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 10),
-                progressRow(
-                  label: "Trust",
-                  valueText: "${m.trustPercent.toStringAsFixed(0)} / ${BusinessModeEligibility.minTrustPercent.toStringAsFixed(0)}",
-                  ratio: trustRatio,
-                  icon: Icons.verified_outlined,
-                ),
-                const SizedBox(height: 12),
-                progressRow(
-                  label: "Prox Points",
-                  valueText: "${m.totalPoints} / ${BusinessModeEligibility.minPoints}",
-                  ratio: pointsRatio,
-                  icon: Icons.bolt,
-                ),
-                const SizedBox(height: 12),
-                progressRow(
-                  label: "Verified meetups",
-                  valueText: "${m.completedMeetups} / ${BusinessModeEligibility.minCompletedMeetups}",
-                  ratio: meetRatio,
-                  icon: Icons.handshake_outlined,
-                ),
-
-                const SizedBox(height: 16),
-                Text(
-                  "Business items (preview)",
-                  style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 10),
-
-                InkWell(
-                  borderRadius: BorderRadius.circular(16),
-                  onTap: () => openBusinessItem(sku: "biz_boost_visibility", businessUnlocked: businessUnlocked),
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: cs.surface,
+                    const SizedBox(height: 10),
+                    progressRow(
+                      label: "Trust",
+                      valueText:
+                          "${m.trustPercent.toStringAsFixed(0)} / ${BusinessModeEligibility.minTrustPercent.toStringAsFixed(0)}",
+                      ratio: trustRatio,
+                      icon: Icons.verified_outlined,
+                    ),
+                    const SizedBox(height: 12),
+                    progressRow(
+                      label: "Prox Points",
+                      valueText:
+                          "${m.totalPoints} / ${BusinessModeEligibility.minPoints}",
+                      ratio: pointsRatio,
+                      icon: Icons.bolt,
+                    ),
+                    const SizedBox(height: 12),
+                    progressRow(
+                      label: "Verified meetups",
+                      valueText:
+                          "${m.completedMeetups} / ${BusinessModeEligibility.minCompletedMeetups}",
+                      ratio: meetRatio,
+                      icon: Icons.handshake_outlined,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      "Business items (preview)",
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 10),
+                    InkWell(
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: cs.outline.withValues(alpha: 0.18)),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.trending_up, color: cs.primary),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            "Business Visibility Boost",
-                            style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800),
-                          ),
+                      onTap: () => openBusinessItem(
+                          sku: "biz_boost_visibility",
+                          businessUnlocked: businessUnlocked),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: cs.surface,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                              color: cs.outline.withValues(alpha: 0.18)),
                         ),
-                        TesterBadge(label: "Business"),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-
-                InkWell(
-                  borderRadius: BorderRadius.circular(16),
-                  onTap: () => openBusinessItem(sku: "biz_provider_tools", businessUnlocked: businessUnlocked),
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: cs.surface,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: cs.outline.withValues(alpha: 0.18)),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.work_outline, color: cs.primary),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            "Provider Tools Pack",
-                            style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800),
-                          ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.trending_up, color: cs.primary),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                "Business Visibility Boost",
+                                style: theme.textTheme.bodyMedium
+                                    ?.copyWith(fontWeight: FontWeight.w800),
+                              ),
+                            ),
+                            TesterBadge(label: "Business"),
+                          ],
                         ),
-                        TesterBadge(label: "Business"),
-                      ],
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 8),
-                Text(
-                  gate == BusinessGateState.eligible
-                      ? "You're eligible to unlock Business Mode."
-                      : "Complete meetups and build trust to unlock Business Mode.",
-                  style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    FilledButton.icon(
-                      onPressed: () => go("/account"),
-                      icon: const Icon(Icons.workspace_premium_outlined),
-                      label: Text(
-                        businessUnlocked ? "Manage Business" : "Unlock Business",
                       ),
                     ),
-                    OutlinedButton.icon(
-                      onPressed: () => go("/nearby"),
-                      icon: const Icon(Icons.radar_outlined),
-                      label: const Text("Open Nearby ROI"),
+                    const SizedBox(height: 10),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: () => openBusinessItem(
+                          sku: "biz_provider_tools",
+                          businessUnlocked: businessUnlocked),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: cs.surface,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                              color: cs.outline.withValues(alpha: 0.18)),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.work_outline, color: cs.primary),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                "Provider Tools Pack",
+                                style: theme.textTheme.bodyMedium
+                                    ?.copyWith(fontWeight: FontWeight.w800),
+                              ),
+                            ),
+                            TesterBadge(label: "Business"),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      gate == BusinessGateState.eligible
+                          ? "You're eligible to unlock Business Mode."
+                          : "Complete meetups and build trust to unlock Business Mode.",
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: cs.onSurfaceVariant),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: () => go("/account"),
+                          icon: const Icon(Icons.workspace_premium_outlined),
+                          label: Text(
+                            businessUnlocked
+                                ? "Manage Business"
+                                : "Unlock Business",
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => go("/nearby"),
+                          icon: const Icon(Icons.radar_outlined),
+                          label: const Text("Open Nearby ROI"),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
-            ),
               );
             },
           );
@@ -589,6 +639,7 @@ class DashboardScreen extends StatelessWidget {
     }
 
     return Scaffold(
+      backgroundColor: cs.surface,
       appBar: AppBar(
         title: const Text("Dashboard"),
         actions: [
@@ -601,7 +652,8 @@ class DashboardScreen extends StatelessWidget {
                 tooltip: 'Creator Panel',
                 onPressed: () {
                   Navigator.of(context).push(
-                    MaterialPageRoute<void>(builder: (_) => const CreatorPanelScreen()),
+                    MaterialPageRoute<void>(
+                        builder: (_) => const CreatorPanelScreen()),
                   );
                 },
                 icon: const Icon(Icons.campaign),
@@ -614,154 +666,167 @@ class DashboardScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-        children: [
-          sectionTitle("Announcements"),
-          StreamBuilder<List<DashboardAnnouncement>>(
-            stream: DashboardAnnouncementsService.instance.watchActive(),
-            builder: (context, annSnap) {
-              final announcements = annSnap.data == null || annSnap.data!.isEmpty
-                  ? fallbackAnnouncements
-                  : annSnap.data!;
+      body: ColoredBox(
+        color: cs.surface,
+        child: ListView(
+          key: const PageStorageKey<String>('hq-dashboard-scroll'),
+          physics: const ClampingScrollPhysics(),
+          cacheExtent: 900,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          children: [
+            sectionTitle("Announcements"),
+            StreamBuilder<List<DashboardAnnouncement>>(
+              stream: DashboardAnnouncementsService.instance.watchActive(),
+              builder: (context, annSnap) {
+                final announcements =
+                    annSnap.data == null || annSnap.data!.isEmpty
+                        ? fallbackAnnouncements
+                        : annSnap.data!;
 
-              return card(
-                child: Column(
-                  children: [
-                    for (final a in announcements)
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: Icon(
-                          a.pinned ? Icons.push_pin_outlined : Icons.campaign_outlined,
-                          color: cs.primary,
+                return card(
+                  child: Column(
+                    children: [
+                      for (final a in announcements)
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(
+                            a.pinned
+                                ? Icons.push_pin_outlined
+                                : Icons.campaign_outlined,
+                            color: cs.primary,
+                          ),
+                          title: Text(
+                            a.title,
+                            style: theme.textTheme.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                          subtitle: Text(
+                            a.body,
+                            style: theme.textTheme.bodySmall
+                                ?.copyWith(color: cs.onSurfaceVariant),
+                          ),
                         ),
-                        title: Text(
-                          a.title,
-                          style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800),
-                        ),
-                        subtitle: Text(
-                          a.body,
-                          style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                        ),
-                      ),
-                  ],
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 16),
-
-          sectionTitle("Business"),
-          businessModePanel(),
-          const SizedBox(height: 16),
-
-          sectionTitle("Onboarding"),
-          onboardingConversionPanel(),
-          const SizedBox(height: 16),
-
-          sectionTitle("Your snapshot"),
-          card(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                StreamBuilder<PointsMeta>(
-                  stream: PointsService.instance.watchMeta(uid),
-                  builder: (context, s) {
-                    final m = s.data ?? PointsService.instance.peekMeta(uid);
-                    return Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        pill("Points: ${m.totalPoints}", i: Icons.bolt),
-                        pill("Trust: ${m.trustPercent.toStringAsFixed(0)}%", i: Icons.verified_outlined),
-                        pill("Level: ${m.level}", i: Icons.stacked_line_chart),
-                      ],
-                    );
-                  },
-                ),
-                const SizedBox(height: 12),
-                StreamBuilder<List<PartyMemberEntry>>(
-                  stream: PartyService.instance.watchMyPartyEntries(),
-                  builder: (context, s) {
-                    final entries = s.data ?? const <PartyMemberEntry>[];
-                    if (entries.isEmpty) {
-                      return Text(
-                        "No Party yet. Complete a meetup and add them to your Party.",
-                        style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                    ],
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+            sectionTitle('Quick Tips'),
+            _QuickTipsCard(
+              onOpenSettings: () => go('/settings'),
+            ),
+            const SizedBox(height: 16),
+            const _ProxIdeaCard(),
+            const SizedBox(height: 16),
+            sectionTitle("Business"),
+            businessModePanel(),
+            const SizedBox(height: 16),
+            sectionTitle("Onboarding"),
+            onboardingConversionPanel(),
+            const SizedBox(height: 16),
+            sectionTitle("Your snapshot"),
+            card(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  StreamBuilder<PointsMeta>(
+                    stream: PointsService.instance.watchMeta(uid),
+                    builder: (context, s) {
+                      final m = s.data ?? PointsService.instance.peekMeta(uid);
+                      return Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          pill("Points: ${m.totalPoints}", i: Icons.bolt),
+                          pill("Trust: ${m.trustPercent.toStringAsFixed(0)}%",
+                              i: Icons.verified_outlined),
+                          pill("Level: ${m.level}",
+                              i: Icons.stacked_line_chart),
+                        ],
                       );
-                    }
-                    final mutual = entries.where((e) => e.mutual).length;
-                    return Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        pill("Party: ${entries.length}", i: Icons.group),
-                        pill("Mutual: $mutual", i: Icons.handshake_outlined),
-                      ],
-                    );
-                  },
-                ),
-              ],
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  StreamBuilder<List<PartyMemberEntry>>(
+                    stream: PartyService.instance.watchMyPartyEntries(),
+                    builder: (context, s) {
+                      final entries = s.data ?? const <PartyMemberEntry>[];
+                      if (entries.isEmpty) {
+                        return Text(
+                          "No Party yet. Complete a meetup and add them to your Party.",
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: cs.onSurfaceVariant),
+                        );
+                      }
+                      final mutual = entries.where((e) => e.mutual).length;
+                      return Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          pill("Party: ${entries.length}", i: Icons.group),
+                          pill("Mutual: $mutual", i: Icons.handshake_outlined),
+                        ],
+                      );
+                    },
+                  ),
+                ],
+              ),
             ),
-          ),
-
-          const SizedBox(height: 16),
-          metricsSection(),
-
-          const SizedBox(height: 16),
-          sectionTitle('Quick Tips'),
-          _QuickTipsCard(
-            onOpenSettings: () => go('/settings'),
-          ),
-
-          const SizedBox(height: 16),
-          sectionTitle("Quick actions"),
-          card(
-            child: Column(
-              children: [
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.storefront_outlined, color: cs.primary),
-                  title: const Text("Prox Points Store"),
-                  subtitle: const Text("Locked items preview"),
-                  onTap: () => go("/store"),
-                ),
-                Divider(height: 1, color: cs.outline.withValues(alpha: 0.20)),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.support_agent_outlined, color: cs.primary),
-                  title: const Text("Support & feedback"),
-                  subtitle: const Text("Report issues"),
-                  onTap: () => go("/support"),
-                ),
-                Divider(height: 1, color: cs.outline.withValues(alpha: 0.20)),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.share_outlined, color: cs.primary),
-                  title: const Text("Referrals"),
-                  subtitle: const Text("Invite friends and track rewards"),
-                  onTap: () => go("/referrals"),
-                ),
-                Divider(height: 1, color: cs.outline.withValues(alpha: 0.20)),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.qr_code_2_outlined, color: cs.primary),
-                  title: const Text("Referral QR code"),
-                  subtitle: const Text("Open and show your in-person invite QR"),
-                  onTap: () => go("/referrals"),
-                ),
-                Divider(height: 1, color: cs.outline.withValues(alpha: 0.20)),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.credit_card_outlined, color: cs.primary),
-                  title: const Text("Account & billing"),
-                  subtitle: const Text("Business Mode"),
-                  onTap: () => go("/account"),
-                ),
-              ],
+            const SizedBox(height: 16),
+            metricsSection(),
+            const SizedBox(height: 16),
+            sectionTitle("Quick actions"),
+            card(
+              child: Column(
+                children: [
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.storefront_outlined, color: cs.primary),
+                    title: const Text("Prox Points Store"),
+                    subtitle: const Text("Locked items preview"),
+                    onTap: () => go("/store"),
+                  ),
+                  Divider(height: 1, color: cs.outline.withValues(alpha: 0.20)),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading:
+                        Icon(Icons.support_agent_outlined, color: cs.primary),
+                    title: const Text("Support & feedback"),
+                    subtitle: const Text("Report issues"),
+                    onTap: () => go("/support"),
+                  ),
+                  Divider(height: 1, color: cs.outline.withValues(alpha: 0.20)),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.share_outlined, color: cs.primary),
+                    title: const Text("Referrals"),
+                    subtitle: const Text("Invite friends and track rewards"),
+                    onTap: () => go("/referrals"),
+                  ),
+                  Divider(height: 1, color: cs.outline.withValues(alpha: 0.20)),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.qr_code_2_outlined, color: cs.primary),
+                    title: const Text("Referral QR code"),
+                    subtitle:
+                        const Text("Open and show your in-person invite QR"),
+                    onTap: () => go("/referrals"),
+                  ),
+                  Divider(height: 1, color: cs.outline.withValues(alpha: 0.20)),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading:
+                        Icon(Icons.credit_card_outlined, color: cs.primary),
+                    title: const Text("Account & billing"),
+                    subtitle: const Text("Business Mode"),
+                    onTap: () => go("/account"),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -780,52 +845,98 @@ class _QuickTipsCard extends StatefulWidget {
 
 class _QuickTipsCardState extends State<_QuickTipsCard> {
   static const List<_TipLine> _tips = <_TipLine>[
-    _TipLine('Hold the Prox Circle in Nearby to switch into active scanning when you are ready to meet now.'),
-    _TipLine('After a successful meetup, add people to Party so reconnecting later is one tap away.'),
-    _TipLine('Use Referrals in person with QR to speed up trust-building for new users you invite.'),
-    _TipLine('If your list is crowded, Settings lets you tune match scope and radius for higher signal.'),
-    _TipLine('Support and policy tools are always available from HQ when you need to report or appeal.'),
-    _TipLine('Match quality improves when your profile has clear can-provide and searching-for keywords.'),
-    _TipLine('Use Settings text size controls if you want easier scanning while moving quickly.'),
-    _TipLine('Checking Trust timeline can explain why your score changed after recent activity.'),
-    _TipLine('If meetup logistics are messy, lock a location first and then confirm arrival details in chat.'),
-    _TipLine('Referrals work best when you explain what Prox solves before sharing your invite.'),
-    _TipLine('Party labels help you triage who to contact first when you are time-limited.'),
-    _TipLine('Discovery filters are your anti-noise controls when your nearby feed is too broad.'),
-    _TipLine('Complete ratings after meetups to strengthen trust signals for both sides.'),
-    _TipLine('Need accountability? Support and policy hubs are two taps away from HQ.'),
-    _TipLine('Business unlock progress is easier to track from Dashboard than by memory alone.'),
-    _TipLine('If radius is too wide, you are matching a map, not a moment. Tighten it.'),
-    _TipLine('Profiles with real photos tend to convert to smoother first meetups.'),
-    _TipLine('Use blocked users in Settings to keep your queue clean and focused.'),
-    _TipLine('For first contact, one clear ask beats five vague messages every time.'),
-    _TipLine('Tip from the Department of Obvious: replying fast helps conversations stay alive.', humorous: true),
-    _TipLine('Puns are optional, clarity is not. Say what you need in one sentence first.', humorous: true),
+    _TipLine(
+        'Hold the Prox Circle in Nearby to switch into active scanning when you are ready to meet now.'),
+    _TipLine(
+        'After a successful meetup, add people to Party so reconnecting later is one tap away.'),
+    _TipLine(
+        'Use Referrals in person with QR to speed up trust-building for new users you invite.'),
+    _TipLine(
+        'If your list is crowded, Settings lets you tune match scope and radius for higher signal.'),
+    _TipLine(
+        'Support and policy tools are always available from HQ when you need to report or appeal.'),
+    _TipLine(
+        'Match quality improves when your profile has clear can-provide and searching-for keywords.'),
+    _TipLine(
+        'Use Settings text size controls if you want easier scanning while moving quickly.'),
+    _TipLine(
+        'Checking Trust timeline can explain why your score changed after recent activity.'),
+    _TipLine(
+        'If meetup logistics are messy, lock a location first and then confirm arrival details in chat.'),
+    _TipLine(
+        'Referrals work best when you explain what Prox solves before sharing your invite.'),
+    _TipLine(
+        'Party labels help you triage who to contact first when you are time-limited.'),
+    _TipLine(
+        'Discovery filters are your anti-noise controls when your nearby feed is too broad.'),
+    _TipLine(
+        'Complete ratings after meetups to strengthen trust signals for both sides.'),
+    _TipLine(
+        'Need accountability? Support and policy hubs are two taps away from HQ.'),
+    _TipLine(
+        'Business unlock progress is easier to track from Dashboard than by memory alone.'),
+    _TipLine(
+        'If radius is too wide, you are matching a map, not a moment. Tighten it.'),
+    _TipLine(
+        'Profiles with real photos tend to convert to smoother first meetups.'),
+    _TipLine(
+        'Use blocked users in Settings to keep your queue clean and focused.'),
+    _TipLine(
+        'For first contact, one clear ask beats five vague messages every time.'),
+    _TipLine(
+        'Tip from the Department of Obvious: replying fast helps conversations stay alive.',
+        humorous: true),
+    _TipLine(
+        'Puns are optional, clarity is not. Say what you need in one sentence first.',
+        humorous: true),
     _TipLine('Nearby works best when your intent is current, not historical.'),
-    _TipLine('If your plan requires six maybe steps, it probably needs one clearer next step.'),
+    _TipLine(
+        'If your plan requires six maybe steps, it probably needs one clearer next step.'),
     _TipLine('Trust grows slower than hype. That is annoying and useful.'),
-    _TipLine('Party is your relationship memory so your brain can be used for better things.'),
+    _TipLine(
+        'Party is your relationship memory so your brain can be used for better things.'),
     _TipLine('Quick reminder: ghosting hurts your momentum more than theirs.'),
-    _TipLine('Yes, opening Settings can actually solve things. We were shocked too.', humorous: true),
-    _TipLine('Support tickets with specifics get resolved faster than dramatic mystery novels.', humorous: true),
-    _TipLine('Prox Points are handy, but reliability is still the real currency.'),
-    _TipLine('If everyone is far away, reduce radius and try again in a busier zone.'),
-    _TipLine('A simple meetup plan beats an elaborate maybe-plan with zero confirmations.'),
-    _TipLine('Sarcastic update: unclear profiles are still unclear after refresh.', humorous: true),
+    _TipLine(
+        'Yes, opening Settings can actually solve things. We were shocked too.',
+        humorous: true),
+    _TipLine(
+        'Support tickets with specifics get resolved faster than dramatic mystery novels.',
+        humorous: true),
+    _TipLine(
+        'Prox Points are handy, but reliability is still the real currency.'),
+    _TipLine(
+        'If everyone is far away, reduce radius and try again in a busier zone.'),
+    _TipLine(
+        'A simple meetup plan beats an elaborate maybe-plan with zero confirmations.'),
+    _TipLine(
+        'Sarcastic update: unclear profiles are still unclear after refresh.',
+        humorous: true),
     _TipLine('If chat stalls, ask one concrete question with a time option.'),
     _TipLine('Use policy and appeals tools early when something feels off.'),
-    _TipLine('Trust pulse is useful context, not a substitute for direct communication.'),
-    _TipLine('Your future self loves when you log outcomes right after each meetup.'),
-    _TipLine('Tiny joke, huge truth: etiquette is a performance feature.', humorous: true),
+    _TipLine(
+        'Trust pulse is useful context, not a substitute for direct communication.'),
+    _TipLine(
+        'Your future self loves when you log outcomes right after each meetup.'),
+    _TipLine('Tiny joke, huge truth: etiquette is a performance feature.',
+        humorous: true),
     _TipLine('When in doubt, shorten the message and sharpen the ask.'),
-    _TipLine('Referrals are stronger when the invite explains why now, not just why someday.'),
-    _TipLine('No app can schedule your priorities for you. We tried.', humorous: true),
-    _TipLine('The fastest path to fewer bad matches is better profile specificity.'),
-    _TipLine('If you keep seeing noise, match scope controls are probably overdue for tuning.'),
-    _TipLine('Meetup confirmations are boring and highly effective. Keep doing them.'),
-    _TipLine('Comic relief break: your inbox called, it wants fewer half-plans.', humorous: true),
-    _TipLine('Helpful cynicism: if it is not scheduled, it is a wish.', humorous: true),
-    _TipLine('Use User\'s Guide in Settings for complete feature and button pipelines.'),
+    _TipLine(
+        'Referrals are stronger when the invite explains why now, not just why someday.'),
+    _TipLine('No app can schedule your priorities for you. We tried.',
+        humorous: true),
+    _TipLine(
+        'The fastest path to fewer bad matches is better profile specificity.'),
+    _TipLine(
+        'If you keep seeing noise, match scope controls are probably overdue for tuning.'),
+    _TipLine(
+        'Meetup confirmations are boring and highly effective. Keep doing them.'),
+    _TipLine(
+        'Comic relief break: your inbox called, it wants fewer half-plans.',
+        humorous: true),
+    _TipLine('Helpful cynicism: if it is not scheduled, it is a wish.',
+        humorous: true),
+    _TipLine(
+        'Use User\'s Guide in Settings for complete feature and button pipelines.'),
   ];
 
   static const Duration _cycleEvery = Duration(seconds: 22);
@@ -852,8 +963,12 @@ class _QuickTipsCardState extends State<_QuickTipsCard> {
 
   void _rebuildCycleOrder({int? avoidFirst}) {
     final all = List<int>.generate(_tips.length, (i) => i);
-    final useful = all.where((i) => !_tips[i].humorous && i != avoidFirst).toList(growable: true);
-    final humorous = all.where((i) => _tips[i].humorous && i != avoidFirst).toList(growable: true);
+    final useful = all
+        .where((i) => !_tips[i].humorous && i != avoidFirst)
+        .toList(growable: true);
+    final humorous = all
+        .where((i) => _tips[i].humorous && i != avoidFirst)
+        .toList(growable: true);
     useful.shuffle(_random);
     humorous.shuffle(_random);
 
@@ -862,7 +977,8 @@ class _QuickTipsCardState extends State<_QuickTipsCard> {
     // Strict cadence: build random 5-message groups with exactly 1 humorous + 4 useful.
     bool previousEndedHumorous = false;
     while (humorous.isNotEmpty && useful.length >= _humorEvery - 1) {
-      final chunkUseful = List<int>.generate(_humorEvery - 1, (_) => useful.removeLast());
+      final chunkUseful =
+          List<int>.generate(_humorEvery - 1, (_) => useful.removeLast());
       final humorousLine = humorous.removeLast();
 
       int humorPos = _random.nextInt(_humorEvery);
@@ -930,12 +1046,14 @@ class _QuickTipsCardState extends State<_QuickTipsCard> {
               const SizedBox(width: 8),
               Text(
                 'Tip Cycler',
-                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                style: theme.textTheme.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w900),
               ),
               const Spacer(),
               Text(
                 'Rotates slowly',
-                style: theme.textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                style: theme.textTheme.labelSmall
+                    ?.copyWith(color: cs.onSurfaceVariant),
               ),
             ],
           ),
@@ -945,7 +1063,8 @@ class _QuickTipsCardState extends State<_QuickTipsCard> {
             switchInCurve: Curves.easeOut,
             switchOutCurve: Curves.easeIn,
             transitionBuilder: (child, animation) {
-              final fade = CurvedAnimation(parent: animation, curve: Curves.easeOut);
+              final fade =
+                  CurvedAnimation(parent: animation, curve: Curves.easeOut);
               final slide = Tween<Offset>(
                 begin: const Offset(0.03, 0),
                 end: Offset.zero,
@@ -967,7 +1086,8 @@ class _QuickTipsCardState extends State<_QuickTipsCard> {
           const SizedBox(height: 10),
           Text(
             "Need the full walkthrough? Open Settings and tap User's Guide for complete feature pipelines.",
-            style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+            style:
+                theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
           ),
           const SizedBox(height: 6),
           TextButton.icon(
@@ -986,4 +1106,103 @@ class _TipLine {
   final bool humorous;
 
   const _TipLine(this.text, {this.humorous = false});
+}
+
+class _ProxIdeaCard extends StatefulWidget {
+  const _ProxIdeaCard();
+
+  @override
+  State<_ProxIdeaCard> createState() => _ProxIdeaCardState();
+}
+
+class _ProxIdeaCardState extends State<_ProxIdeaCard> {
+  static const List<String> _ideas = <String>[
+    'Find a nearby skill-swap partner: trade an hour of something you know for something you want to learn.',
+    'Borrow a rarely used tool from someone nearby instead of buying one for a single project.',
+    'Find a walking or workout accountability partner who is available on the same schedule.',
+    'Pair up for errands when two people need to visit the same store or part of town.',
+    'Ask for a local expert who can help you compare options before a repair or purchase.',
+    'Find a practice partner for a language, presentation, audition, or job interview.',
+    'Coordinate an extra set of hands for moving furniture, loading a vehicle, or setting up an event.',
+    'Match with another maker to finish a small project using complementary tools or skills.',
+    'Find someone nearby who has a charger, adapter, cable, or other item you need right now.',
+    'Create a focused work session with someone who also needs momentum on a personal project.',
+    'Connect with neighbors who can exchange garden supplies, spare materials, or useful leftovers.',
+    'Find a knowledgeable local to help you learn a venue, trail, neighborhood, or community resource.',
+  ];
+
+  final Random _random = Random();
+  int _ideaIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _ideaIndex = _random.nextInt(_ideas.length);
+  }
+
+  void _showAnotherIdea() {
+    if (_ideas.length < 2) return;
+    int next = _ideaIndex;
+    while (next == _ideaIndex) {
+      next = _random.nextInt(_ideas.length);
+    }
+    setState(() => _ideaIndex = next);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cs.outline.withValues(alpha: 0.22)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.auto_awesome_outlined, color: cs.primary),
+              const SizedBox(width: 8),
+              Text(
+                'Prox Inspiration',
+                style: theme.textTheme.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w900),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 240),
+            child: Text(
+              _ideas[_ideaIndex],
+              key: ValueKey<int>(_ideaIndex),
+              style: theme.textTheme.bodyMedium?.copyWith(height: 1.3),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton.icon(
+                onPressed: _showAnotherIdea,
+                icon: const Icon(Icons.refresh),
+                label: const Text('New Prox Idea'),
+              ),
+              OutlinedButton.icon(
+                onPressed: null,
+                icon: const Icon(Icons.format_quote_outlined),
+                label: const Text('Testimonial: Coming later'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }

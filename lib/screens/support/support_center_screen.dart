@@ -11,11 +11,24 @@ import "package:prox/models/support_ticket_draft.dart";
 import "package:prox/screens/support/support_compose_screen.dart";
 import "package:prox/services/help/context_help_service.dart";
 import "package:prox/services/support_ticket_queue.dart";
+import "package:prox/services/support_email.dart";
+import "package:prox/screens/dev/bug_reports/bug_reports_list_screen.dart";
 import "package:prox/widgets/retry_banner.dart";
 import "package:prox/widgets/safe_snack.dart";
 
-class SupportCenterScreen extends StatelessWidget {
+class SupportCenterScreen extends StatefulWidget {
   const SupportCenterScreen({super.key});
+
+  @override
+  State<SupportCenterScreen> createState() => _SupportCenterScreenState();
+}
+
+class _SupportCenterScreenState extends State<SupportCenterScreen> {
+  @override
+  void initState() {
+    super.initState();
+    SupportTicketQueue.instance.ensureLoaded().catchError((Object _) {});
+  }
 
   Future<void> _pushWithHelpContext(
     BuildContext context, {
@@ -24,9 +37,9 @@ class SupportCenterScreen extends StatelessWidget {
   }) async {
     final previous = ContextHelpService.instance.contextKey.value;
     ContextHelpService.instance.setContext(contextKey);
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => page),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => page));
     ContextHelpService.instance.setContext(previous);
   }
 
@@ -37,9 +50,7 @@ class SupportCenterScreen extends StatelessWidget {
     final queue = SupportTicketQueue.instance;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Support & feedback"),
-      ),
+      appBar: AppBar(title: const Text("Support & feedback")),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -80,7 +91,7 @@ class SupportCenterScreen extends StatelessWidget {
           OutlinedButton.icon(
             onPressed: () => _openTesterForm(context),
             icon: const Icon(Icons.bug_report_outlined),
-            label: const Text("Open tester support form"),
+            label: const Text("My bug reports"),
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
@@ -100,6 +111,16 @@ class SupportCenterScreen extends StatelessWidget {
             animation: queue,
             builder: (context, _) {
               final drafts = queue.drafts;
+              if (queue.lastError != null) {
+                return ListTile(
+                  title: Text(queue.lastError!),
+                  trailing: TextButton(
+                    onPressed: () =>
+                        queue.ensureLoaded().catchError((Object _) {}),
+                    child: const Text("Retry"),
+                  ),
+                );
+              }
               if (drafts.isEmpty) {
                 return Text(
                   "No drafts yet. Start a support message and it will appear here until you send or delete it.",
@@ -110,13 +131,7 @@ class SupportCenterScreen extends StatelessWidget {
               }
 
               return Column(
-                children: drafts
-                    .map(
-                      (d) => _DraftTile(
-                        draft: d,
-                      ),
-                    )
-                    .toList(),
+                children: drafts.map((d) => _DraftTile(draft: d)).toList(),
               );
             },
           ),
@@ -157,26 +172,24 @@ class SupportCenterScreen extends StatelessWidget {
   }
 
   static Future<void> _openTesterForm(BuildContext context) async {
-    // Placeholder URL for the tester portal / support form.
-    final Uri uri = Uri.parse("https://prox-us.com/tester-support");
-    final bool ok =
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok) {
-      if (!context.mounted) return;
-      safeShowSnackBar(context, "Could not open the support form.");
-    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const BugReportsListScreen()),
+    );
   }
 
   static Future<void> _emailSupport(BuildContext context) async {
-    final Uri uri = Uri(
-      scheme: "mailto",
-      path: "support@prox-us.com",
-      query: Uri.encodeQueryComponent(
-        "subject=Prox tester feedback&body=What were you trying to do?\nWhat happened instead?\nAny screenshots or extra details?",
-      ),
+    final Uri uri = supportEmailUri(
+      subject: "Prox tester feedback",
+      body:
+          "What were you trying to do?\nWhat happened instead?\nAny screenshots or extra details?",
     );
 
-    final bool ok = await launchUrl(uri);
+    bool ok = false;
+    try {
+      ok = await launchUrl(uri);
+    } catch (_) {
+      /* Offer an actionable error below. */
+    }
     if (!ok) {
       if (!context.mounted) return;
       safeShowSnackBar(context, "Could not open email app.");
@@ -197,19 +210,14 @@ class _SupportHintCard extends StatelessWidget {
       color: cs.surfaceContainerHighest,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: cs.outline.withValues(alpha: 0.35),
-        ),
+        side: BorderSide(color: cs.outline.withValues(alpha: 0.35)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              Icons.lightbulb_outline,
-              color: cs.primary,
-            ),
+            Icon(Icons.lightbulb_outline, color: cs.primary),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -243,9 +251,7 @@ class _Bullet extends StatelessWidget {
         children: [
           Text(
             "\u2022",
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: cs.onSurface,
-            ),
+            style: theme.textTheme.bodyMedium?.copyWith(color: cs.onSurface),
           ),
           const SizedBox(width: 6),
           Expanded(
@@ -288,13 +294,10 @@ class _DraftTile extends StatelessWidget {
       color: cs.surfaceContainerHighest,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
-        side: BorderSide(
-          color: cs.outline.withValues(alpha: 0.35),
-        ),
+        side: BorderSide(color: cs.outline.withValues(alpha: 0.35)),
       ),
       child: ListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         title: Text(
           draft.subject.isEmpty ? "Untitled support message" : draft.subject,
           maxLines: 1,
@@ -332,9 +335,7 @@ class _DraftTile extends StatelessWidget {
           Navigator.of(context)
               .push(
                 MaterialPageRoute<void>(
-                  builder: (_) => SupportComposeScreen(
-                    existingDraft: draft,
-                  ),
+                  builder: (_) => SupportComposeScreen(existingDraft: draft),
                 ),
               )
               .then((_) {
@@ -344,8 +345,16 @@ class _DraftTile extends StatelessWidget {
         trailing: IconButton(
           icon: const Icon(Icons.delete_outline),
           tooltip: "Delete draft",
-          onPressed: () {
-            queue.removeDraft(draft.id);
+          onPressed: () async {
+            try {
+              await queue.removeDraft(draft.id);
+            } catch (_) {
+              if (context.mounted)
+                safeShowSnackBar(
+                  context,
+                  "Could not delete this draft. Try again.",
+                );
+            }
           },
         ),
       ),

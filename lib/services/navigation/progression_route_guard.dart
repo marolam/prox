@@ -10,7 +10,6 @@ class ProgressionRouteGuard {
     "/auth",
     "/home",
     "/nearby",
-    "/matches",
     "/chat",
     "/meetup_plan",
     "/meetup_live",

@@ -1,5 +1,6 @@
 import "package:cloud_firestore/cloud_firestore.dart";
 import "package:firebase_auth/firebase_auth.dart";
+import "dart:async";
 import "dart:math";
 
 import "package:prox/services/first_user_journey/first_user_journey_service.dart";
@@ -101,8 +102,31 @@ class PartyService {
   static const Duration _presenceFreshness = Duration(minutes: 5);
   static const Duration _partyAddRequestTtl = Duration(days: 30);
 
+  static bool isOnlinePresenceData(
+    Map<String, dynamic>? data, {
+    DateTime? now,
+  }) {
+    if (data == null) return false;
+    final ts = data["ts"];
+    final expiresAt = data["expiresAt"];
+    if (ts is! Timestamp || expiresAt is! Timestamp) return false;
+    final current = now ?? DateTime.now();
+    return expiresAt.toDate().isAfter(current) &&
+        current.difference(ts.toDate()) <= _presenceFreshness;
+  }
+
   CollectionReference<Map<String, dynamic>> _party(String uid) =>
       _db.collection("users").doc(uid).collection("party");
+
+  DocumentReference<Map<String, dynamic>> _partyNetworkSettings(String uid) =>
+      _db
+          .collection("users")
+          .doc(uid)
+          .collection("settings")
+          .doc("partyNetwork");
+
+  DocumentReference<Map<String, dynamic>> _partyNetworkRequest(String uid) =>
+      _db.collection("partyNetworkRequests").doc(uid);
 
   bool _isPartyMemberDocId(String docId) {
     final id = docId.trim();
@@ -574,6 +598,64 @@ class PartyService {
     return snap.exists;
   }
 
+  Stream<Set<String>> watchOnlinePartyUids(Iterable<String> partyUids) {
+    final uids = partyUids
+        .map((uid) => uid.trim())
+        .where((uid) => uid.isNotEmpty)
+        .toSet();
+    if (uids.isEmpty) return Stream<Set<String>>.value(const <String>{});
+
+    final presence = <String, Map<String, dynamic>?>{};
+    final subscriptions = <StreamSubscription>[];
+    Timer? timer;
+    late final StreamController<Set<String>> controller;
+
+    Set<String> onlineNow() {
+      final now = DateTime.now();
+      return presence.entries
+          .where((entry) {
+            return isOnlinePresenceData(entry.value, now: now);
+          })
+          .map((entry) => entry.key)
+          .toSet();
+    }
+
+    void emit() {
+      if (!controller.isClosed) controller.add(onlineNow());
+    }
+
+    controller = StreamController<Set<String>>(
+      onListen: () {
+        for (final uid in uids) {
+          subscriptions.add(
+            _db
+                .collection("users")
+                .doc(uid)
+                .collection("presence")
+                .doc("current")
+                .snapshots()
+                .listen((snap) {
+              presence[uid] = snap.data();
+              emit();
+            }, onError: (_) {
+              presence[uid] = null;
+              emit();
+            }),
+          );
+        }
+        timer = Timer.periodic(const Duration(seconds: 30), (_) => emit());
+        emit();
+      },
+      onCancel: () async {
+        timer?.cancel();
+        for (final subscription in subscriptions) {
+          await subscription.cancel();
+        }
+      },
+    );
+    return controller.stream;
+  }
+
   /// Live stream for "is other in my party?"
   Stream<bool> watchIsInMyParty(String otherUid) {
     final uid = _me();
@@ -614,6 +696,38 @@ class PartyService {
         return out;
       });
     });
+  }
+
+  Stream<bool> watchPartyNetworkSharing() {
+    final uid = _me();
+    return _partyNetworkSettings(uid)
+        .snapshots()
+        .map((snap) => snap.data()?["sharingEnabled"] == true);
+  }
+
+  Future<void> setPartyNetworkSharing(bool enabled) async {
+    final uid = _me();
+    await _partyNetworkSettings(uid).set(<String, Object?>{
+      "sharingEnabled": enabled,
+      "updatedAt": FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Stream<Map<String, dynamic>> watchPartyNetworkInsights() {
+    final uid = _me();
+    return _partyNetworkRequest(uid)
+        .snapshots()
+        .map((snap) => snap.data() ?? const <String, dynamic>{});
+  }
+
+  Future<void> refreshPartyNetworkInsights() async {
+    final uid = _me();
+    await _partyNetworkRequest(uid).set(<String, Object?>{
+      "ownerUid": uid,
+      "requestNonce": "${uid}_${DateTime.now().millisecondsSinceEpoch}",
+      "requestedAt": FieldValue.serverTimestamp(),
+      "status": "requested",
+    }, SetOptions(merge: true));
   }
 
   Future<void> addToParty(

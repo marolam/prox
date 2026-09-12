@@ -1,3 +1,6 @@
+import "package:prox/services/ui_telemetry_service.dart";
+
+/// Local operational counts, excluding user payloads and external analytics.
 class MetricsEventService {
   MetricsEventService._();
   static final MetricsEventService instance = MetricsEventService._();
@@ -8,5 +11,8 @@ class MetricsEventService {
     String category = "",
     String contextId = "",
     String contextType = "",
-  }) async {}
+  }) async {
+    if (event.isEmpty || event.length > 100) return;
+    UiTelemetryService.instance.log(event);
+  }
 }

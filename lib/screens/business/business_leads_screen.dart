@@ -1,7 +1,7 @@
 import "package:flutter/material.dart";
 
 import "package:prox/screens/match_inbox/match_inbox_screen.dart";
-import "package:prox/screens/matches/matches_screen.dart";
+import "package:prox/screens/chats/chat_threads_screen.dart";
 import "package:prox/services/help/context_help_service.dart";
 import "package:prox/screens/services/match_settings_service.dart";
 
@@ -30,12 +30,12 @@ class BusinessLeadsScreen extends StatelessWidget {
     );
   }
 
-  void _openMatches(BuildContext context) {
+  void _openPartyChats(BuildContext context) {
     // ignore: discarded_futures
     _pushWithHelpContext(
       context,
       contextKey: "business:active_chats",
-      page: const MatchesScreen(),
+      page: const ChatThreadsScreen(),
     );
   }
 
@@ -65,7 +65,9 @@ class BusinessLeadsScreen extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("Lead filters", style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                Text("Lead filters",
+                    style: theme.textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w800)),
                 const SizedBox(height: 10),
                 StreamBuilder(
                   stream: MatchSettingsService.instance.watchDiscovery(),
@@ -75,16 +77,20 @@ class BusinessLeadsScreen extends StatelessWidget {
                       children: [
                         SwitchListTile.adaptive(
                           value: settings.businessOnly,
-                          onChanged: MatchSettingsService.instance.setBusinessOnly,
+                          onChanged:
+                              MatchSettingsService.instance.setBusinessOnly,
                           title: const Text("Business-only"),
-                          subtitle: const Text("Show clients looking for providers."),
+                          subtitle:
+                              const Text("Show clients looking for providers."),
                           contentPadding: EdgeInsets.zero,
                         ),
                         SwitchListTile.adaptive(
                           value: settings.immediateOnly,
-                          onChanged: MatchSettingsService.instance.setImmediateOnly,
+                          onChanged:
+                              MatchSettingsService.instance.setImmediateOnly,
                           title: const Text("Immediate-only"),
-                          subtitle: const Text("Only show people who need help now."),
+                          subtitle:
+                              const Text("Only show people who need help now."),
                           contentPadding: EdgeInsets.zero,
                         ),
                       ],
@@ -99,7 +105,9 @@ class BusinessLeadsScreen extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("Quick actions", style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                Text("Quick actions",
+                    style: theme.textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w800)),
                 const SizedBox(height: 10),
                 FilledButton.icon(
                   onPressed: () => _openNearby(context),
@@ -108,9 +116,9 @@ class BusinessLeadsScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 OutlinedButton.icon(
-                  onPressed: () => _openMatches(context),
+                  onPressed: () => _openPartyChats(context),
                   icon: const Icon(Icons.forum_outlined),
-                  label: const Text("Open active chats"),
+                  label: const Text("Open Party chats"),
                 ),
               ],
             ),

@@ -1,9 +1,12 @@
+import "package:prox/services/business_mode/business_access_policy.dart";
 import "package:cloud_firestore/cloud_firestore.dart";
 import "package:firebase_auth/firebase_auth.dart";
 import "package:http/http.dart" as http;
 import "dart:convert";
 
 import "package:prox/services/points_service.dart";
+import "package:cloud_functions/cloud_functions.dart";
+import "package:shared_preferences/shared_preferences.dart";
 
 /// Firestore-backed monetization state.
 ///
@@ -44,12 +47,16 @@ class MonetizationService {
 
   int referralsNeededForPointsGap(int pointsGap) {
     final int gap = pointsGap <= 0 ? 0 : pointsGap;
-    return gap == 0 ? 0 : ((gap + referralRewardPoints - 1) ~/ referralRewardPoints);
+    return gap == 0
+        ? 0
+        : ((gap + referralRewardPoints - 1) ~/ referralRewardPoints);
   }
 
   int supportTicketsNeededForPointsGap(int pointsGap) {
     final int gap = pointsGap <= 0 ? 0 : pointsGap;
-    return gap == 0 ? 0 : ((gap + supportRewardPoints - 1) ~/ supportRewardPoints);
+    return gap == 0
+        ? 0
+        : ((gap + supportRewardPoints - 1) ~/ supportRewardPoints);
   }
 
   DocumentReference<Map<String, dynamic>> _savedPaymentMethodRef(String uid) {
@@ -62,98 +69,36 @@ class MonetizationService {
         .doc("default");
   }
 
-        CollectionReference<Map<String, dynamic>> _paymentMethodsCollectionRef(String uid) {
-          return _fs
-          .collection("users")
-          .doc(uid)
-          .collection("billing")
-          .doc("paymentMethods")
-          .collection("items");
-        }
-
-        DocumentReference<Map<String, dynamic>> _billingPreferencesRef(String uid) {
-          return _fs
-          .collection("users")
-          .doc(uid)
-          .collection("billing")
-          .doc("preferences");
-        }
+  CollectionReference<Map<String, dynamic>> _paymentMethodsCollectionRef(
+    String uid,
+  ) {
+    return _fs
+        .collection("users")
+        .doc(uid)
+        .collection("billing")
+        .doc("paymentMethods")
+        .collection("items");
+  }
 
   Future<void> saveDefaultPaymentMethod({
     required String uid,
     required String paymentMethodId,
     String? brand,
     String? last4,
-    String provider = "stripe_stub",
+    String provider = "square",
   }) async {
-    final cleanUid = uid.trim();
-    final cleanPm = paymentMethodId.trim();
-    if (cleanUid.isEmpty || cleanPm.isEmpty) {
-      throw StateError("uid and paymentMethodId are required");
-    }
-
-    final cardPayload = <String, Object?>{
-      "paymentMethodId": cleanPm,
-      "brand": (brand ?? "").trim(),
-      "last4": (last4 ?? "").trim(),
-      "provider": provider.trim().isEmpty ? "stripe_stub" : provider.trim(),
-      "active": true,
-      "isDefault": true,
-      "updatedAt": FieldValue.serverTimestamp(),
-    };
-
-    await _paymentMethodsCollectionRef(cleanUid)
-        .doc(cleanPm)
-        .set(cardPayload, SetOptions(merge: true));
-
-    await _savedPaymentMethodRef(cleanUid).set(<String, Object?>{
-      "paymentMethodId": cleanPm,
-      "brand": (brand ?? "").trim(),
-      "last4": (last4 ?? "").trim(),
-      "provider": provider.trim().isEmpty ? "stripe_stub" : provider.trim(),
-      "active": true,
-      "updatedAt": FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    throw StateError(
+      "Manage payment details in the secure payment provider checkout.",
+    );
   }
 
   Future<void> setDefaultPaymentMethodId({
     required String uid,
     required String paymentMethodId,
   }) async {
-    final cleanUid = uid.trim();
-    final cleanPm = paymentMethodId.trim();
-    if (cleanUid.isEmpty || cleanPm.isEmpty) {
-      throw StateError("uid and paymentMethodId are required");
-    }
-
-    final cardSnap = await _paymentMethodsCollectionRef(cleanUid).doc(cleanPm).get();
-    final card = cardSnap.data() ?? <String, dynamic>{
-      "paymentMethodId": cleanPm,
-      "brand": "",
-      "last4": "",
-      "provider": "square",
-      "active": true,
-    };
-
-    final batch = _fs.batch();
-    final allCards = await _paymentMethodsCollectionRef(cleanUid).where("active", isEqualTo: true).get();
-    for (final doc in allCards.docs) {
-      batch.set(doc.reference, <String, Object?>{
-        "isDefault": doc.id == cleanPm,
-        "updatedAt": FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    }
-
-    batch.set(_savedPaymentMethodRef(cleanUid), <String, Object?>{
-      "paymentMethodId": cleanPm,
-      "brand": (card["brand"] ?? "").toString().trim(),
-      "last4": (card["last4"] ?? "").toString().trim(),
-      "provider": (card["provider"] ?? "square").toString().trim(),
-      "active": true,
-      "updatedAt": FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-
-    await batch.commit();
+    throw StateError(
+      "Manage payment details in the secure payment provider checkout.",
+    );
   }
 
   Future<List<Map<String, String>>> listPaymentMethods({
@@ -162,9 +107,9 @@ class MonetizationService {
     final cleanUid = uid.trim();
     if (cleanUid.isEmpty) return const <Map<String, String>>[];
 
-    final snap = await _paymentMethodsCollectionRef(cleanUid)
-        .where("active", isEqualTo: true)
-        .get();
+    final snap = await _paymentMethodsCollectionRef(
+      cleanUid,
+    ).where("active", isEqualTo: true).get();
 
     return _mapPaymentMethods(snap);
   }
@@ -188,7 +133,6 @@ class MonetizationService {
   List<Map<String, String>> _mapPaymentMethods(
     QuerySnapshot<Map<String, dynamic>> snap,
   ) {
-
     final out = <Map<String, String>>[];
     for (final doc in snap.docs) {
       final d = doc.data();
@@ -217,75 +161,14 @@ class MonetizationService {
     required String uid,
     required String paymentMethodId,
   }) async {
-    final cleanUid = uid.trim();
-    final cleanPm = paymentMethodId.trim();
-    if (cleanUid.isEmpty || cleanPm.isEmpty) {
-      throw StateError("uid and paymentMethodId are required");
-    }
-
-    final paymentMethodsRef = _paymentMethodsCollectionRef(cleanUid);
-    final cardRef = paymentMethodsRef.doc(cleanPm);
-    final defaultRef = _savedPaymentMethodRef(cleanUid);
-
-    final cardSnap = await cardRef.get();
-    final removedCard = cardSnap.data() ?? const <String, dynamic>{};
-
-    final activeSnap = await paymentMethodsRef.where("active", isEqualTo: true).get();
-    QueryDocumentSnapshot<Map<String, dynamic>>? nextDefaultDoc;
-    for (final doc in activeSnap.docs) {
-      final id = (doc.data()["paymentMethodId"] ?? doc.id).toString().trim();
-      if (id.isNotEmpty && id != cleanPm) {
-        nextDefaultDoc = doc;
-        break;
-      }
-    }
-
-    final hasNextDefault = nextDefaultDoc != null;
-    final nextDefaultDocId = nextDefaultDoc?.id ?? "";
-    final batch = _fs.batch();
-
-    batch.set(cardRef, <String, Object?>{
-      "active": false,
-      "isDefault": false,
-      "updatedAt": FieldValue.serverTimestamp(),
-      "removedAt": FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-
-    for (final doc in activeSnap.docs) {
-      if (doc.id == cardRef.id) continue;
-      batch.set(doc.reference, <String, Object?>{
-        "isDefault": hasNextDefault && doc.id == nextDefaultDocId,
-        "updatedAt": FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    }
-
-    if (!hasNextDefault) {
-      batch.set(defaultRef, <String, Object?>{
-        "paymentMethodId": "",
-        "brand": "",
-        "last4": "",
-        "provider": (removedCard["provider"] ?? "square").toString().trim(),
-        "active": false,
-        "updatedAt": FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    } else {
-      final nextDoc = nextDefaultDoc;
-      final next = nextDoc.data();
-      final nextPmId = (next["paymentMethodId"] ?? nextDoc.id).toString().trim();
-      batch.set(defaultRef, <String, Object?>{
-        "paymentMethodId": nextPmId,
-        "brand": (next["brand"] ?? "").toString().trim(),
-        "last4": (next["last4"] ?? "").toString().trim(),
-        "provider": (next["provider"] ?? "square").toString().trim(),
-        "active": true,
-        "updatedAt": FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    }
-
-    await batch.commit();
+    throw StateError(
+      "Manage payment details in the secure payment provider checkout.",
+    );
   }
 
-  Future<Map<String, dynamic>> getBillingPreferences({required String uid}) async {
+  Future<Map<String, dynamic>> getBillingPreferences({
+    required String uid,
+  }) async {
     final cleanUid = uid.trim();
     if (cleanUid.isEmpty) {
       return <String, dynamic>{
@@ -294,14 +177,17 @@ class MonetizationService {
       };
     }
 
-    final snap = await _billingPreferencesRef(cleanUid).get();
-    final d = snap.data() ?? const <String, dynamic>{};
-    final mode = (d["paymentMode"] ?? paymentModePointsFirst).toString().trim();
+    final prefs = await SharedPreferences.getInstance();
+    final mode =
+        prefs.getString("billing_payment_mode:$cleanUid") ??
+        paymentModePointsFirst;
     final validMode =
-        mode == paymentModePointsOnly || mode == paymentModeCashOnly || mode == paymentModePointsFirst;
+        mode == paymentModePointsOnly ||
+        mode == paymentModeCashOnly ||
+        mode == paymentModePointsFirst;
 
     return <String, dynamic>{
-      "autoRenewWithSelectedCard": d["autoRenewWithSelectedCard"] == true,
+      "autoRenewWithSelectedCard": false,
       "paymentMode": validMode ? mode : paymentModePointsFirst,
     };
   }
@@ -316,16 +202,16 @@ class MonetizationService {
 
     final cleanMode = paymentMode.trim();
     final effectiveMode =
-        cleanMode == paymentModePointsOnly || cleanMode == paymentModeCashOnly || cleanMode == paymentModePointsFirst
-            ? cleanMode
-            : paymentModePointsFirst;
+        cleanMode == paymentModePointsOnly ||
+            cleanMode == paymentModeCashOnly ||
+            cleanMode == paymentModePointsFirst
+        ? cleanMode
+        : paymentModePointsFirst;
 
-    await _billingPreferencesRef(cleanUid).set(<String, Object?>{
-      "autoRenewWithSelectedCard": autoRenewWithSelectedCard,
-      "paymentMode": effectiveMode,
-      "preferPointsFirst": effectiveMode == paymentModePointsFirst,
-      "updatedAt": FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    if (autoRenewWithSelectedCard)
+      throw StateError("Access is prepaid and does not renew automatically.");
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString("billing_payment_mode:$cleanUid", effectiveMode);
   }
 
   Future<Map<String, String>> getDefaultPaymentMethod({
@@ -345,7 +231,7 @@ class MonetizationService {
       "paymentMethodId": paymentMethodId,
       "brand": (d["brand"] ?? "").toString(),
       "last4": (d["last4"] ?? "").toString(),
-      "provider": (d["provider"] ?? "stripe_stub").toString(),
+      "provider": (d["provider"] ?? "square").toString(),
     };
   }
 
@@ -362,17 +248,14 @@ class MonetizationService {
     }
 
     final endpoint = _externalCheckoutSessionUrl.trim();
-    if (endpoint.isEmpty) {
-      // Fallback so testers can still validate flow when endpoint is not configured.
-      final localSessionId = await createExternalCheckoutIntent(
-        uid: cleanUid,
-        sku: cleanSku,
-        provider: provider,
+    final endpointUri = Uri.tryParse(endpoint);
+    if (endpointUri == null ||
+        endpointUri.scheme != "https" ||
+        endpointUri.host.isEmpty ||
+        endpointUri.userInfo.isNotEmpty) {
+      throw StateError(
+        "Card checkout is not available in this build. No payment has been taken.",
       );
-      return <String, String>{
-        "sessionId": localSessionId,
-        "checkoutUrl": "",
-      };
     }
 
     final currentUser = _auth.currentUser;
@@ -381,37 +264,43 @@ class MonetizationService {
     }
 
     final idToken = await currentUser.getIdToken(true);
-    final response = await http.post(
-      Uri.parse(endpoint),
-      headers: <String, String>{
-        "content-type": "application/json",
-        "authorization": "Bearer $idToken",
-      },
-      body: jsonEncode(<String, String>{
-        "sku": cleanSku,
-        "provider": provider.trim().isEmpty ? "square" : provider.trim(),
-        if (paymentMethodId != null && paymentMethodId.trim().isNotEmpty)
-          "paymentMethodId": paymentMethodId.trim(),
-      }),
-    );
+    final response = await http
+        .post(
+          endpointUri,
+          headers: <String, String>{
+            "content-type": "application/json",
+            "authorization": "Bearer $idToken",
+          },
+          body: jsonEncode(<String, String>{
+            "sku": cleanSku,
+            "provider": provider.trim().isEmpty ? "square" : provider.trim(),
+            if (paymentMethodId != null && paymentMethodId.trim().isNotEmpty)
+              "paymentMethodId": paymentMethodId.trim(),
+          }),
+        )
+        .timeout(const Duration(seconds: 20));
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError(
-        "External checkout session failed (${response.statusCode}): ${response.body}",
+        "Card checkout is unavailable (${response.statusCode}). Please try again.",
       );
     }
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final sessionId = (data["sessionId"] ?? "").toString();
     final checkoutUrl = (data["checkoutUrl"] ?? "").toString();
-    if (sessionId.trim().isEmpty) {
-      throw StateError("External checkout response missing sessionId");
+    final checkoutUri = Uri.tryParse(checkoutUrl);
+    if (sessionId.trim().isEmpty ||
+        checkoutUri == null ||
+        checkoutUri.scheme != "https" ||
+        checkoutUri.host.isEmpty ||
+        checkoutUri.userInfo.isNotEmpty) {
+      throw StateError(
+        "The payment provider did not return a secure checkout page.",
+      );
     }
 
-    return <String, String>{
-      "sessionId": sessionId,
-      "checkoutUrl": checkoutUrl,
-    };
+    return <String, String>{"sessionId": sessionId, "checkoutUrl": checkoutUrl};
   }
 
   Future<Map<String, dynamic>> getExternalCheckoutSession({
@@ -434,10 +323,7 @@ class MonetizationService {
 
     final snap = await ref.get();
     if (!snap.exists) {
-      return <String, dynamic>{
-        "exists": false,
-        "status": "",
-      };
+      return <String, dynamic>{"exists": false, "status": ""};
     }
 
     final data = snap.data() ?? const <String, dynamic>{};
@@ -458,17 +344,6 @@ class MonetizationService {
         .doc("entitlements");
   }
 
-  DocumentReference<Map<String, dynamic>> _invoiceRef(
-      String uid, String invoiceId) {
-    return _fs
-        .collection("users")
-        .doc(uid)
-        .collection("billing")
-        .doc("invoices")
-        .collection("items")
-        .doc(invoiceId);
-  }
-
   Future<bool> isBusinessPurchased(String uid) async {
     final clean = uid.trim();
     if (clean.isEmpty) return false;
@@ -486,20 +361,18 @@ class MonetizationService {
     final data = snap.data() ?? <String, dynamic>{};
     if (data['businessSubscriptionActive'] != true) return false;
 
-    final rawRenew = data['subscriptionRenewsAt'];
-    if (rawRenew is Timestamp) {
-      return rawRenew.toDate().isAfter(DateTime.now());
-    }
-    return true;
+    return BusinessAccessPolicy.hasActivePrepaid(data);
   }
 
-  /// In our UX, "Business unlocked" means:
-  /// - either a one-time purchase has been recorded, OR
-  /// - a subscription is active.
+  /// Access is a confirmed lifetime purchase or prepaid time with a valid expiry.
   Future<bool> isBusinessUnlocked(String uid) async {
-    final purchased = await isBusinessPurchased(uid);
-    if (purchased) return true;
-    return isBusinessSubscriptionActive(uid);
+    final clean = uid.trim();
+    if (clean.isEmpty || _auth.currentUser?.uid != clean) return false;
+    final snap = await _entitlementRef(
+      clean,
+    ).get().timeout(const Duration(seconds: 8));
+    if (_auth.currentUser?.uid != clean) return false;
+    return BusinessAccessPolicy.hasAccess(snap.data() ?? <String, dynamic>{});
   }
 
   Future<bool> isHighRadiusUnlocked(String uid) async {
@@ -541,275 +414,103 @@ class MonetizationService {
     required String uid,
     required bool purchased,
     String? sku,
-  }) async {
-    final clean = uid.trim();
-    if (clean.isEmpty) return;
-
-    final Map<String, Object?> payload = <String, Object?>{
-      'businessPurchased': purchased,
-      'updatedAt': FieldValue.serverTimestamp(),
-    };
-    if (sku != null && sku.trim().isNotEmpty) {
-      payload['lastSku'] = sku.trim();
-    }
-
-    await _entitlementRef(clean).set(payload, SetOptions(merge: true));
-  }
-
+  }) async => _serverOnly();
   Future<void> setHighRadiusUnlocked({
     required String uid,
     required bool unlocked,
     String? sku,
-  }) async {
-    final clean = uid.trim();
-    if (clean.isEmpty) return;
-
-    final Map<String, Object?> payload = <String, Object?>{
-      'highRadiusUnlocked': unlocked,
-      'updatedAt': FieldValue.serverTimestamp(),
-    };
-    if (sku != null && sku.trim().isNotEmpty) {
-      payload['lastSku'] = sku.trim();
-    }
-
-    await _entitlementRef(clean).set(payload, SetOptions(merge: true));
-  }
-
+  }) async => _serverOnly();
   Future<void> setEntitlementBool({
     required String uid,
     required String key,
     required bool value,
     String? sku,
-  }) async {
-    final cleanUid = uid.trim();
-    final cleanKey = key.trim();
-    if (cleanUid.isEmpty || cleanKey.isEmpty) return;
-
-    final payload = <String, Object?>{
-      cleanKey: value,
-      'updatedAt': FieldValue.serverTimestamp(),
-    };
-    if (sku != null && sku.trim().isNotEmpty) {
-      payload['lastSku'] = sku.trim();
-    }
-
-    await _entitlementRef(cleanUid).set(payload, SetOptions(merge: true));
-  }
-
+  }) async => _serverOnly();
   Future<void> setBusinessSubscriptionActive({
     required String uid,
     required bool active,
     String? sku,
-  }) async {
-    final clean = uid.trim();
-    if (clean.isEmpty) return;
-
-    final Map<String, Object?> payload = <String, Object?>{
-      'businessSubscriptionActive': active,
-      'updatedAt': FieldValue.serverTimestamp(),
-    };
-
-    if (active) {
-      payload['subscriptionStartedAt'] = FieldValue.serverTimestamp();
-      payload['subscriptionRenewsAt'] = Timestamp.fromDate(
-        DateTime.now().add(const Duration(days: 30)),
-      );
-    } else {
-      payload['subscriptionRenewsAt'] = null;
-    }
-
-    if (sku != null && sku.trim().isNotEmpty) {
-      payload['lastSku'] = sku.trim();
-    }
-
-    await _entitlementRef(clean).set(payload, SetOptions(merge: true));
-  }
-
+  }) async => _serverOnly();
   Future<void> setBusinessActivationBundleUnlocked({
     required String uid,
     required bool unlocked,
     String? sku,
-  }) async {
-    final clean = uid.trim();
-    if (clean.isEmpty) return;
+  }) async => _serverOnly();
+  Never _serverOnly() =>
+      throw StateError("Access is granted by Prox after a verified purchase.");
 
-    final payload = <String, Object?>{
-      "businessStoreUnlocked": unlocked,
-      "businessWalletUnlocked": unlocked,
-      "updatedAt": FieldValue.serverTimestamp(),
-    };
-    if (sku != null && sku.trim().isNotEmpty) {
-      payload["lastSku"] = sku.trim();
+  Future<String?> getLastSku(String uid) async =>
+      (await _entitlementRef(uid).get()).data()?["lastSku"]?.toString();
+
+  final Map<String, Future<bool>> _purchases = {};
+  Future<bool> _purchaseWithPoints(String uid, String sku) {
+    final key = "$uid:$sku";
+    final pending = _purchases[key];
+    if (pending != null) return pending;
+    final future = _submitPointsPurchase(uid, sku);
+    _purchases[key] = future;
+    return future.whenComplete(() {
+      if (identical(_purchases[key], future)) _purchases.remove(key);
+    });
+  }
+
+  Future<bool> _submitPointsPurchase(String uid, String sku) async {
+    if (_auth.currentUser?.uid != uid) throw StateError("Sign in to purchase.");
+    final prefs = await SharedPreferences.getInstance();
+    final key = "pending_purchase:$uid:$sku";
+    final requestId =
+        prefs.getString(key) ?? _fs.collection("purchaseIds").doc().id;
+    await prefs.setString(key, requestId);
+    try {
+      final result = await FirebaseFunctions.instanceFor(region: "us-central1")
+          .httpsCallable(
+            "purchaseWithPoints",
+            options: HttpsCallableOptions(timeout: const Duration(seconds: 20)),
+          )
+          .call<dynamic>({"sku": sku, "requestId": requestId});
+      final data = result.data;
+      if (data is! Map || data["purchased"] != true)
+        throw StateError("Purchase was not confirmed.");
+      await prefs.remove(key);
+      try {
+        await PointsService.instance.refreshMeta(uid);
+      } catch (_) {}
+      return true;
+    } on FirebaseFunctionsException catch (error) {
+      if (error.code == "failed-precondition" &&
+          (error.message ?? "").toLowerCase().contains("not enough points")) {
+        await prefs.remove(key);
+        return false;
+      }
+      rethrow;
     }
-
-    await _entitlementRef(clean).set(payload, SetOptions(merge: true));
   }
 
-  Future<String?> getLastSku(String uid) async {
-    final clean = uid.trim();
-    if (clean.isEmpty) return null;
-
-    final snap = await _entitlementRef(clean).get();
-    final v = snap.data()?['lastSku']?.toString();
-    if (v == null || v.trim().isEmpty) return null;
-    return v.trim();
-  }
-
-  Future<bool> purchaseOneTimeUnlockWithPoints(String uid) async {
-    final clean = uid.trim();
-    if (clean.isEmpty) return false;
-
-    final ok = await PointsService.instance.spendPoints(
-      uid: clean,
-      amount: oneTimeUnlockPoints,
-      reason: 'Business one-time unlock',
-      category: 'billing',
-      contextType: 'business_one_time_unlock',
-    );
-    if (!ok) return false;
-
-    await setBusinessPurchased(
-        uid: clean, purchased: true, sku: 'biz_onetime_unlock');
-    await setBusinessActivationBundleUnlocked(
-      uid: clean,
-      unlocked: true,
-      sku: 'biz_onetime_unlock',
-    );
-    await _logInvoice(
-      uid: clean,
-      sku: 'biz_onetime_unlock',
-      amountPoints: oneTimeUnlockPoints,
-      status: 'paid',
-      paymentMethod: 'points',
-      description: 'Business Mode one-time unlock',
-    );
-    return true;
-  }
-
-  Future<bool> startMonthlySubscriptionWithPoints(String uid) async {
-    final clean = uid.trim();
-    if (clean.isEmpty) return false;
-
-    final ok = await PointsService.instance.spendPoints(
-      uid: clean,
-      amount: monthlySubscriptionPoints,
-      reason: 'Business monthly subscription',
-      category: 'billing',
-      contextType: 'business_monthly_subscription',
-    );
-    if (!ok) return false;
-
-    await setBusinessSubscriptionActive(
-      uid: clean,
-      active: true,
-      sku: 'biz_monthly_subscription',
-    );
-    await setBusinessActivationBundleUnlocked(
-      uid: clean,
-      unlocked: true,
-      sku: 'biz_monthly_subscription',
-    );
-    await _logInvoice(
-      uid: clean,
-      sku: 'biz_monthly_subscription',
-      amountPoints: monthlySubscriptionPoints,
-      status: 'paid',
-      paymentMethod: 'points',
-      description: 'Business monthly subscription',
-    );
-    return true;
-  }
+  Future<bool> purchaseOneTimeUnlockWithPoints(String uid) =>
+      _purchaseWithPoints(uid, "biz_onetime_unlock");
+  Future<bool> startMonthlySubscriptionWithPoints(String uid) =>
+      _purchaseWithPoints(uid, "biz_monthly_subscription");
 
   Future<void> cancelMonthlySubscription(String uid) async {
-    final clean = uid.trim();
-    if (clean.isEmpty) return;
-
-    await setBusinessSubscriptionActive(
-      uid: clean,
-      active: false,
-      sku: 'biz_monthly_subscription',
-    );
-
-    await _entitlementRef(clean).set(
-      <String, Object?>{
-        'cancelledAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      },
-      SetOptions(merge: true),
-    );
-  }
-
-  Future<void> _logInvoice({
-    required String uid,
-    required String sku,
-    required int amountPoints,
-    required String status,
-    required String paymentMethod,
-    required String description,
-  }) async {
-    final invoiceId = _fs.collection('tmp').doc().id;
-    await _invoiceRef(uid, invoiceId).set(<String, Object?>{
-      'invoiceId': invoiceId,
-      'sku': sku,
-      'amountPoints': amountPoints,
-      'status': status,
-      'paymentMethod': paymentMethod,
-      'description': description,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+    if (_auth.currentUser?.uid != uid)
+      throw StateError("Sign in to manage your access.");
+    await FirebaseFunctions.instanceFor(
+      region: "us-central1",
+    ).httpsCallable("cancelMySubscription").call<dynamic>();
   }
 
   Future<String> createExternalCheckoutIntent({
     required String uid,
     required String sku,
-    String provider = "stripe_stub",
+    String provider = "square",
   }) async {
-    final cleanUid = uid.trim();
-    final cleanSku = sku.trim();
-    if (cleanUid.isEmpty || cleanSku.isEmpty) {
-      throw StateError("uid and sku are required");
-    }
-
-    final ref = _fs
-        .collection("users")
-        .doc(cleanUid)
-        .collection("billing")
-        .doc("externalCheckout")
-        .collection("items")
-        .doc();
-
-    await ref.set(<String, Object?>{
-      "sessionId": ref.id,
-      "uid": cleanUid,
-      "sku": cleanSku,
-      "provider": provider.trim().isEmpty ? "stripe_stub" : provider.trim(),
-      "status": "intent_created",
-      "createdAt": FieldValue.serverTimestamp(),
-      "updatedAt": FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-
-    return ref.id;
-  }
-
-  /// Reset all local monetization flags for this user.
-  /// Dev/testing only.
-  Future<void> resetForUser(String uid) async {
-    final clean = uid.trim();
-    if (clean.isEmpty) return;
-
-    await _entitlementRef(clean).set(
-      <String, Object?>{
-        'businessPurchased': false,
-        'businessSubscriptionActive': false,
-        'businessStoreUnlocked': false,
-        'businessWalletUnlocked': false,
-        'highRadiusUnlocked': false,
-        'lastSku': null,
-        'subscriptionRenewsAt': null,
-        'subscriptionStartedAt': null,
-        'updatedAt': FieldValue.serverTimestamp(),
-      },
-      SetOptions(merge: true),
+    final session = await createExternalCheckoutSession(
+      uid: uid,
+      sku: sku,
+      provider: provider,
     );
+    return session["sessionId"]!;
   }
+
+  Future<void> resetForUser(String uid) async => _serverOnly();
 }
