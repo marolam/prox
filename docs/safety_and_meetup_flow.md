@@ -1,6 +1,6 @@
 # Safety access and definitive meetup outcomes
 
-Release candidate: `0.19.0+23`, including the meetup feedback/Party changes merged in PR #10. Required functions are deployed; rules activation and signed publication are pending. Attempts 21 and 22 stopped before package upload; build 23 fixes release-test formatting and Java-path portability with the same app code.
+Released: `0.19.0+23` on September 12, 2026, including the meetup feedback/Party changes merged in PR #10. Required functions and exact tagged rules are deployed. Android is published with its update policy active; Apple validated build 23 for the internal TestFlight group. External group assignment and beta submission/review remain pending. See `automatic_paired_releases.md` for verified distribution status.
 
 ## User experience
 

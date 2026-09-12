@@ -1,6 +1,6 @@
 # Meetup feedback and mutual Party requests
 
-Build candidate: `0.19.0+23`. Uploaded iOS build 20 does not contain these changes. Attempts 21 and 22 stopped before package upload; build 23 fixes release-test formatting and Java-path portability with the same app code.
+Released: `0.19.0+23` on September 12, 2026. Android is published and its update policy is active; iOS build 23 is validated and available to internal TestFlight testers. External group assignment and beta submission/review remain pending. Uploaded iOS build 20 does not contain these changes. See `automatic_paired_releases.md` for verified publication and Apple status.
 
 Thumbs-up reveals **Add to Party** and **Not Right Now**. Each choice has a
 confirmation explaining membership and Party-visible profile sharing. Thumbs-down
@@ -52,7 +52,7 @@ new functions: `respondToPartyConnection`, `onPartyConnectionNotification`,
 accounting functions must be present. New queries use automatic single-field
 indexes (`members` array membership and `expiresAt` range); no composite index
 is required. The required functions are now deployed and active; all nine indexes
-are ready. Live rules activation and signed app publication are pending.
+are ready. The exact build 23 rules are live and the signed app is published.
 
 Validate with:
 

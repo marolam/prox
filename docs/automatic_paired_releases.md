@@ -93,6 +93,12 @@ permission to deploy application functions or Firestore rules. Run
 `Verify release policy authentication` on main before enabling automatic policy
 activation; this fetches the live template without changing it or logging it.
 
+Configured and verified September 12, 2026: the authentication check passed in
+https://github.com/marolam/prox/actions/runs/34691999782. Both
+`AUTO_PUBLISH_ANDROID_POLICY` and `UPDATE_LEGACY_ANDROID_POLICY` are now `true`.
+Future production version tags publish the verified APK and then advance both
+the platform and legacy Android policy through the Android-only condition.
+
 The workflow selects `paired-release-gate-prod`, `paired-release-gate-staging`,
 or `paired-release-gate-tester`. Configure their allowed deployment branches/tags
 and secrets as needed. Environment rules must permit the corresponding version
@@ -127,29 +133,49 @@ matching the uploaded artifact to the version is checked during publication.
 
 ## Release a version
 
-The current candidate is `0.19.0+23`; `0.19.0+19` is publicly released,
-and iOS `0.19.0+20` has already been uploaded to TestFlight. The meetup, Party,
-and safety source is merged in PR #10, with its required functions deployed and
-all nine indexes ready. The 33 public profiles and 23 presence records need no
-backfill. Activate the reviewed rules before distributing the new client.
+The current public release is
+[0.19.0+23](https://github.com/marolam/prox/releases/tag/v0.19.0%2B23), with the
+meetup, Party and safety source merged in PR #10. Its required functions and
+exact tagged Firestore rules are deployed, all nine indexes are ready, and the
+existing public profiles/presence records required no backfill. Android policy
+activation was verified for both platform and legacy Android clients, using the
+pinned APK URL. iOS policy and shared default values were preserved.
+
+The paired build verified both signed packages and uploaded build 23 to Apple:
+https://github.com/marolam/prox/actions/runs/34690292971. GitHub publication then
+failed because an unnecessary explicit old target commit required workflow-write
+permission after main's workflow files advanced. The corrected publisher verifies
+the existing remote tag and omits `--target`; new tags still require the exact
+verified commit. Publication-only recovery used the original package hashes:
+https://github.com/marolam/prox/actions/runs/34692301776. Both anonymous pinned and
+portal-latest downloads passed checksum verification. Do not rerun the original
+build or recovery now that the release is published.
+
+Apple inspection at 11:56 UTC September 12 confirmed build 23 is `VALID`,
+`IN_BETA_TESTING`, and assigned to the internal `Prox Testers` group:
+https://github.com/marolam/prox/actions/runs/34692336214. External state is
+`READY_FOR_BETA_SUBMISSION`, with no external group assigned to this build yet.
+Build 20 remains in external beta review. Do not describe build 23 as available
+to external testers or advance the iOS minimum for that population.
+
 Tag `v0.19.0+21` stopped before package building/upload because a release test
 did not tolerate PowerShell's wrapped exception output on macOS. Tag 22 passed
 those checks, then exposed a committed Windows Java path during Android build.
 Build 23 fixes both portability issues, selects CI's JDK 17 explicitly, and adds
 Mac release-tooling and Android compile PR checks. App code is unchanged from
 the candidate whose Flutter tests and iOS simulator compile passed. Do not reuse
-an existing tag or an uploaded TestFlight build number for this retry.
+an existing tag or an uploaded TestFlight build number.
 Increase the numeric build number for every new Android/iOS upload, across all
 channels. Never reuse a TestFlight build number to promote a tester build by
 rebuilding it as production.
 
 1. Set `pubspec.yaml` to `x.y.z+build` and commit the reviewed source.
 2. Push the source commit to the approved branch.
-3. Push a matching version tag. For example, after committing build 23 on `main`:
+3. Push a matching new version tag. For example, after committing build 24 on `main`:
 
    ```powershell
-   git tag -a 'v0.19.0+23' -m 'Prox 0.19.0+23'
-   git push origin 'v0.19.0+23'
+   git tag -a 'v0.19.0+24' -m 'Prox 0.19.0+24'
+   git push origin 'v0.19.0+24'
    ```
 
 The workflow rejects tags whose version differs from `pubspec.yaml`.
