@@ -6,10 +6,16 @@ import "package:prox/screens/services/user_profile_service.dart";
 
 class PartyMemberProfileScreen extends StatelessWidget {
   final String memberUid;
+  final Stream<bool>? membershipStream;
+  final Stream<UserProfile?>? profileStream;
+  final Stream<PartyProfileSharing>? sharingStream;
 
   const PartyMemberProfileScreen({
     super.key,
     required this.memberUid,
+    this.membershipStream,
+    this.profileStream,
+    this.sharingStream,
   });
 
   Widget _section(
@@ -28,9 +34,12 @@ class PartyMemberProfileScreen extends StatelessWidget {
             children: [
               Icon(icon, size: 20, color: theme.colorScheme.primary),
               const SizedBox(width: 8),
-              Text(title,
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w800)),
+              Text(
+                title,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -59,52 +68,78 @@ class PartyMemberProfileScreen extends StatelessWidget {
 
     if (sharing.shareHeadline &&
         (profile?.headline?.trim().isNotEmpty ?? false)) {
-      sections.add(_section(
-        context,
-        icon: Icons.short_text,
-        title: "Headline",
-        child: Text(profile!.headline!.trim()),
-      ));
+      sections.add(
+        _section(
+          context,
+          icon: Icons.short_text,
+          title: "Headline",
+          child: Text(profile!.headline!.trim()),
+        ),
+      );
     }
     if (sharing.shareAbout && sharing.about.isNotEmpty) {
-      sections.add(_section(context,
+      sections.add(
+        _section(
+          context,
           icon: Icons.person_outline,
           title: "About",
-          child: Text(sharing.about)));
+          child: Text(sharing.about),
+        ),
+      );
     }
     if (sharing.shareGeneralArea && sharing.generalArea.isNotEmpty) {
-      sections.add(_section(context,
+      sections.add(
+        _section(
+          context,
           icon: Icons.location_city_outlined,
           title: "General area",
-          child: Text(sharing.generalArea)));
+          child: Text(sharing.generalArea),
+        ),
+      );
     }
     if (sharing.shareKeywords &&
         ((profile?.searchingFor.isNotEmpty ?? false) ||
             (profile?.canProvide.isNotEmpty ?? false))) {
       if (profile!.searchingFor.isNotEmpty) {
-        sections.add(_section(context,
+        sections.add(
+          _section(
+            context,
             icon: Icons.search,
             title: "Wants",
-            child: _chips(profile.searchingFor)));
+            child: _chips(profile.searchingFor),
+          ),
+        );
       }
       if (profile.canProvide.isNotEmpty) {
-        sections.add(_section(context,
+        sections.add(
+          _section(
+            context,
             icon: Icons.handshake_outlined,
             title: "Has",
-            child: _chips(profile.canProvide)));
+            child: _chips(profile.canProvide),
+          ),
+        );
       }
     }
     if (sharing.shareContactEmail && sharing.contactEmail.isNotEmpty) {
-      sections.add(_section(context,
+      sections.add(
+        _section(
+          context,
           icon: Icons.email_outlined,
           title: "Contact email",
-          child: SelectableText(sharing.contactEmail)));
+          child: SelectableText(sharing.contactEmail),
+        ),
+      );
     }
     if (sharing.sharePhone && sharing.phone.isNotEmpty) {
-      sections.add(_section(context,
+      sections.add(
+        _section(
+          context,
           icon: Icons.phone_outlined,
           title: "Phone",
-          child: SelectableText(sharing.phone)));
+          child: SelectableText(sharing.phone),
+        ),
+      );
     }
 
     return ListView(
@@ -121,10 +156,9 @@ class PartyMemberProfileScreen extends StatelessWidget {
         Text(
           name?.isNotEmpty == true ? name! : "Party member",
           textAlign: TextAlign.center,
-          style: Theme.of(context)
-              .textTheme
-              .headlineSmall
-              ?.copyWith(fontWeight: FontWeight.w800),
+          style: Theme.of(
+            context,
+          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 28),
         if (sections.isEmpty)
@@ -149,7 +183,7 @@ class PartyMemberProfileScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text("Party profile")),
       body: StreamBuilder<bool>(
-        stream: PartyService.instance.watchIsInMyParty(uid),
+        stream: membershipStream ?? PartyService.instance.watchIsInMyParty(uid),
         builder: (context, membershipSnap) {
           if (membershipSnap.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -166,10 +200,13 @@ class PartyMemberProfileScreen extends StatelessWidget {
             );
           }
           return StreamBuilder<UserProfile?>(
-            stream: UserProfileService.instance.watchProfile(uid),
+            stream:
+                profileStream ?? UserProfileService.instance.watchProfile(uid),
             builder: (context, profileSnap) {
               return StreamBuilder<PartyProfileSharing>(
-                stream: PartyProfileService.instance.watchMember(uid),
+                stream:
+                    sharingStream ??
+                    PartyProfileService.instance.watchMember(uid),
                 builder: (context, sharingSnap) {
                   if (!sharingSnap.hasData &&
                       sharingSnap.connectionState == ConnectionState.waiting) {

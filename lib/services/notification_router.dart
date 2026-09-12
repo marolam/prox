@@ -46,6 +46,7 @@ class NotificationRouter {
       );
     }
     if (type.contains('match')) return const NotificationDestination('/nearby');
+    if (type == 'party_request') return const NotificationDestination('/party');
     return const NotificationDestination('/home');
   }
 

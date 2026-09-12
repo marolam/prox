@@ -99,6 +99,7 @@ export const onNewChatMessage = functions.firestore
     }
 
     const chat = chatSnap.data() || {};
+    if (chat.closedAt) return;
     const participants = Array.isArray(chat.participants) ? (chat.participants as string[]) : [];
     const chatType = (chat.type as string | undefined) ?? "direct";
     const gate = (chat.chatGate as Record<string, unknown> | undefined) ?? {};

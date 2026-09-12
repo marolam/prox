@@ -7,6 +7,7 @@ export { purchaseWithPoints } from './points_purchases';
 export { claimVerifiedReward, cancelMySubscription } from './verified_rewards';
 export { onMeetupCompletedAccounting, syncCompletedMeetup } from './meetup_accounting';
 export { onPartyWrite } from './lib/party';
+export { respondToPartyConnection, sweepPartyConnections, onPartyConnectionBlock, onPartyConnectionNotification } from './party_connections';
 export { onPublicProfileProjection, onPublicMatchingProjection } from './public_profiles';
 export { setBusinessModeActive } from './business_mode';
 export { onPresenceCoordinates } from './presence_projection';
@@ -29,6 +30,8 @@ export { onSupportTicketCreatedExportSheets } from "./support_sheets";
 export { createExternalCheckoutSession, verifyExternalCheckoutCallback, onSquareWebhookBridge } from "./external_payments";
 export { onInPartyMatchMetrics } from "./lib/in_party_match_metrics";
 export { sweepMeetupAutoClose } from "./lib/meetup_auto_close";
+export { endMySafetySession, onMeetupOutcome } from './safety_sessions';
+export { onMeetupTransitionGuard, onChatGateTransitionGuard, onMeetupInteractionLockProjection } from './lib/match_dashboard_enforcement';
 export { sweepKeywordHygiene } from "./lib/keyword_hygiene";
 export { onBugReportScoreFeedback, onSupportTicketScoreFeedback } from "./lib/tester_feedback_scoring";
 export {

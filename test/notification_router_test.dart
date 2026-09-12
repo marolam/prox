@@ -29,6 +29,7 @@ void main() {
     }
     expect(router.destinationFor(item('meetup')).route, '/meetups');
     expect(router.destinationFor(item('match')).route, '/nearby');
+    expect(router.destinationFor(item('party_request')).route, '/party');
     expect(router.destinationFor(item('announcement')).route, '/home');
   });
 

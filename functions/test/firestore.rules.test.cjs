@@ -15,6 +15,30 @@ before(async () => {
 after(async () => { await env?.cleanup(); });
 beforeEach(async () => { await env.clearFirestore(); });
 const db = uid => env.authenticatedContext(uid).firestore();
+
+test('closed chats reject new messages and cannot be reopened by participants', async () => {
+  await seed({'chats/ended': {participants: ['alice', 'bob'], closedAt: new Date(), chatGate: {status: 'expired'}}});
+  await assertFails(setDoc(doc(db('alice'), 'chats/ended/messages/new'), {from: 'alice', to: 'bob', text: 'Still here', read: false}));
+  await assertFails(updateDoc(doc(db('bob'), 'chats/ended'), {closedAt: null}));
+  await assertFails(updateDoc(doc(db('bob'), 'chats/ended'), {'chatGate.status': 'accepted'}));
+});
+
+test('meetups cannot move backward, change a confirmed pin, forge an outcome, or be deleted while active', async () => {
+  await seed({'meetups/safe': {aUid: 'alice', bUid: 'bob', status: 'live', locationStatus: 'confirmed', lat: 10, lng: 10}});
+  const ref = doc(db('alice'), 'meetups/safe');
+  await assertFails(updateDoc(ref, {status: 'accepted'}));
+  await assertFails(updateDoc(ref, {lat: 11}));
+  await assertFails(updateDoc(ref, {locationStatus: 'proposed'}));
+  await assertFails(updateDoc(ref, {outcome: 'completed'}));
+  await assertFails(deleteDoc(ref));
+  await assertSucceeds(updateDoc(ref, {aArrived: true}));
+  await assertFails(updateDoc(ref, {aArrived: false}));
+  await seed({'meetups/safe': {aUid: 'alice', bUid: 'bob', status: 'cancelled', aArrived: true, bArrived: true}});
+  await assertFails(updateDoc(ref, {status: 'completed'}));
+  await assertFails(setDoc(doc(db('alice'), 'meetups/safe/beacon/live'), {lat: 10}));
+  await assertFails(setDoc(doc(db('alice'), 'users/alice/meetupOutcomes/forged'), {outcome: 'completed'}));
+  await assertFails(getDoc(doc(db('bob'), 'users/alice/meetupOutcomes/forged')));
+});
 async function seed(entries) {
   await env.withSecurityRulesDisabled(async context => {
     for (const [name, data] of Object.entries(entries)) await setDoc(doc(context.firestore(), name), data);
@@ -171,4 +195,26 @@ test('payment reconciliation is admin-private and operator notes cannot forge fi
   await assertSucceeds(getDoc(doc(adminDb, 'paymentReconciliation/refund')));
   await assertSucceeds(updateDoc(doc(adminDb, 'paymentReconciliation/refund'), {operatorNote: 'Reviewing provider receipt', operatorStatus: 'investigating'}));
   await assertFails(updateDoc(doc(adminDb, 'paymentReconciliation/refund'), {status: 'reconciled'}));
+});
+
+
+test('Party consent is server-only and pending users cannot read Party profiles or private feedback', async () => {
+  await seed({
+    'partyConnections/pair': {members:['alice','bob'],status:'pending',decisions:{alice:'add'}},
+    'users/alice/partyProfile/sharing': {sharePhone:true,phone:'555-0100'},
+    'meetups/rating': {aUid:'alice',bUid:'bob',status:'completed'},
+    'ratings/rating/entries/alice': {thumb:false,reason:'Private feedback'},
+  });
+  await assertSucceeds(getDocs(query(collection(db('alice'),'partyConnections'),where('members','array-contains','alice'))));
+  await assertFails(getDoc(doc(db('mallory'),'partyConnections/pair')));
+  await assertFails(updateDoc(doc(db('alice'),'partyConnections/pair'),{decisions:{alice:'add',bob:'add'},status:'connected'}));
+  await assertFails(getDoc(doc(db('bob'),'users/alice/partyProfile/sharing')));
+  await assertFails(getDoc(doc(db('bob'),'ratings/rating/entries/alice')));
+  await assertSucceeds(getDoc(doc(db('alice'),'ratings/rating/entries/alice')));
+  await seed({'users/alice/party/bob':{mutual:false},'users/bob/party/alice':{mutual:false}});
+  await assertFails(getDoc(doc(db('bob'),'users/alice/partyProfile/sharing')));
+  await seed({'users/alice/party/bob':{mutual:true},'users/bob/party/alice':{mutual:true}});
+  await assertSucceeds(getDoc(doc(db('bob'),'users/alice/partyProfile/sharing')));
+  await seed({'users/bob/blocks/alice':{uid:'alice'}});
+  await assertFails(getDoc(doc(db('bob'),'users/alice/partyProfile/sharing')));
 });

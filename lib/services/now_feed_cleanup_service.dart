@@ -178,7 +178,7 @@ class NowFeedCleanupService {
       final d = doc.data();
       final status = (d["status"] ?? "").toString().trim().toLowerCase();
 
-      if (status == "live") continue;
+      if (<String>{"requested", "accepted", "live"}.contains(status)) continue;
 
       final bool completed = status == "completed";
       final retention = completed ? _manualMeetupCompletedRetention : _manualMeetupStaleRetention;

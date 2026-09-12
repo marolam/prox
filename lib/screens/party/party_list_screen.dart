@@ -20,6 +20,7 @@ import "package:prox/services/party_service.dart";
 import "package:prox/services/user_profile_service.dart";
 import "package:prox/utils/bounded_async_map.dart";
 import "package:prox/screens/party/party_member_profile_screen.dart";
+import "package:prox/widgets/pending_party_requests.dart";
 
 class PartyListScreen extends StatelessWidget {
   const PartyListScreen({super.key});
@@ -703,6 +704,12 @@ class PartyListScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return Column(
+      children: [const PendingPartyRequests(), _buildMembers(context)],
+    );
+  }
+
+  Widget _buildMembers(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final myUid = FirebaseAuth.instance.currentUser?.uid ?? "";
@@ -1068,7 +1075,7 @@ class PartyListScreen extends StatelessWidget {
                                                     "Remove from Party?",
                                                   ),
                                                   content: const Text(
-                                                    "Are you sure? You can add them again later.",
+                                                    "This removes you from each other’s Party and ends access to Party-visible information. Reconnecting requires both people to agree again.",
                                                   ),
                                                   actions: [
                                                     TextButton(
@@ -1096,8 +1103,23 @@ class PartyListScreen extends StatelessWidget {
                                               );
                                               if (ok != true) return;
 
-                                              await PartyService.instance
-                                                  .removeFromParty(uid);
+                                              try {
+                                                await PartyService.instance
+                                                    .removeFromParty(uid);
+                                              } catch (_) {
+                                                if (context.mounted) {
+                                                  ScaffoldMessenger.of(
+                                                    context,
+                                                  ).showSnackBar(
+                                                    const SnackBar(
+                                                      content: Text(
+                                                        'Could not remove this member. Check your connection and try again.',
+                                                      ),
+                                                    ),
+                                                  );
+                                                }
+                                                return;
+                                              }
                                               if (context.mounted) {
                                                 ScaffoldMessenger.of(
                                                   context,

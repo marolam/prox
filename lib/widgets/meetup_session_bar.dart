@@ -22,6 +22,15 @@ class MeetupSessionBar extends StatelessWidget {
 
   Future<void> _open(BuildContext context, String screen) async {
     if (screen == currentScreen) return;
+    final data = (await MeetupService.instance.meetupRef(meetupId).get())
+        .data();
+    if (!context.mounted) return;
+    if (!<String>{"requested", "accepted", "live"}.contains(data?["status"]))
+      return;
+    if (screen == "planner" && data?["locationStatus"] == "confirmed")
+      screen = "live";
+    if (screen == "live" && data?["locationStatus"] != "confirmed")
+      screen = "planner";
     await MeetupService.instance.recordSessionScreen(
       meetupId: meetupId,
       screen: screen,
@@ -69,7 +78,9 @@ class MeetupSessionBar extends StatelessWidget {
         status != "completed" &&
         status != "cancelled" &&
         status != "canceled" &&
-        status != "expired";
+        status != "expired" &&
+        status != "auto_closed" &&
+        status != "declined";
     if (!isPartyMember && !isActiveMeetup) {
       if (!context.mounted) return;
       await showDialog<void>(
@@ -132,8 +143,8 @@ class MeetupSessionBar extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: <Widget>[
             _item(context, "chat", Icons.chat_bubble_outline, "Chat"),
-            _item(context, "planner", Icons.edit_location_alt_outlined, "Plan"),
-            _item(context, "live", Icons.map_outlined, "Live"),
+            if (currentScreen != "live")
+              _item(context, "live", Icons.arrow_forward, "Continue"),
             IconButton(
               tooltip: "View participant profile",
               onPressed: () => _showProfile(context),
@@ -156,11 +167,10 @@ class MeetupSessionBar extends StatelessWidget {
     IconData icon,
     String label,
   ) {
-    return IconButton(
-      tooltip: label,
+    return TextButton.icon(
       onPressed: screen == currentScreen ? null : () => _open(context, screen),
       icon: Icon(icon),
-      isSelected: screen == currentScreen,
+      label: Text(label),
     );
   }
 }

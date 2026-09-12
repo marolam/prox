@@ -5,7 +5,7 @@ if (admin.apps.length === 0) {
   admin.initializeApp();
 }
 
-type Status = "" | "requested" | "accepted" | "declined" | "expired" | "live" | "completed" | "auto_closed";
+type Status = "" | "requested" | "accepted" | "declined" | "expired" | "live" | "completed" | "auto_closed" | "cancelled";
 
 function asMap(v: unknown): Record<string, unknown> {
   if (v && typeof v === "object") return v as Record<string, unknown>;
@@ -21,7 +21,7 @@ function normalizeStatus(v: unknown): Status {
     s === "expired" ||
     s === "live" ||
     s === "completed" ||
-    s === "auto_closed"
+    s === "auto_closed" || s === "cancelled"
   ) {
     return s;
   }
@@ -30,23 +30,24 @@ function normalizeStatus(v: unknown): Status {
 
 function allowChatGateTransition(fromStatus: Status, toStatus: Status): boolean {
   if (fromStatus === toStatus) return true;
+  if (toStatus === "expired") return true;
   if (fromStatus === "" && toStatus === "requested") return true;
-  if (fromStatus === "requested" && (toStatus === "accepted" || toStatus === "declined" || toStatus === "expired")) {
+  if (fromStatus === "requested" && (toStatus === "accepted" || toStatus === "declined")) {
     return true;
   }
-  if (fromStatus === "accepted" && toStatus === "expired") return true;
   return false;
 }
 
 function allowMeetupTransition(fromStatus: Status, toStatus: Status): boolean {
   if (fromStatus === toStatus) return true;
+  if (["requested", "accepted", "live"].includes(fromStatus) && toStatus === "cancelled") return true;
 
   // Creation paths used in current app flows.
   if (fromStatus === "" && (toStatus === "requested" || toStatus === "live")) return true;
 
   // Allow fresh meetup cycles in an existing chat after terminal/request-end states.
   if (
-    (fromStatus === "declined" ||
+    (fromStatus === "cancelled" || fromStatus === "declined" ||
       fromStatus === "expired" ||
       fromStatus === "auto_closed" ||
       fromStatus === "completed") &&
@@ -159,8 +160,12 @@ async function recomputeInteractionLockForUser(uid: string): Promise<void> {
   const busy = activeMeetupId !== "";
   const statusTag = busy ? "In active meetup" : "";
 
-  await Promise.all([
-    admin.firestore().collection("users").doc(safeUid).set(
+  await admin.firestore().runTransaction(async tx => {
+    const userRef = admin.firestore().collection("users").doc(safeUid);
+    const [user, deletion] = await tx.getAll(userRef,
+      admin.firestore().collection("accountDeletions").doc(safeUid));
+    if (!user.exists || deletion.exists) return;
+    tx.set(userRef,
       {
         interactionLock: {
           busyInMeetup: busy,
@@ -171,16 +176,16 @@ async function recomputeInteractionLockForUser(uid: string): Promise<void> {
         },
       },
       { merge: true },
-    ),
-    admin.firestore().collection("users").doc(safeUid).collection("presence").doc("current").set(
+    );
+    tx.set(userRef.collection("presence").doc("current"),
       {
         busyInMeetup: busy,
         interactionStatusTag: statusTag,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
       { merge: true },
-    ),
-  ]);
+    );
+  });
 }
 
 export const onChatGateTransitionGuard = functions.firestore
@@ -210,7 +215,10 @@ export const onChatGateTransitionGuard = functions.firestore
       toStatus,
     });
 
-    await change.after.ref.set(
+    await admin.firestore().runTransaction(async tx => {
+      const current = await tx.get(change.after.ref);
+      if (!current.updateTime?.isEqual(change.after.updateTime!)) return;
+      tx.set(change.after.ref,
       {
         chatGate: {
           status: fromStatus,
@@ -227,6 +235,7 @@ export const onChatGateTransitionGuard = functions.firestore
       },
       { merge: true },
     );
+    });
   });
 
 export const onMeetupTransitionGuard = functions.firestore
@@ -253,7 +262,10 @@ export const onMeetupTransitionGuard = functions.firestore
       toStatus,
     });
 
-    await change.after.ref.set(
+    await admin.firestore().runTransaction(async tx => {
+      const current = await tx.get(change.after.ref);
+      if (!current.updateTime?.isEqual(change.after.updateTime!)) return;
+      tx.set(change.after.ref,
       {
         status: fromStatus,
         statusPolicy: {
@@ -267,6 +279,7 @@ export const onMeetupTransitionGuard = functions.firestore
       },
       { merge: true },
     );
+    });
   });
 
 export const onMeetupInteractionLockProjection = functions.firestore

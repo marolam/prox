@@ -147,7 +147,7 @@ class _MeetupRequestBarState extends State<MeetupRequestBar> {
         final s = snap.data;
 
         // No active request: allow request
-        if (s == null || s.status.isEmpty || s.status == "expired") {
+        if (s == null || s.status.isEmpty || <String>{"expired", "cancelled", "auto_closed"}.contains(s.status)) {
           return Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
             child: SizedBox(

@@ -5,6 +5,18 @@ version tag, uploads the IPA to App Store Connect/TestFlight, and publishes the
 APK, IPA and `release-manifest.json` to the public `marolam/prox` GitHub release.
 No local APK build, connected phone, or manual APK upload is required.
 
+## Standing release authorization
+
+As requested on September 12, 2026, publish a new paired Android/TestFlight
+release whenever a significant change is complete and the candidate is stable.
+Do not ask for release permission again for that routine cycle. Review the
+intended source changes, run Flutter analysis and relevant tests, verify any
+required backend deployment, and use a new build number on main. Keep generated
+files and unrelated work out of the release commit. After CI verifies the signed
+packages and published Android download, activate its Android update policy.
+Report actual upload/publication results and any remaining device checks;
+TestFlight upload alone does not prove Apple processing or tester availability.
+
 ## Tester Portal download
 
 The live `https://www.prox-us.com/tester-portal.html` APK button uses

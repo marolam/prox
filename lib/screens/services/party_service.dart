@@ -6,6 +6,7 @@ import "dart:math";
 import "package:prox/services/first_user_journey/first_user_journey_service.dart";
 import "package:prox/services/offline/offline_outbox_service.dart";
 import "package:prox/utils/geo.dart";
+import "package:prox/services/party_connection_service.dart";
 
 class PartyMemberEntry {
   final String otherUid;
@@ -595,7 +596,7 @@ class PartyService {
     final other = otherUid.trim();
     if (other.isEmpty) return false;
     final snap = await _party(uid).doc(other).get();
-    return snap.exists;
+    return snap.data()?["mutual"] == true;
   }
 
   Stream<Set<String>> watchOnlinePartyUids(Iterable<String> partyUids) {
@@ -661,7 +662,7 @@ class PartyService {
     final uid = _me();
     final other = otherUid.trim();
     if (other.isEmpty) return const Stream<bool>.empty();
-    return _party(uid).doc(other).snapshots().map((s) => s.exists);
+    return _party(uid).doc(other).snapshots().map((s) => s.data()?["mutual"] == true);
   }
 
   /// Canonical Party list stream: reads /users/{uid}/party/*
@@ -679,6 +680,7 @@ class PartyService {
         final out = <PartyMemberEntry>[];
         for (final doc in qs.docs) {
           if (!_isPartyMemberDocId(doc.id)) continue;
+          if (doc.data()["mutual"] != true) continue;
           final other = doc.id.trim();
           out.add(PartyMemberEntry.fromDoc(other, doc.data()));
         }
@@ -825,23 +827,7 @@ class PartyService {
   }
 
   Future<void> removeFromParty(String otherUid) async {
-    final uid = _me();
-    final other = otherUid.trim();
-    if (other.isEmpty) return;
-
-    final myRef = _party(uid).doc(other);
-    final theirRef = _party(other).doc(uid);
-
-    await _db.runTransaction((tx) async {
-      // Read before any writes in this transaction to avoid Firestore assertions.
-      final theirSnap = await tx.get(theirRef);
-
-      tx.delete(myRef);
-
-      if (theirSnap.exists) {
-        tx.set(theirRef, {"mutual": false}, SetOptions(merge: true));
-      }
-    });
+    await PartyConnectionService.instance.act(otherUid.trim(), 'remove');
   }
 }
 
