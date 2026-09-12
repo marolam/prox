@@ -11,6 +11,19 @@ permissions:
   contents: read
 
 jobs:
+  release-tooling-macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Test release guards on the signing runner platform
+        run: python3 -m unittest discover -s tools/scripts/tests -p "test_release*.py"
+      - name: Test platform update policy preparation
+        shell: pwsh
+        run: ./tools/scripts/test_update_release_policy.ps1
+
   backend-safety:
     uses: ./.github/workflows/backend_safety_checks.yml
 

@@ -117,21 +117,27 @@ matching the uploaded artifact to the version is checked during publication.
 
 ## Release a version
 
-The next candidate is `0.19.0+21`; `0.19.0+19` is already publicly released,
-and iOS `0.19.0+20` has already been uploaded to TestFlight. Build 21's meetup,
-Party, and safety changes are still local and need their backend rollout before
-publication. Do not tag the older build 20 on main for another TestFlight upload.
+The current candidate is `0.19.0+22`; `0.19.0+19` is publicly released,
+and iOS `0.19.0+20` has already been uploaded to TestFlight. The meetup, Party,
+and safety source is merged in PR #10, with its required functions deployed and
+all nine indexes ready. The 33 public profiles and 23 presence records need no
+backfill. Activate the reviewed rules before distributing the new client.
+Tag `v0.19.0+21` stopped before package building/upload because a release test
+did not tolerate PowerShell's wrapped exception output on macOS. Build 22 fixes
+that test and adds Mac release-tooling PR checks; app code is unchanged from the
+candidate whose Flutter tests and iOS simulator compile passed. Do not reuse
+an existing tag or an uploaded TestFlight build number for this retry.
 Increase the numeric build number for every new Android/iOS upload, across all
 channels. Never reuse a TestFlight build number to promote a tester build by
 rebuilding it as production.
 
 1. Set `pubspec.yaml` to `x.y.z+build` and commit the reviewed source.
 2. Push the source commit to the approved branch.
-3. Push a matching version tag. For example, after committing build 21 on `main`:
+3. Push a matching version tag. For example, after committing build 22 on `main`:
 
    ```powershell
-   git tag -a 'v0.19.0+21' -m 'Prox 0.19.0+21'
-   git push origin 'v0.19.0+21'
+   git tag -a 'v0.19.0+22' -m 'Prox 0.19.0+22'
+   git push origin 'v0.19.0+22'
    ```
 
 The workflow rejects tags whose version differs from `pubspec.yaml`.

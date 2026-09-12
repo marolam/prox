@@ -232,7 +232,9 @@ elif args[:2] == ['release', 'view']: print('https://example.invalid/release')
         self.api["repos/test/releases/releases/latest"] = dict(tag_name="v0.19.0+21")
         result = self.invoke("-ValidateOnly")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("build number must increase", result.stdout)
+        # PowerShell 7 can wrap and decorate the exception across terminal lines.
+        self.assertRegex(result.stdout, r"build number must[\s\S]*increase")
+        self.assertTrue(all(c[0] == "api" for c in self.calls()))
 
     def test_new_release_targets_commit_and_uploads_metadata_before_promotion(self):
         metadata = self.root / "release-manifest.json"

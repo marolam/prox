@@ -1,6 +1,6 @@
 # Meetup feedback and mutual Party requests
 
-Build candidate: `0.19.0+21`. Uploaded iOS build 20 does not contain these changes.
+Build candidate: `0.19.0+22`. Uploaded iOS build 20 does not contain these changes. Build 21 stopped at a release-script test before package building/upload; build 22 retries with the same app code and a corrected test.
 
 Thumbs-up reveals **Add to Party** and **Not Right Now**. Each choice has a
 confirmation explaining membership and Party-visible profile sharing. Thumbs-down
@@ -45,13 +45,14 @@ created by the new completed-meetup feedback flow.
 
 ## Rollout
 
-Deploy the backend and Firestore rules before distributing build 21. Required
+Deploy the backend and Firestore rules before distributing the new build. Required
 new functions: `respondToPartyConnection`, `onPartyConnectionNotification`,
 `onPartyConnectionBlock`, `sweepPartyConnections`. Also deploy the updated
 `onPartyWrite`, `deleteMyAccount` and `onAuthDelete`. Existing trust and meetup
 accounting functions must be present. New queries use automatic single-field
 indexes (`members` array membership and `expiresAt` range); no composite index
-is required. This implementation has not deployed any live backend or app build.
+is required. The required functions are now deployed and active; all nine indexes
+are ready. Live rules activation and signed app publication are pending.
 
 Validate with:
 

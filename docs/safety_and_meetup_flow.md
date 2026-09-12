@@ -1,6 +1,6 @@
 # Safety access and definitive meetup outcomes
 
-Local candidate: `0.19.0+21`, alongside the pending meetup feedback/Party changes. Not deployed or uploaded.
+Release candidate: `0.19.0+22`, including the meetup feedback/Party changes merged in PR #10. Required functions are deployed; rules activation and signed publication are pending. Build 21 stopped at a release-script test before building/uploading packages; build 22 fixes that test with the same app code.
 
 ## User experience
 
@@ -26,4 +26,4 @@ Deploy the new `endMySafetySession` and `onMeetupOutcome`, updated `sweepMeetupA
 
 Automated coverage includes authenticated and concurrent cancellation, closed-chat rules, immutable outcomes, scheduler pagination, group exits, outcome receipts, visible guidance, and two-tap emergency access over a modal. Physical Android/iOS dialer handoff, notification delivery, accessibility, external Maps return, and two-device completion/cancellation still need device verification. Automated tests use an injected phone launcher and never place an emergency call.
 
-Validation: Flutter suite 222 passed / 3 existing skips; backend and Firestore/Storage emulator suites 68 passed; Flutter analysis clean. Generated logs remain under ignored `artifacts/release/safety-*`.
+Validation: Flutter suite 222 passed / 3 existing skips; backend and Firestore/Storage emulator suites 69 passed; Flutter analysis clean; iOS simulator compile passed. All required functions are active and all nine indexes are ready. The scheduled meetup cleanup has run successfully. Generated logs remain under ignored `artifacts/release/`.
