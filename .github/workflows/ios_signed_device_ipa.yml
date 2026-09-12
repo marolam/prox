@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       inspect_testflight:
-        description: Read TestFlight group links only (no build or upload)
+        description: Read TestFlight processing states and tester groups (no build or upload)
         type: boolean
         default: false
       build_flavor:

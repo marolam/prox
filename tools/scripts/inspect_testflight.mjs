@@ -33,6 +33,27 @@ export async function inspect(apiGet, bundleId = 'com.prox-us.prox') {
   return { appId: app.id, bundleId, groups };
 }
 
+// https://developer.apple.com/documentation/appstoreconnectapi/get-v1-builds
+export async function inspectRecentBuilds(apiGet, appId) {
+  const response = await apiGet(`/v1/builds?filter[app]=${encodeURIComponent(appId)}&sort=-uploadedDate&limit=5` +
+    '&include=preReleaseVersion,buildBetaDetail,betaGroups' +
+    '&fields[builds]=version,uploadedDate,processingState,expired,preReleaseVersion,buildBetaDetail,betaGroups' +
+    '&fields[preReleaseVersions]=version&fields[buildBetaDetails]=internalBuildState,externalBuildState,autoNotifyEnabled' +
+    '&fields[betaGroups]=name,isInternalGroup');
+  const included = new Map((response.included ?? []).map(item => [`${item.type}:${item.id}`, item.attributes]));
+  const attributes = relationship => relationship ? included.get(`${relationship.type}:${relationship.id}`) : undefined;
+  return response.data.map(build => {
+    const detail = attributes(build.relationships?.buildBetaDetail?.data);
+    return { build: build.attributes.version,
+      version: attributes(build.relationships?.preReleaseVersion?.data)?.version ?? null,
+      uploadedDate: build.attributes.uploadedDate, processingState: build.attributes.processingState,
+      expired: build.attributes.expired, internalBuildState: detail?.internalBuildState ?? null,
+      externalBuildState: detail?.externalBuildState ?? null, autoNotifyEnabled: detail?.autoNotifyEnabled ?? null,
+      groups: (build.relationships?.betaGroups?.data ?? []).map(group => attributes(group)).filter(Boolean)
+        .map(group => ({name: group.name, internal: group.isInternalGroup})) };
+  });
+}
+
 async function main() {
   for (const key of ['APP_STORE_CONNECT_API_KEY_ID', 'APP_STORE_CONNECT_ISSUER_ID', 'APP_STORE_CONNECT_API_KEY_P8_BASE64']) {
     if (!process.env[key]) throw new Error(`Missing CI secret: ${key}`);
@@ -48,7 +69,8 @@ async function main() {
     if (!response.ok) throw new Error(`App Store Connect lookup failed: HTTP ${response.status}`);
     return response.json();
   };
-  console.log(JSON.stringify(await inspect(apiGet), null, 2));
+  const app = await inspect(apiGet);
+  console.log(JSON.stringify({...app, builds: await inspectRecentBuilds(apiGet, app.appId)}, null, 2));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
