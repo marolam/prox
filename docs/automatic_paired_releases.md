@@ -19,8 +19,10 @@ latest link against the built APK checksum before Android update-policy
 activation. APK files are stored as GitHub Release assets; GitHub Pages serves
 the portal HTML. Website linking does not activate Firebase in-app update policy.
 
-The release automation remains in draft PR #9 until merged into `main`, and CI
-still needs the private rollback read token listed below. The portal link itself
+PR #9 was merged into `main` on September 12, 2026 (commit `57d0ffd`), and the
+paired release workflow is active. The release environments have no required
+reviewers or wait timers. CI still needs the private rollback read token listed
+below before unattended releases can pass preflight. The portal link itself
 works independently with the currently published release.
 
 The implementation is in `.github/workflows/release_android_and_ios.yml`.
@@ -93,7 +95,7 @@ gh workflow run ios_signed_device_ipa.yml --ref release/paired-automation-202609
 ```
 
 This mode performs only App Store Connect GET requests and skips all builds and
-uploads. Once merged, use `--ref main`.
+uploads. The workflow is now available with `--ref main`.
 
 PR and production branch guards use the same private rollback credential. The
 production branch guard allows a committed version bump to precede its tag;
@@ -101,18 +103,21 @@ matching the uploaded artifact to the version is checked during publication.
 
 ## Release a version
 
-The next candidate is `0.19.0+20`; `0.19.0+19` is already publicly released.
+The next candidate is `0.19.0+21`; `0.19.0+19` is already publicly released,
+and iOS `0.19.0+20` has already been uploaded to TestFlight. Build 21's meetup,
+Party, and safety changes are still local and need their backend rollout before
+publication. Do not tag the older build 20 on main for another TestFlight upload.
 Increase the numeric build number for every new Android/iOS upload, across all
 channels. Never reuse a TestFlight build number to promote a tester build by
 rebuilding it as production.
 
 1. Set `pubspec.yaml` to `x.y.z+build` and commit the reviewed source.
 2. Push the source commit to the approved branch.
-3. Push a matching version tag. For example, after committing build 20 on `main`:
+3. Push a matching version tag. For example, after committing build 21 on `main`:
 
    ```powershell
-   git tag -a 'v0.19.0+20' -m 'Prox 0.19.0+20'
-   git push origin 'v0.19.0+20'
+   git tag -a 'v0.19.0+21' -m 'Prox 0.19.0+21'
+   git push origin 'v0.19.0+21'
    ```
 
 The workflow rejects tags whose version differs from `pubspec.yaml`.
