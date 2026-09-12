@@ -508,9 +508,9 @@ jobs:
           & "$project/tools/scripts/publish_github_release.ps1" @parameters
           if ($LASTEXITCODE -ne 0) { throw 'Paired release publication failed.' }
 
-      - name: Verify anonymous Android download against the built APK
+      - name: Verify Android download and the Tester Portal latest APK link
         working-directory: ${{ env.PROJECT_DIR }}
-        run: python3 tools/scripts/verify_release_artifacts.py --published
+        run: python3 tools/scripts/verify_release_artifacts.py --published --verify-latest
 
       - name: Set up Node for Android update policy deployment
         if: ${{ env.RELEASE_CHANNEL == 'prod' && env.AUTO_PUBLISH_ANDROID_POLICY == 'true' }}

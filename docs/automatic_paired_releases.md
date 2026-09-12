@@ -5,6 +5,24 @@ version tag, uploads the IPA to App Store Connect/TestFlight, and publishes the
 APK, IPA and `release-manifest.json` to the public `marolam/prox` GitHub release.
 No local APK build, connected phone, or manual APK upload is required.
 
+## Tester Portal download
+
+The live `https://www.prox-us.com/tester-portal.html` APK button uses
+`https://github.com/marolam/prox/releases/latest/download/app-release.apk`.
+The website link was published separately on September 12, 2026, replacing the
+old pinned `v0.18.1` URL. Each newly published production release automatically
+becomes the button's download; there is no website edit or second APK upload.
+Drafts and tester/staging prereleases do not replace this download.
+
+The paired workflow checks both the version-pinned download and this permanent
+latest link against the built APK checksum before Android update-policy
+activation. APK files are stored as GitHub Release assets; GitHub Pages serves
+the portal HTML. Website linking does not activate Firebase in-app update policy.
+
+The release automation remains in draft PR #9 until merged into `main`, and CI
+still needs the private rollback read token listed below. The portal link itself
+works independently with the currently published release.
+
 The implementation is in `.github/workflows/release_android_and_ios.yml`.
 `release_parameters.py` resolves both tag and manual-dispatch inputs. The
 publisher binds the remote tag to the exact checked-out commit and refuses to

@@ -41,6 +41,17 @@ def verify_published(manifest, url):
                     f"{quote(manifest['tag'], safe='')}/{manifest['android']['asset']}")
     if url != expected_url:
         raise ValueError("Published APK URL does not match the verified release manifest")
+    verify_download(manifest, url)
+
+
+def verify_latest(manifest):
+    if manifest.get("channel") != "prod" or manifest["android"]["asset"] != "app-release.apk":
+        raise ValueError("Only a production app-release.apk can become the portal download")
+    url = f"https://github.com/{manifest['repository']}/releases/latest/download/app-release.apk"
+    verify_download(manifest, url)
+
+
+def verify_download(manifest, url):
     # Deliberately anonymous: a CI token must not mask a private download URL.
     request = urllib.request.Request(url, headers={"User-Agent": "Prox-release-verification"})
     checksum = hashlib.sha256()
@@ -58,10 +69,15 @@ def verify_published(manifest, url):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--published", action="store_true")
+    parser.add_argument("--verify-latest", action="store_true")
     args = parser.parse_args()
     manifest_path = Path("artifacts/release/release-manifest.json")
     if args.published:
-        verify_published(json.loads(manifest_path.read_text()), os.environ["PUBLIC_APK_URL"])
+        manifest = json.loads(manifest_path.read_text())
+        verify_published(manifest, os.environ["PUBLIC_APK_URL"])
+        if args.verify_latest and manifest.get("channel") == "prod":
+            verify_latest(manifest)
+            print("The Tester Portal latest-APK link serves this exact release.")
         print("Anonymous download matches the verified Android package and checksum.")
         return
     version = os.environ["APP_VERSION"]

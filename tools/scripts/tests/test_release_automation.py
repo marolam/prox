@@ -68,6 +68,26 @@ class ReleaseParametersTests(unittest.TestCase):
 
 
 class ReleaseArtifactTests(unittest.TestCase):
+    def test_portal_latest_download_must_match_production_build(self):
+        import hashlib
+        from verify_release_artifacts import verify_latest
+        data = b"current published APK"
+        manifest = dict(repository="marolam/prox", channel="prod", android=dict(
+            asset="app-release.apk", size=len(data), sha256=hashlib.sha256(data).hexdigest()))
+        response = io.BytesIO(data)
+        response.status = 200
+        with patch("verify_release_artifacts.urllib.request.urlopen", return_value=response) as request:
+            verify_latest(manifest)
+            self.assertEqual(request.call_args.args[0].full_url,
+                             "https://github.com/marolam/prox/releases/latest/download/app-release.apk")
+            self.assertNotIn("Authorization", request.call_args.args[0].headers)
+        response = io.BytesIO(b"previous APK")
+        response.status = 200
+        with patch("verify_release_artifacts.urllib.request.urlopen", return_value=response), self.assertRaises(ValueError):
+            verify_latest(manifest)
+        with self.assertRaises(ValueError):
+            verify_latest(dict(manifest, channel="tester"))
+
     def test_android_identity_version_and_signer(self):
         badging = "package: name='com.prox.app' versionCode='20' versionName='0.19.0'"
         signing = "Signer #1 certificate SHA-256 digest: " + "a" * 64
