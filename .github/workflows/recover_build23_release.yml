@@ -1,0 +1,62 @@
+name: Publish verified build 23 artifacts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: paired-release-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_COMMIT: 2d85995fbc0857484b214e76bc729e7422347629
+      PUBLIC_APK_URL: https://github.com/marolam/prox/releases/download/v0.19.0%2B23/app-release.apk
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Test publication guards on macOS
+        run: python3 -m unittest discover -s tools/scripts/tests -p 'test_release*.py'
+      - name: Recover the exact verified artifacts without rebuilding or Apple upload
+        run: |
+          gh run download 34690292971 --repo marolam/prox --name paired-release-artifacts --dir recovered
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          root = Path('recovered')
+          manifest = json.loads((root / 'artifacts/release/release-manifest.json').read_text())
+          assert manifest['version'] == '0.19.0+23'
+          assert manifest['commit'] == '2d85995fbc0857484b214e76bc729e7422347629'
+          assert manifest['tag'] == 'v0.19.0+23' and manifest['repository'] == 'marolam/prox'
+          expected = {
+            'android': ('build/app/outputs/flutter-apk/app-release.apk', 'af234d85981f2d72687f68df84c7509f2a1a8efa1a1205d252f32d7dbedc2441'),
+            'ios': ('build/ios/ipa/app-release.ipa', 'e6b2d259c82748572a6fa4345a71b4ca0eb70496097bfa63d8a29e8999a6e3f3')}
+          for platform, (path, checksum) in expected.items():
+            package = root / path
+            assert hashlib.sha256(package.read_bytes()).hexdigest() == checksum == manifest[platform]['sha256']
+            assert package.stat().st_size == manifest[platform]['size']
+          print('Recovered both exact signed packages from the verified build 23 run.')
+          PY
+          git worktree add --detach source "$SOURCE_COMMIT"
+      - name: Publish with the corrected existing-tag handling
+        shell: pwsh
+        env:
+          ROLLBACK_GITHUB_TOKEN: ${{ secrets.ROLLBACK_GITHUB_TOKEN }}
+        run: |
+          ./tools/scripts/publish_github_release.ps1 -RepoPath ./source -Repo marolam/prox -Tag 'v0.19.0+23' -TargetCommit $env:SOURCE_COMMIT -RequireExistingTag -ApkPath ./recovered/build/app/outputs/flutter-apk/app-release.apk -IpaPath ./recovered/build/ios/ipa/app-release.ipa -AdditionalAssets ./recovered/artifacts/release/release-manifest.json -Notes 'Prox 0.19.0+23: meetup feedback, mutual Party acceptance, safety access and guided meetup completion. Signed Android APK and iOS IPA; matching IPA already uploaded to TestFlight.'
+          if ($LASTEXITCODE -ne 0) { throw 'Publication failed.' }
+      - name: Verify anonymous Android and portal downloads
+        working-directory: recovered
+        run: python3 ../tools/scripts/verify_release_artifacts.py --published --verify-latest

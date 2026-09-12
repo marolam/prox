@@ -155,6 +155,8 @@ class ReleasePublisherTests(unittest.TestCase):
 from pathlib import Path
 args = sys.argv[1:]
 with open(os.environ['MOCK_GH_LOG'], 'a') as log: log.write(json.dumps(args) + '\\n')
+if os.environ.get('MOCK_REQUIRE_PUBLICATION_TOKEN') and os.environ.get('GH_TOKEN') != 'fixture':
+    print('wrong publication credential', file=sys.stderr); sys.exit(3)
 if args[0] == 'api':
     responses = json.loads(Path(os.environ['MOCK_GH_RESPONSES']).read_text())
     if args[1] not in responses:
@@ -190,6 +192,13 @@ elif args[:2] == ['release', 'view']: print('https://example.invalid/release')
         result = self.invoke("-ValidateOnly", "-RequireExistingTag")
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue(all(c[0] == "api" for c in self.calls()))
+
+    def test_rollback_credential_does_not_replace_publication_credential(self):
+        self.env['ROLLBACK_GITHUB_TOKEN'] = 'read-only-rollback-fixture'
+        self.env['MOCK_REQUIRE_PUBLICATION_TOKEN'] = 'true'
+        result = self.invoke('-ApkPath', str(self.apk))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertTrue(any(c[:2] == ['release', 'create'] for c in self.calls()))
 
     def test_published_release_is_never_clobbered(self):
         self.api["repos/test/releases/releases/tags/v0.19.0%2B20"] = dict(draft=False)
@@ -236,18 +245,27 @@ elif args[:2] == ['release', 'view']: print('https://example.invalid/release')
         self.assertRegex(result.stdout, r"build number must[\s\S]*increase")
         self.assertTrue(all(c[0] == "api" for c in self.calls()))
 
-    def test_new_release_targets_commit_and_uploads_metadata_before_promotion(self):
+    def test_existing_tag_is_verified_without_retargeting_and_metadata_precedes_promotion(self):
         metadata = self.root / "release-manifest.json"
         metadata.write_text('{}')
         result = self.invoke("-ApkPath", str(self.apk), "-AdditionalAssets", str(metadata), "-RequireExistingTag")
         self.assertEqual(result.returncode, 0, result.stdout)
         calls = self.calls()
         create = next(c for c in calls if c[:2] == ["release", "create"])
-        self.assertEqual(create[create.index("--target") + 1], self.sha)
+        self.assertNotIn("--target", create)
         self.assertIn("--verify-tag", create)
         upload_index = next(i for i, c in enumerate(calls) if c[:2] == ["release", "upload"] and str(metadata) in c)
         edit_index = next(i for i, c in enumerate(calls) if c[:2] == ["release", "edit"])
         self.assertLess(upload_index, edit_index)
+
+    def test_new_tag_creation_still_targets_the_verified_commit(self):
+        self.api["repos/test/releases/git/ref/tags/v0.19.0%2B20"] = None
+        self.api["repos/test/releases/commits/" + self.sha] = dict(sha=self.sha)
+        result = self.invoke('-ApkPath', str(self.apk))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        create = next(c for c in self.calls() if c[:2] == ['release', 'create'])
+        self.assertEqual(create[create.index('--target') + 1], self.sha)
+        self.assertNotIn('--verify-tag', create)
 
     def test_existing_draft_can_resume_but_stays_bound_to_commit(self):
         self.api["repos/test/releases/releases/tags/v0.19.0%2B20"] = dict(draft=True, target_commitish=self.sha)

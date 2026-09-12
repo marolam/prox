@@ -358,8 +358,12 @@ if (-not $exists) {
   # Keep an incomplete pair invisible until all assets have uploaded.
   $notesFile = [IO.Path]::GetTempFileName()
   Set-Content -LiteralPath $notesFile -Value $Notes -Encoding utf8
-  $createArgs = @("release", "create", $Tag, "-R", $Repo, "--title", $Title, "--notes-file", $notesFile, "--draft", "--target", $TargetCommit)
-  if ($RequireExistingTag) { $createArgs += '--verify-tag' }
+  $createArgs = @("release", "create", $Tag, "-R", $Repo, "--title", $Title, "--notes-file", $notesFile, "--draft")
+  # The existing remote tag was already resolved to the exact build commit.
+  # Passing an old --target unnecessarily requires workflow-write permission
+  # when main's workflow files advance during the build. Never recreate that tag.
+  if ($tagRef) { $createArgs += '--verify-tag' }
+  else { $createArgs += @('--target', $TargetCommit) }
   if ($Prerelease) { $createArgs += "--prerelease" }
 
   Write-Host "Creating release $Tag..." -ForegroundColor Cyan
