@@ -55,7 +55,8 @@ jobs:
         env:
           ROLLBACK_GITHUB_TOKEN: ${{ secrets.ROLLBACK_GITHUB_TOKEN }}
         run: |
-          ./tools/scripts/publish_github_release.ps1 -RepoPath ./source -Repo marolam/prox -Tag 'v0.19.0+23' -TargetCommit $env:SOURCE_COMMIT -RequireExistingTag -ApkPath ./recovered/build/app/outputs/flutter-apk/app-release.apk -IpaPath ./recovered/build/ios/ipa/app-release.ipa -AdditionalAssets ./recovered/artifacts/release/release-manifest.json -Notes 'Prox 0.19.0+23: meetup feedback, mutual Party acceptance, safety access and guided meetup completion. Signed Android APK and iOS IPA; matching IPA already uploaded to TestFlight.'
+          $recovered = (Resolve-Path ./recovered).Path
+          ./tools/scripts/publish_github_release.ps1 -RepoPath ./source -Repo marolam/prox -Tag 'v0.19.0+23' -TargetCommit $env:SOURCE_COMMIT -RequireExistingTag -ApkPath "$recovered/build/app/outputs/flutter-apk/app-release.apk" -IpaPath "$recovered/build/ios/ipa/app-release.ipa" -AdditionalAssets "$recovered/artifacts/release/release-manifest.json" -Notes 'Prox 0.19.0+23: meetup feedback, mutual Party acceptance, safety access and guided meetup completion. Signed Android APK and iOS IPA; matching IPA already uploaded to TestFlight.'
           if ($LASTEXITCODE -ne 0) { throw 'Publication failed.' }
       - name: Verify anonymous Android and portal downloads
         working-directory: recovered
