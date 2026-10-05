@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Your Prox invitation</title>
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      main { max-width: 640px; margin: 48px auto; padding: 24px; }
+      .invite-actions { display: flex; gap: 12px; flex-wrap: wrap; margin: 24px 0; }
+      .invite-actions a, button { padding: 12px 18px; border-radius: 8px; cursor: pointer; }
+      .invite-code { font-size: 1.35rem; overflow-wrap: anywhere; padding: 18px; border: 1px solid currentColor; border-radius: 8px; }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a href="index.html">Prox</a>
+      <h1>You're invited to Prox</h1>
+      <p>Meet people nearby through what you seek and what you can offer.</p>
+      <div id="invitation" hidden>
+        <p>Save this code before installing. After signing in, open Referrals → Founding tester rewards and accept the invitation.</p>
+        <p class="invite-code" id="code"></p>
+        <button type="button" id="copy">Copy invitation code</button>
+        <p id="copy-status" role="status"></p>
+        <div class="invite-actions">
+          <a id="open">Open installed Prox</a>
+          <a id="android">Download for Android</a>
+          <a id="ios">Open iOS testing</a>
+        </div>
+        <p>Eligible invitations include a welcome reward. Your inviter earns a reward after your profile and a real conversation or meetup are verified. Availability and amounts appear in the app; some rewards require review.</p>
+        <p>If Prox was not installed when you opened this page, enter the saved code after installation. iOS testing may require a tester invitation.</p>
+      </div>
+      <p id="invalid" hidden>This invitation is incomplete. Ask your inviter for their full referral link or code.</p>
+      <p><a href="support.html">Contact support</a> · <a href="tester-portal.html">Tester portal</a></p>
+    </main>
+    <script>
+      (() => {
+        const code = (new URLSearchParams(location.search).get('code') || '').trim().toUpperCase();
+        if (!/^PROX-P-[A-F0-9]{12}$/.test(code)) {
+          document.getElementById('invalid').hidden = false;
+          return;
+        }
+        document.getElementById('invitation').hidden = false;
+        document.getElementById('code').textContent = code;
+        document.getElementById('open').href = 'prox://referral?code=' + encodeURIComponent(code);
+        const download = new URL('https://us-central1-prox-42bef.cloudfunctions.net/referralApkDownload');
+        download.searchParams.set('code', code);
+        document.getElementById('android').href = download.href;
+        download.searchParams.set('platform', 'ios');
+        document.getElementById('ios').href = download.href;
+        document.getElementById('copy').addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(code);
+            document.getElementById('copy-status').textContent = 'Invitation code copied.';
+          } catch (_) {
+            document.getElementById('copy-status').textContent = 'Select and copy the code above.';
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>
