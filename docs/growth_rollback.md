@@ -263,6 +263,25 @@ with matching SHA-256 and uploaded as a separate immutable five-file addition
 The original cloud manifest remains unchanged. Additional private evidence is
 `artifacts/rollback/native-drill-offdevice-proof/cloud-upload-manifest.json`.
 
+A subsequent six-file addition includes the same five native proof files plus
+the original source ownership manifest, allowing the strict cloud recovery
+helper to validate the destination. All six files (982,853 bytes) were downloaded
+into `C:/Users/marty/Documents/prox_native_drill_cloud_download_20261005/` and
+their actual SHA-256 bytes verified. Its immutable private prefix is
+`gs://prox-42bef-rollback-us-central1/pre-growth-20261005_094316/full-local-baseline-20261005T120923229Z/`.
+The cloud upload manifest SHA-256 is
+`5dbc131c94ace082d85fbeddb658a1d2c4a635ef59f0c125aa07538d0a4b54ed`;
+evidence is `artifacts/rollback/native-drill-offdevice-proof-with-ownership/`
+and the downloaded `cloud-download-verification.json`. Neither addition changes
+the original 265-file baseline.
+
+After locked-phone background collection testing, the normal app service
+restored the original disabled preference. Server verification found that
+preference disabled and the presence record absent; the native collector stopped.
+Revoking only background location restored the original while-using permission,
+with precise/coarse location still granted. These final checks are recorded
+privately under `device-final/`; they did not overwrite auth or app data.
+
 Installing an archived APK with a lower version code can be rejected by Android,
 including when an installer retries with `-d`. Uninstalling clears private local
 app data and cannot be considered a data-preserving rollback. The successful
