@@ -17,10 +17,7 @@ void main() {
         outgoingRequestUids: const <String>[],
       );
 
-      expect(
-        visible,
-        <String>{"party_a", "party_b"},
-      );
+      expect(visible, <String>{"party_a", "party_b"});
       expect(visible.contains("random_firebase_user"), isFalse);
       expect(visible.contains("plain_referral_signup"), isFalse);
     });
@@ -41,42 +38,53 @@ void main() {
     test("only in-person Party referrals become Party candidates", () {
       expect(
         PartyListScreen.inPersonPartyReferralUid(
-          docId: "plain_referral_signup",
+          documentPath: "users/me/referrals/plain_referral_signup",
           data: const <String, dynamic>{"uid": "plain_referral_signup"},
+          myUid: "me",
         ),
         isNull,
       );
       expect(
         PartyListScreen.inPersonPartyReferralUid(
-          docId: "fallback_uid",
-          data: const <String, dynamic>{"partyInPersonQrRequested": true},
+          documentPath: "users/me/referrals/fallback_uid",
+          data: const <String, dynamic>{
+            "partyInPersonQrRequested": true,
+            "inPersonVerified": true,
+          },
+          myUid: "me",
         ),
         "fallback_uid",
       );
       expect(
         PartyListScreen.inPersonPartyReferralUid(
-          docId: "doc_uid",
+          documentPath: "users/me/referrals/doc_uid",
           data: const <String, dynamic>{
             "partyInPersonQrRequested": true,
+            "inPersonVerified": true,
             "uid": " data_uid ",
           },
+          myUid: "me",
         ),
-        "data_uid",
+        isNull,
       );
     });
 
     test("only other in-person Party referrers become Party candidates", () {
       expect(
         PartyListScreen.inPersonPartyReferrerUid(
-          referrerUid: "referrer",
+          documentPath: "users/referrer/referrals/me",
           myUid: "me",
-          data: const <String, dynamic>{"partyInPersonQrRequested": true},
+          data: const <String, dynamic>{
+            "uid": "me",
+            "partyInPersonQrRequested": true,
+            "inPersonVerified": true,
+          },
         ),
         "referrer",
       );
       expect(
         PartyListScreen.inPersonPartyReferrerUid(
-          referrerUid: "plain_referrer",
+          documentPath: "users/plain_referrer/referrals/me",
           myUid: "me",
           data: const <String, dynamic>{},
         ),
@@ -84,13 +92,77 @@ void main() {
       );
       expect(
         PartyListScreen.inPersonPartyReferrerUid(
-          referrerUid: "me",
+          documentPath: "users/me/referrals/me",
           myUid: "me",
-          data: const <String, dynamic>{"partyInPersonQrRequested": true},
+          data: const <String, dynamic>{
+            "uid": "me",
+            "partyInPersonQrRequested": true,
+            "inPersonVerified": true,
+          },
         ),
         isNull,
       );
     });
+
+    test(
+      "both badges reject requested-only, foreign, or mismatched referral rows",
+      () {
+        const verified = <String, dynamic>{
+          "uid": "me",
+          "partyInPersonQrRequested": true,
+          "inPersonVerified": true,
+        };
+        for (final data in <Map<String, dynamic>>[
+          {...verified, "inPersonVerified": false},
+          {...verified, "partyInPersonQrRequested": false},
+          {...verified, "uid": "someone_else"},
+        ]) {
+          expect(
+            PartyListScreen.inPersonPartyReferrerUid(
+              documentPath: "users/referrer/referrals/me",
+              data: data,
+              myUid: "me",
+            ),
+            isNull,
+          );
+        }
+        for (final path in <String>[
+          "referrals/me",
+          "foreign/referrer/referrals/me",
+          "users/referrer/business/custom/referrals/me",
+          "users/referrer/referrals/other",
+        ]) {
+          expect(
+            PartyListScreen.inPersonPartyReferrerUid(
+              documentPath: path,
+              data: verified,
+              myUid: "me",
+            ),
+            isNull,
+          );
+        }
+        expect(
+          PartyListScreen.inPersonPartyReferralUid(
+            documentPath: "users/me/referrals/peer",
+            myUid: "me",
+            data: const {"uid": "peer", "partyInPersonQrRequested": true},
+          ),
+          isNull,
+        );
+        expect(
+          PartyListScreen.inPersonPartyReferralUid(
+            documentPath: "users/other/referrals/peer",
+            myUid: "me",
+            data: const {
+              "uid": "peer",
+              "partyInPersonQrRequested": true,
+              "inPersonVerified": true,
+            },
+          ),
+          isNull,
+        );
+      },
+    );
 
     test("online presence must be fresh and unexpired", () {
       final now = DateTime(2026, 8, 27, 12);
@@ -111,10 +183,12 @@ void main() {
     });
 
     test("Party UI sorts presence and keeps offline messaging available", () {
-      final party =
-          File("lib/screens/party/party_list_screen.dart").readAsStringSync();
-      final meetups =
-          File("lib/services/meetup_service.dart").readAsStringSync();
+      final party = File(
+        "lib/screens/party/party_list_screen.dart",
+      ).readAsStringSync();
+      final meetups = File(
+        "lib/services/meetup_service.dart",
+      ).readAsStringSync();
 
       expect(party, contains("watchOnlinePartyUids"));
       expect(party, contains('value: "message"'));

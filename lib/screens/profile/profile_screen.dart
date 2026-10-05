@@ -449,7 +449,7 @@ class ProfileScreen extends StatelessWidget {
                               ?.copyWith(fontWeight: FontWeight.w800),
                         ),
                         const SizedBox(height: 10),
-                        const ProxTrustBar(),
+                        const CurrentUserTrustBar(),
                       ],
                     ),
                   ),
