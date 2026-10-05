@@ -22,6 +22,22 @@ def proxGitSha    = System.getenv("GIT_SHA") ?: "dev"
 def proxBuildTime = System.getenv("BUILD_TIME_UTC") ?: "unknown"
 def proxChannel   = System.getenv("BUILD_CHANNEL") ?: "local"
 
+// Flutter passes the same base64-encoded defines to native Gradle builds.
+// Missing or invalid availability never permits a native collector to restore.
+def proxDartDefines = [:]
+if (project.hasProperty("dart-defines")) {
+    try {
+        project.property("dart-defines").toString().split(",").findAll { !it.isEmpty() }.each { encoded ->
+            def decoded = new String(encoded.decodeBase64(), "UTF-8")
+            def parts = decoded.split("=", 2)
+            if (parts.length == 2) proxDartDefines[parts[0]] = parts[1]
+        }
+    } catch (Exception ignored) {
+        throw new GradleException("Invalid Flutter build definitions.")
+    }
+}
+def proxBackgroundMatchingAvailable = proxDartDefines["PROX_BACKGROUND_MATCHING_AVAILABLE"] == "true"
+
 // Google Play app updates require Android 16/API 36 from August 31, 2026.
 def proxCompileSdk = 36
 def proxTargetSdk  = 36
@@ -55,6 +71,7 @@ android {
         buildConfigField "String", "PROX_GIT_SHA", "\"${proxGitSha}\""
         buildConfigField "String", "PROX_BUILD_TIME_UTC", "\"${proxBuildTime}\""
         buildConfigField "String", "PROX_BUILD_CHANNEL", "\"${proxChannel}\""
+        buildConfigField "boolean", "PROX_BACKGROUND_MATCHING_AVAILABLE", proxBackgroundMatchingAvailable.toString()
     }
 
     compileOptions {
@@ -109,6 +126,10 @@ flutter {
 }
 
 dependencies {
+    implementation platform("com.google.firebase:firebase-bom:34.4.0")
+    implementation "com.google.firebase:firebase-auth"
+    implementation "com.google.firebase:firebase-firestore"
+    implementation "com.google.android.gms:play-services-location:21.2.0"
     coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"
     implementation "androidx.multidex:multidex:2.0.1"
 }

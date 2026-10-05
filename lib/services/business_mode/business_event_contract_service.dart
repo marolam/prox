@@ -31,7 +31,9 @@ class BusinessEventValidationSummary {
   final Set<String> expectedTypes;
 
   List<String> get missingExpectedTypes {
-    return expectedTypes.where((t) => !seenTypes.contains(t)).toList(growable: false);
+    return expectedTypes
+        .where((t) => !seenTypes.contains(t))
+        .toList(growable: false);
   }
 }
 
@@ -45,13 +47,48 @@ class BusinessEventContractService {
 
   static const Map<String, List<String>> requiredFieldsByType =
       <String, List<String>>{
-    "business_lead_scored": <String>["leadId", "score", "scoreBand", "createdAt"],
-    "business_template_applied": <String>["leadId", "templateId", "channel", "createdAt"],
-    "business_followup_scheduled": <String>["leadId", "createdAt"],
-    "business_followup_cancelled": <String>["leadId", "cancelReason", "createdAt"],
-    "business_followup_sent": <String>["leadId", "step", "channel", "createdAt"],
-    "business_roi_recomputed": <String>["leadsReceived", "paybackRatio", "createdAt"],
-  };
+        "business_lead_scored": <String>[
+          "leadId",
+          "score",
+          "scoreBand",
+          "createdAt",
+        ],
+        "business_template_applied": <String>[
+          "leadId",
+          "templateId",
+          "channel",
+          "createdAt",
+        ],
+        "business_template_prepared": <String>[
+          "leadId",
+          "templateId",
+          "channel",
+          "createdAt",
+        ],
+        "business_followup_scheduled": <String>["leadId", "createdAt"],
+        "business_followup_cancelled": <String>[
+          "leadId",
+          "cancelReason",
+          "createdAt",
+        ],
+        "business_followup_sent": <String>[
+          "leadId",
+          "step",
+          "channel",
+          "createdAt",
+        ],
+        "business_followup_reminder": <String>[
+          "leadId",
+          "step",
+          "channel",
+          "createdAt",
+        ],
+        "business_roi_recomputed": <String>[
+          "leadsReceived",
+          "paybackRatio",
+          "createdAt",
+        ],
+      };
 
   Stream<BusinessEventValidationSummary> watchSummary({int limit = 200}) {
     final uid = (_auth.currentUser?.uid ?? "").trim();
@@ -78,69 +115,71 @@ class BusinessEventContractService {
         .limit(limit)
         .snapshots()
         .map((snap) {
-      int total = 0;
-      int valid = 0;
-      int invalid = 0;
-      final Set<String> seen = <String>{};
-      final List<BusinessEventValidationIssue> issues = <BusinessEventValidationIssue>[];
+          int total = 0;
+          int valid = 0;
+          int invalid = 0;
+          final Set<String> seen = <String>{};
+          final List<BusinessEventValidationIssue> issues =
+              <BusinessEventValidationIssue>[];
 
-      for (final doc in snap.docs) {
-        final data = doc.data();
-        final type = (data["type"] ?? "").toString().trim();
-        if (type.isEmpty) {
-          invalid++;
-          issues.add(
-            BusinessEventValidationIssue(
-              docId: doc.id,
-              type: "unknown",
-              missingFields: const <String>["type"],
-            ),
-          );
-          continue;
-        }
+          for (final doc in snap.docs) {
+            final data = doc.data();
+            final type = (data["type"] ?? "").toString().trim();
+            if (type.isEmpty) {
+              invalid++;
+              issues.add(
+                BusinessEventValidationIssue(
+                  docId: doc.id,
+                  type: "unknown",
+                  missingFields: const <String>["type"],
+                ),
+              );
+              continue;
+            }
 
-        total++;
-        seen.add(type);
+            total++;
+            seen.add(type);
 
-        final required = requiredFieldsByType[type] ?? const <String>[];
-        if (required.isEmpty) {
-          valid++;
-          continue;
-        }
+            final required = requiredFieldsByType[type] ?? const <String>[];
+            if (required.isEmpty) {
+              valid++;
+              continue;
+            }
 
-        final List<String> missing = <String>[];
-        for (final field in required) {
-          if (!data.containsKey(field) || data[field] == null) {
-            missing.add(field);
-            continue;
+            final List<String> missing = <String>[];
+            for (final field in required) {
+              if (!data.containsKey(field) || data[field] == null) {
+                missing.add(field);
+                continue;
+              }
+              if (data[field] is String &&
+                  (data[field] as String).trim().isEmpty) {
+                missing.add(field);
+              }
+            }
+
+            if (missing.isEmpty) {
+              valid++;
+            } else {
+              invalid++;
+              issues.add(
+                BusinessEventValidationIssue(
+                  docId: doc.id,
+                  type: type,
+                  missingFields: missing,
+                ),
+              );
+            }
           }
-          if (data[field] is String && (data[field] as String).trim().isEmpty) {
-            missing.add(field);
-          }
-        }
 
-        if (missing.isEmpty) {
-          valid++;
-        } else {
-          invalid++;
-          issues.add(
-            BusinessEventValidationIssue(
-              docId: doc.id,
-              type: type,
-              missingFields: missing,
-            ),
+          return BusinessEventValidationSummary(
+            totalEvents: total,
+            validEvents: valid,
+            invalidEvents: invalid,
+            issues: issues,
+            seenTypes: seen,
+            expectedTypes: requiredFieldsByType.keys.toSet(),
           );
-        }
-      }
-
-      return BusinessEventValidationSummary(
-        totalEvents: total,
-        validEvents: valid,
-        invalidEvents: invalid,
-        issues: issues,
-        seenTypes: seen,
-        expectedTypes: requiredFieldsByType.keys.toSet(),
-      );
-    });
+        });
   }
 }

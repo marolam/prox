@@ -95,6 +95,8 @@ class SupportTicketQueue extends ChangeNotifier {
           message: row['message'] as String? ?? '',
           createdAt: createdAt,
           updatedAt: DateTime.tryParse('${row['updatedAt']}'),
+          category: row['category'] as String? ?? 'question',
+          firstHuhMoment: row['firstHuhMoment'] as String? ?? '',
         );
       }
       if (_owner != owner || _deletedOwners.contains(owner)) return;
@@ -151,6 +153,8 @@ class SupportTicketQueue extends ChangeNotifier {
                 'message': d.message,
                 'createdAt': d.createdAt.toIso8601String(),
                 'updatedAt': d.updatedAt?.toIso8601String(),
+                'category': d.category,
+                'firstHuhMoment': d.firstHuhMoment,
               },
             )
             .toList(),

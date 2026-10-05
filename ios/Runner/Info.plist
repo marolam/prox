@@ -46,7 +46,7 @@
 	<key>NSFaceIDUsageDescription</key>
 	<string>Prox can use Face ID to help protect your account on this device.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Prox uses location to find nearby matches and support live meetup safety features.</string>
+	<string>When you enable background matching, Prox uses your location even when the app is closed to find nearby connections and alert you to significant matches. You can turn this off in Sound &amp; alerts.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Prox uses your location while the app is open to find nearby matches and meetup options.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
@@ -55,6 +55,10 @@
 	<string>Prox uses your photo library when you choose a profile photo or evidence image.</string>
 	<key>NSUserNotificationUsageDescription</key>
 	<string>Prox sends notifications for chats, meetup requests, and match activity.</string>
+	<!-- Flutter's client build definitions are expanded by Xcode. Native code
+	     accepts only the explicit background availability flag; absent fails closed. -->
+	<key>ProxBackgroundMatchingDartDefines</key>
+	<string>$(DART_DEFINES)</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>

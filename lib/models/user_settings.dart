@@ -133,7 +133,7 @@ class MatchDiscoverySettings {
     this.modeKind = MatchingModeKind.normal,
     this.normalMode = NormalMatchMode.passive,
     this.listenRole = ListenMatchRole.speak,
-    this.treasureRadiusMiles = 1.0,
+    this.treasureRadiusMiles = 10.0,
     this.activeLockUntilEpochMs = 0,
     this.activePenaltyCount = 0,
     this.keywordMode = KeywordMatchMode.similar,
@@ -180,7 +180,7 @@ class MatchDiscoverySettings {
         modeKind = MatchingModeKind.normal,
         normalMode = NormalMatchMode.passive,
         listenRole = ListenMatchRole.speak,
-        treasureRadiusMiles = 1.0,
+        treasureRadiusMiles = 10.0,
         activeLockUntilEpochMs = 0,
         activePenaltyCount = 0,
         keywordMode = KeywordMatchMode.similar,
@@ -299,7 +299,7 @@ class MatchDiscoverySettings {
     final double radius = radiusRaw.clamp(minRadiusMiles, maxAllowed);
 
     final double treasureRadiusRaw =
-        (raw["treasureRadiusMiles"] as num?)?.toDouble() ?? 1.0;
+        (raw["treasureRadiusMiles"] as num?)?.toDouble() ?? 10.0;
     final double treasureRadius =
         treasureRadiusRaw.clamp(minRadiusMiles, maxRadiusMiles);
 
@@ -674,7 +674,9 @@ class UserSettings {
       simpleModeEnabled: simpleModeEnabled ?? this.simpleModeEnabled,
       alwaysUseNormalMode: alwaysUseNormalMode ?? this.alwaysUseNormalMode,
       simpleModeCompleted: simpleModeCompleted ?? this.simpleModeCompleted,
-      simpleModeStageIndex: simpleModeStageIndex ?? this.simpleModeStageIndex,
+      simpleModeStageIndex: simpleModeStageIndex == null
+          ? this.simpleModeStageIndex
+          : simpleModeStageIndex.clamp(0, 5),
       partyUnlockHighlightPending:
           partyUnlockHighlightPending ?? this.partyUnlockHighlightPending,
     );
@@ -782,7 +784,7 @@ class UserSettings {
     final bool simpleModeCompleted =
         (raw["simpleModeCompleted"] as bool?) ?? false;
     final int simpleModeStageIndex =
-        (raw["simpleModeStageIndex"] as num?)?.toInt() ?? 0;
+        ((raw["simpleModeStageIndex"] as num?)?.toInt() ?? 0).clamp(0, 5);
     final bool partyUnlockHighlightPending =
         (raw["partyUnlockHighlightPending"] as bool?) ?? false;
 

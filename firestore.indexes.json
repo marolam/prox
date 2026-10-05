@@ -1,6 +1,16 @@
 {
   "indexes": [
     {
+      "collectionGroup": "businessAutomationJobs",
+      "queryScope": "COLLECTION",
+      "fields": [{"fieldPath": "state", "order": "ASCENDING"}, {"fieldPath": "scheduledAt", "order": "ASCENDING"}]
+    },
+    {
+      "collectionGroup": "messages",
+      "queryScope": "COLLECTION",
+      "fields": [{"fieldPath": "from", "order": "ASCENDING"}, {"fieldPath": "ts", "order": "DESCENDING"}]
+    },
+    {
       "collectionGroup": "items",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
@@ -133,9 +143,37 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "backgroundPresence",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        {
+          "fieldPath": "enabled",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "latitude",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "longitude",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [
+    {
+      "collectionGroup": "rewardClaims",
+      "fieldPath": "inviteeUid",
+      "indexes": [{"queryScope": "COLLECTION_GROUP", "order": "ASCENDING"}]
+    },
+    {"collectionGroup": "growthSessions", "fieldPath": "expiresAt", "ttl": true, "indexes": []},
+    {"collectionGroup": "growthSessionEvents", "fieldPath": "expiresAt", "ttl": true, "indexes": []},
+    {"collectionGroup": "growthActivity", "fieldPath": "expiresAt", "ttl": true, "indexes": []},
+    {"collectionGroup": "growthRateLimits", "fieldPath": "expiresAt", "ttl": true, "indexes": []},
+    {"collectionGroup": "growthIdentitySignals", "fieldPath": "expiresAt", "ttl": true, "indexes": []},
     {
       "collectionGroup": "items",
       "fieldPath": "state",
@@ -261,6 +299,60 @@
         {
           "queryScope": "COLLECTION",
           "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "backgroundPresence",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "backgroundOpportunities",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "backgroundAlertPairs",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "backgroundAlertOutbox",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "backgroundOpportunities",
+      "fieldPath": "otherUid",
+      "indexes": [
+        {
+          "queryScope": "COLLECTION_GROUP",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "backgroundAlertPairs",
+      "fieldPath": "otherUid",
+      "indexes": [
+        {
+          "queryScope": "COLLECTION_GROUP",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "backgroundAlertOutbox",
+      "fieldPath": "otherUid",
+      "indexes": [
+        {
+          "queryScope": "COLLECTION_GROUP",
+          "order": "ASCENDING"
         }
       ]
     }

@@ -671,13 +671,13 @@ class _BusinessPaywallScreenState extends State<BusinessPaywallScreen> {
       final userSettings = UserSettingsService.instance;
       MatchSettingsService.instance.setBusinessOnly(true);
       userSettings.setMatchingMode(MatchingModeKind.normal);
-      userSettings.setNormalMatchMode(NormalMatchMode.active);
+      userSettings.setNormalMatchMode(NormalMatchMode.passive);
 
       await ActionReceiptService.instance.add(
         kind: "business",
         title: "Business ROI mode started",
         detail:
-            "Business-only filter enabled and matching set to Normal Active.",
+            "Business-only filter enabled. Hold the Prox Circle for 3 seconds to activate matching.",
       );
 
       if (!mounted) return;

@@ -14,12 +14,33 @@ const VALID_SKUS = new Set<string>([
   "biz_monthly_subscription",
   "biz_onetime_unlock",
   "dev_card_test_charge",
+  "service_priority_support_pass",
+  "service_profile_spotlight_week",
+  "service_message_boost_pack",
+  "service_single_keyword_match_unlock",
+  "service_reciprocal_match_unlock",
+  "service_keyword_chain_unlock",
   "points_topup_1",
   "points_topup_250",
   "points_topup_600",
   "points_topup_1400",
   "points_topup_4000",
 ]);
+
+const STORE_SERVICE_CARD_PRICE_BY_SKU: Record<string, number> = {
+  service_priority_support_pass: 0.60,
+  service_profile_spotlight_week: 0.80,
+  service_message_boost_pack: 0.70,
+  service_single_keyword_match_unlock: 0.65,
+  service_reciprocal_match_unlock: 1.10,
+  service_keyword_chain_unlock: 1.40,
+};
+
+const STORE_SERVICE_ENTITLEMENT_FIELD_BY_SKU: Record<string, string> = {
+  service_single_keyword_match_unlock: "singleKeywordMatchModeUnlocked",
+  service_reciprocal_match_unlock: "reciprocalKeywordMatchModeUnlocked",
+  service_keyword_chain_unlock: "keywordChainMatchModeUnlocked",
+};
 
 const POINTS_TOPUP_BY_SKU: Record<string, { points: number; amountUsd: number }> = {
   points_topup_1: { points: 1, amountUsd: 0.01 },
@@ -328,6 +349,18 @@ export async function applyExternalCheckoutStatus(args: {
         reason: 'Card points top-up', sku, timestamp: now,
       });
     }
+    if (STORE_SERVICE_CARD_PRICE_BY_SKU[sku]) {
+      tx.set(db.doc(`users/${uid}/store/purchases/items/${sku}`), {
+        sku,
+        requiresBusiness: false,
+        paymentMethod: 'card_external',
+        providerSessionId: sessionId,
+        purchasedAt: now,
+        amountUsd: Number(session.amountUsd) || STORE_SERVICE_CARD_PRICE_BY_SKU[sku],
+      }, {merge: true});
+      const entitlementField = STORE_SERVICE_ENTITLEMENT_FIELD_BY_SKU[sku];
+      if (entitlementField) patch[entitlementField] = true;
+    }
     tx.set(entitlementRef, patch, {merge: true});
     tx.create(invoiceRef, {
       invoiceId: sessionId, externalSessionId: sessionId, sku,
@@ -346,6 +379,7 @@ function amountUsdForSku(sku: string): number {
   if (sku === "biz_monthly_subscription") return monthlySubscriptionAmountUsd();
   if (sku === "biz_onetime_unlock") return 11.99;
   if (sku === "dev_card_test_charge") return 0.01;
+  if (STORE_SERVICE_CARD_PRICE_BY_SKU[sku]) return STORE_SERVICE_CARD_PRICE_BY_SKU[sku];
   if (POINTS_TOPUP_BY_SKU[sku]) return POINTS_TOPUP_BY_SKU[sku].amountUsd;
   return 0;
 }

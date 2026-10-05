@@ -3,7 +3,19 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
-const storeCatalog: Record<string, {cost: number; requiresBusiness: boolean; entitlement: string}> = {
+const storeCatalog: Record<string, {cost: number; requiresBusiness: boolean; entitlement?: string}> = {
+  "service_priority_support_pass": {
+    "cost": 60,
+    "requiresBusiness": false,
+  },
+  "service_profile_spotlight_week": {
+    "cost": 80,
+    "requiresBusiness": false,
+  },
+  "service_message_boost_pack": {
+    "cost": 70,
+    "requiresBusiness": false,
+  },
   "service_single_keyword_match_unlock": {
     "cost": 65,
     "requiresBusiness": false,
@@ -18,6 +30,18 @@ const storeCatalog: Record<string, {cost: number; requiresBusiness: boolean; ent
     "cost": 140,
     "requiresBusiness": false,
     "entitlement": "keywordChainMatchModeUnlocked"
+  },
+  "biz_boost_visibility": {
+    "cost": 40,
+    "requiresBusiness": true,
+  },
+  "biz_provider_tools": {
+    "cost": 60,
+    "requiresBusiness": true,
+  },
+  "biz_auto_reply_templates": {
+    "cost": 95,
+    "requiresBusiness": true,
   },
   "biz_high_radius_unlock": {
     "cost": 90,
@@ -72,7 +96,7 @@ export async function purchasePointsEntitlement(uid: string, sku: string, reques
       patch.subscriptionRenewsAt = admin.firestore.Timestamp.fromMillis(Math.max(Date.now(), current) + 30 * 86400000);
     }
     if (item) {
-      patch[item.entitlement] = true;
+      if (item.entitlement) patch[item.entitlement] = true;
       tx.create(purchase, {sku, costPoints: cost, requiresBusiness: item.requiresBusiness, purchasedAt: now});
     }
     tx.update(points, {currentPoints: available - cost, updatedAt: now});

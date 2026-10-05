@@ -47,6 +47,27 @@ class MainActivity : FlutterFragmentActivity() {
 
 	override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
 		super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "prox/device_metadata")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "getMetadata") {
+                    result.success(mapOf(
+                        "device" to "${Build.MANUFACTURER} ${Build.MODEL}",
+                        "os" to "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
+                    ))
+                } else { result.notImplemented() }
+            }
+        BackgroundMatchingService.channels(this)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "prox/background_matching")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "configure" -> result.success(BackgroundMatchingService.configure(this,
+                        call.argument<String>("uid") ?: "", call.argument<String>("deviceId") ?: "",
+                        call.argument<Boolean>("enabled") ?: false, call.argument<String>("mode") ?: "normal"))
+                    "status" -> result.success(mapOf("permissionGranted" to BackgroundMatchingService.permitted(this)))
+                    else -> result.notImplemented()
+                }
+            }
+
 
 		MethodChannel(flutterEngine.dartExecutor.binaryMessenger, methodChannelName)
 			.setMethodCallHandler { call: MethodCall, result: MethodChannel.Result ->

@@ -15,7 +15,6 @@ class MeetupFlowGuard extends StatefulWidget {
 }
 
 class _MeetupFlowGuardState extends State<MeetupFlowGuard> {
-  bool _allowLeave = false;
   bool _asking = false;
   late final _stream = FirebaseFirestore.instance
       .doc('meetups/${widget.meetupId}')
@@ -26,9 +25,9 @@ class _MeetupFlowGuardState extends State<MeetupFlowGuard> {
     final decision = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Leave this meetup pending?'),
+        title: const Text('Finish this meetup step first'),
         content: const Text(
-          'Going back does not cancel the meetup. You can resume before its deadline. If it remains unfinished, it closes without completion credit. Use Safety to cancel now without a rating penalty.',
+          'This meetup is active and step-locked to prevent confusion. Continue the current step, or open Safety to cancel by request.',
         ),
         actions: [
           TextButton(
@@ -39,22 +38,12 @@ class _MeetupFlowGuardState extends State<MeetupFlowGuard> {
             onPressed: () => Navigator.pop(context, 'safety'),
             child: const Text('Safety / cancel'),
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, 'leave'),
-            child: const Text('Leave pending'),
-          ),
         ],
       ),
     );
     _asking = false;
     if (!mounted) return;
     if (decision == 'safety') SafetyAccessShell.open(context);
-    if (decision == 'leave') {
-      setState(() => _allowLeave = true);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) Navigator.of(context).pop();
-      });
-    }
   }
 
   @override
@@ -67,7 +56,7 @@ class _MeetupFlowGuardState extends State<MeetupFlowGuard> {
         'live',
       }.contains(snap.data?.data()?['status']);
       return PopScope(
-        canPop: _allowLeave || !active,
+        canPop: !active,
         onPopInvokedWithResult: (didPop, _) {
           if (!didPop) _ask();
         },

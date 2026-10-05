@@ -49,7 +49,7 @@ class SimpleModeService {
       return;
     }
 
-    var idx = settings.simpleModeStageIndex;
+    var idx = settings.simpleModeStageIndex.clamp(0, 5);
     if (idx <= 0 && await _hasMinimumProfile()) {
       idx = 1;
       UserSettingsService.instance.setSimpleModeStageIndex(idx);

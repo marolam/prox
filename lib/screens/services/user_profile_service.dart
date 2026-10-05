@@ -61,12 +61,17 @@ class UserProfile {
 
   static List<String> _readStringList(dynamic raw) {
     if (raw is List) {
-      return raw
-          .map((e) => toStringOrNull(e))
-          .whereType<String>()
-          .map((s) => s.trim())
-          .where((s) => s.isNotEmpty)
-          .toList(growable: false);
+      final Map<String, String> uniqueByLower = <String, String>{};
+      for (final entry in raw) {
+        final String? text = toStringOrNull(entry);
+        if (text == null) continue;
+        final String normalized =
+            text.trim().replaceAll(RegExp(r"\s+"), " ");
+        if (normalized.isEmpty) continue;
+        final String key = normalized.toLowerCase();
+        uniqueByLower.putIfAbsent(key, () => normalized);
+      }
+      return uniqueByLower.values.toList(growable: false);
     }
     return const <String>[];
   }
@@ -137,9 +142,30 @@ class UserProfile {
       data["avatar"],
     ];
 
+    const invalidPlaceholders = <String>{
+      "null",
+      "undefined",
+      "none",
+      "n/a",
+      "na",
+      "false",
+      "0",
+      "(null)",
+    };
+
     for (final c in candidates) {
       final s = toStringOrNull(c)?.trim();
       if (s == null || s.isEmpty) continue;
+
+      final lower = s.toLowerCase();
+      if (invalidPlaceholders.contains(lower)) continue;
+
+      final Uri? parsed = Uri.tryParse(s);
+      final bool malformedHttpUrl = parsed != null &&
+          (parsed.scheme == "http" || parsed.scheme == "https") &&
+          parsed.host.isEmpty;
+      if (malformedHttpUrl) continue;
+
       return s;
     }
     return null;

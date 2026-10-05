@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:prox/models/support_ticket.dart';
 import 'package:prox/models/support_ticket_draft.dart';
 import 'package:prox/services/support_service.dart';
 import 'package:prox/services/support_ticket_queue.dart';
@@ -27,6 +26,10 @@ class _SupportComposeScreenState extends State<SupportComposeScreen> {
   bool _busy = false;
   bool _submitted = false;
   String? _error;
+  SupportCategory _category = SupportCategory.question;
+  SupportAttachment? _attachment;
+  Map<String, String> _metadata = const {};
+  SupportReportRequest? _pendingReport;
 
   String? _currentUid() {
     try {
@@ -41,10 +44,19 @@ class _SupportComposeScreenState extends State<SupportComposeScreen> {
     super.initState();
     final draft = widget.existingDraft;
     _ownerUid = _currentUid();
-    _draftId = draft?.id ?? DateTime.now().microsecondsSinceEpoch.toString();
+    _draftId = draft?.id ?? SupportService.newRequestId();
     _createdAt = draft?.createdAt ?? DateTime.now();
     _subjectController = TextEditingController(text: draft?.subject ?? '');
     _messageController = TextEditingController(text: draft?.message ?? '');
+    _category = SupportCategory.values.firstWhere(
+      (value) => value.name == draft?.category,
+      orElse: () => SupportCategory.question,
+    );
+    SupportService.collectMetadata()
+        .then((value) {
+          if (mounted) setState(() => _metadata = value);
+        })
+        .catchError((Object _) {});
     SupportTicketQueue.instance.ensureLoaded().catchError((Object _) {
       if (mounted)
         setState(
@@ -74,6 +86,8 @@ class _SupportComposeScreenState extends State<SupportComposeScreen> {
           createdAt: _createdAt,
           subject: subject,
           message: message,
+          category: _category.name,
+          firstHuhMoment: widget.existingDraft?.firstHuhMoment ?? '',
         ),
       );
       if (mounted && showMessage)
@@ -160,18 +174,18 @@ class _SupportComposeScreenState extends State<SupportComposeScreen> {
     _debounce?.cancel();
     await _saveDraft(showMessage: false);
     try {
-      await SupportService.instance
-          .createTicket(
-            SupportTicket(
-              id: _draftId,
-              userId: uid,
-              subject: subject,
-              description: message,
-              status: SupportTicketStatus.open,
-              createdAt: _createdAt,
-            ),
-          )
-          .timeout(const Duration(seconds: 20));
+      _pendingReport ??= SupportReportRequest(
+        requestId: _draftId,
+        category: _category,
+        subject: subject,
+        message: message,
+        expectedUid: _ownerUid,
+        metadata: Map.unmodifiable(_metadata),
+        attachment: _attachment,
+        source: 'support_compose',
+        firstHuhMoment: widget.existingDraft?.firstHuhMoment ?? '',
+      );
+      await SupportService.instance.submitReport(_pendingReport!);
       _submitted = true;
       try {
         await SupportTicketQueue.instance.removeDraft(_draftId);
@@ -211,7 +225,7 @@ class _SupportComposeScreenState extends State<SupportComposeScreen> {
         const SizedBox(height: 16),
         TextField(
           controller: _subjectController,
-          enabled: !_busy,
+          enabled: !_busy && _pendingReport == null,
           maxLength: 120,
           textInputAction: TextInputAction.next,
           onChanged: _changed,
@@ -223,7 +237,7 @@ class _SupportComposeScreenState extends State<SupportComposeScreen> {
         const SizedBox(height: 12),
         TextField(
           controller: _messageController,
-          enabled: !_busy,
+          enabled: !_busy && _pendingReport == null,
           maxLength: 5000,
           keyboardType: TextInputType.multiline,
           minLines: 5,
@@ -236,8 +250,63 @@ class _SupportComposeScreenState extends State<SupportComposeScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        const Text(
-          'Include your phone model and app version. Avoid passwords or payment details.',
+        DropdownButtonFormField<SupportCategory>(
+          initialValue: _category,
+          decoration: const InputDecoration(labelText: 'Category'),
+          items: [
+            for (final value in SupportCategory.values)
+              DropdownMenuItem(value: value, child: Text(value.label)),
+          ],
+          onChanged: _busy || _pendingReport != null
+              ? null
+              : (value) {
+                  if (value != null) {
+                    setState(() => _category = value);
+                    _changed('');
+                  }
+                },
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: _busy || _pendingReport != null
+              ? null
+              : () async {
+                  setState(() => _busy = true);
+                  try {
+                    final image = await SupportService.pickScreenshot();
+                    if (mounted && image != null)
+                      setState(() => _attachment = image);
+                  } on ArgumentError catch (error) {
+                    if (mounted) setState(() => _error = '${error.message}');
+                  } catch (_) {
+                    if (mounted)
+                      setState(
+                        () => _error = 'Could not open your photos. Try again.',
+                      );
+                  } finally {
+                    if (mounted) setState(() => _busy = false);
+                  }
+                },
+          icon: const Icon(Icons.add_photo_alternate_outlined),
+          label: const Text('Attach screenshot (optional)'),
+        ),
+        if (_attachment != null)
+          ListTile(
+            title: const Text('Screenshot attached'),
+            subtitle: const Text(
+              'Private to you and support. Reselect it if you reopen this draft.',
+            ),
+            trailing: IconButton(
+              tooltip: 'Remove screenshot',
+              icon: const Icon(Icons.close),
+              onPressed: _busy || _pendingReport != null
+                  ? null
+                  : () => setState(() => _attachment = null),
+            ),
+          ),
+        Text(
+          'App version and device details are attached automatically. Avoid passwords or payment details.'
+          '${_metadata.isEmpty ? '' : '\n${_metadata['version']} (build ${_metadata['build']}) · ${_metadata['platform']} · ${_metadata['device']}'}',
         ),
         if (_error != null)
           Padding(

@@ -805,13 +805,13 @@ class ContextHelpScreen extends StatelessWidget {
     ),
     "matches:treasure_hunt": _HelpContent(
       title: "Treasure Hunt",
-      summary: "Treasure Hunt uses directional cues and keyword overlap to guide exploration.",
+      summary: "Treasure Hunt offers an approximate snapshot of promising areas based on your criteria.",
       tutorialSteps: <String>[
-        "Open compass and identify top clue.",
-        "Move toward bearing while monitoring clues.",
-        "Open chat when target becomes relevant.",
+        "Hold the Prox Circle for 3 seconds to activate the Matching Compass.",
+        "Use the north-up arrow and hot/cold gauge to explore the suggested area.",
+        "When closer, switch to Normal and hold the circle to activate matching.",
       ],
-      tips: <String>["Treasure mode performs best with active movement and fresh location."],
+      tips: <String>["Snapshots last 5 minutes. People may move and matches are not guaranteed."],
     ),
   };
 

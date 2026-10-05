@@ -9,6 +9,7 @@ import 'package:prox/services/secure_credential_store.dart';
 import 'package:prox/services/action_receipt_service.dart';
 import 'package:prox/services/support_ticket_queue.dart';
 import 'package:prox/services/user_settings_service.dart';
+import 'package:prox/services/growth_service.dart';
 
 class DeletionIdentity {
   const DeletionIdentity({
@@ -104,6 +105,7 @@ class AccountDeletionService {
     },
     clearAccountQueue: (uid) async {
       await Future.wait([
+        GrowthService.instance.clearForUser(uid),
         OfflineOutboxService.instance.clearForUser(uid),
         SupportTicketQueue.instance.clearForUser(uid),
         ActionReceiptService.instance.clearForUser(uid),

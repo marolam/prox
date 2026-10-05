@@ -75,7 +75,7 @@ class UserSettingsService {
         'uxMode': AppUxMode.party.name,
       });
     }
-    _emit(next.copyWith(), persist: false);
+    _emit(_sessionDefaults(next), persist: false);
     return _persist(_settings);
   }
 
@@ -157,7 +157,7 @@ class UserSettingsService {
           _settingsOwnerUid = raw is Map ? raw['_accountUid'] as String? : null;
           // Persisted paid flags are never evidence of current server access.
           final normalized = _withBillingEntitlements(
-            _normalizeProModeAccess(loaded),
+            _normalizeProModeAccess(_sessionDefaults(loaded)),
             const {},
           );
           _settings = normalized;
@@ -190,6 +190,15 @@ class UserSettingsService {
     });
     return _controller.stream;
   }
+
+  // Matching activation belongs to this app/account session, not device storage.
+  // Background/resume events do not start a new session.
+  UserSettings _sessionDefaults(UserSettings settings) => settings.copyWith(
+    matchDiscovery: settings.matchDiscovery.copyWith(
+      modeKind: MatchingModeKind.normal,
+      normalMode: NormalMatchMode.passive,
+    ),
+  );
 
   void _ensureLoadedAsync() {
     unawaited(
@@ -497,7 +506,7 @@ class UserSettingsService {
   }
 
   void setSimpleModeStageIndex(int stageIndex) {
-    final safe = stageIndex < 0 ? 0 : stageIndex;
+    final safe = stageIndex.clamp(0, 5);
     if (_settings.simpleModeStageIndex == safe) return;
     _emit(_settings.copyWith(simpleModeStageIndex: safe));
   }

@@ -10,12 +10,19 @@ import "package:prox/services/keyword_quality_service.dart";
 import "package:prox/services/user_profile_service.dart";
 import "package:prox/services/user_settings_service.dart";
 import "package:prox/utils/bounded_async_map.dart";
+import "package:prox/services/presence_writer.dart";
+import "package:prox/services/matching/travel_match_policy.dart";
+import "package:geolocator/geolocator.dart";
+import "package:cloud_firestore/cloud_firestore.dart";
 
 class MatchingRuntimeService {
   MatchingRuntimeService._({
+    Map<String, dynamic> Function()? travelSampleProvider,
     String? Function()? uidProvider,
     Future<UserProfile?> Function(String)? profileLoader,
-  }) : _uidProvider =
+  }) : _travelSampleProvider =
+           travelSampleProvider ?? (() => PresenceWriter.instance.travelSample),
+       _uidProvider =
            uidProvider ?? (() => FirebaseAuth.instance.currentUser?.uid),
        _profileLoader =
            profileLoader ??
@@ -23,22 +30,24 @@ class MatchingRuntimeService {
 
   @visibleForTesting
   factory MatchingRuntimeService.forTesting({
+    Map<String, dynamic> Function()? travelSampleProvider,
     required String? Function() uidProvider,
     required Future<UserProfile?> Function(String) profileLoader,
   }) => MatchingRuntimeService._(
+    travelSampleProvider: travelSampleProvider,
     uidProvider: uidProvider,
     profileLoader: profileLoader,
   );
 
   static final MatchingRuntimeService instance = MatchingRuntimeService._();
+  final Map<String, dynamic> Function() _travelSampleProvider;
   final String? Function() _uidProvider;
   final Future<UserProfile?> Function(String) _profileLoader;
 
   final UserSettingsService _settings = UserSettingsService.instance;
   static const Duration _profileFetchTimeout = Duration(seconds: 4);
   static const Duration _sharedKeywordsTimeout = Duration(seconds: 5);
-  static const Duration _travelRecentMovementWindow = Duration(minutes: 30);
-  static const int _maxTreasureCandidates = 24;
+  static const int _maxTreasureCandidates = 50;
 
   List<String> _myKeywords = const <String>[];
   _MatchKeywordVectors _myVectors = const _MatchKeywordVectors.empty();
@@ -100,39 +109,51 @@ class MatchingRuntimeService {
     }
 
     if (settings.modeKind == MatchingModeKind.travel) {
+      final revision = _synchronizeSession();
+      await _refreshMyKeywordsIfNeeded();
+      if (!_sessionIsCurrent(revision)) return const [];
       final now = DateTime.now();
-      return raw
-          .where((d) {
-            final ts = d.presenceTs;
-            if (ts == null) return false;
-            final bool recentlyMoving =
-                !ts.isAfter(now.add(const Duration(minutes: 2))) &&
-                now.difference(ts) <= _travelRecentMovementWindow;
-            return recentlyMoving;
-          })
-          .toList(growable: false);
+      final local = _travelSampleProvider();
+      final candidates = raw.where((doc) {
+        final presence = doc.data['presence'];
+        return _peerModeKind(doc) == MatchingModeKind.travel &&
+            presence is Map<String, dynamic> &&
+            TravelMatchPolicy.canMatch(
+              local: local,
+              peer: presence,
+              distanceMiles: local['geopoint'] is GeoPoint
+                  ? Geolocator.distanceBetween(
+                          (local['geopoint'] as GeoPoint).latitude,
+                          (local['geopoint'] as GeoPoint).longitude,
+                          doc.loc.latitude,
+                          doc.loc.longitude,
+                        ) /
+                        1609.344
+                  : doc.distanceMiles,
+              radiusMiles: effectiveRadiusMiles(settings),
+              now: now,
+            );
+      });
+      final matches = await boundedAsyncMap(
+        candidates,
+        (doc) async =>
+            await _passesCriteria(
+              doc,
+              settings,
+            ).timeout(_sharedKeywordsTimeout, onTimeout: () => false)
+            ? doc
+            : null,
+      );
+      if (!_sessionIsCurrent(revision)) return const [];
+      return matches.whereType<NearbyDoc>().toList(growable: false);
     }
 
-    if (settings.modeKind == MatchingModeKind.treasureHunt) {
-      try {
-        final hits = await rankTreasureTargets(raw);
-        return hits.map((e) => e.doc).toList(growable: false);
-      } catch (_) {
-        return const <NearbyDoc>[];
-      }
-    }
+    // Treasure produces area clues only after deliberate compass activation.
+    if (settings.modeKind == MatchingModeKind.treasureHunt) return const [];
 
     if (settings.modeKind == MatchingModeKind.listen) {
-      final ListenMatchRole localRole = settings.listenRole;
       return raw
-          .where((d) {
-            final peerMode = _peerModeKind(d);
-            if (peerMode != MatchingModeKind.listen) return false;
-
-            final peerRole = _peerListenRole(d);
-            if (peerRole == null) return false;
-            return peerRole != localRole;
-          })
+          .where((doc) => _peerModeKind(doc) == MatchingModeKind.listen)
           .toList(growable: false);
     }
 
@@ -151,8 +172,9 @@ class MatchingRuntimeService {
       final results = await boundedAsyncMap(candidates, (doc) async {
         if (!_sessionIsCurrent(revision)) return null;
         try {
-          final matches = await _hasComplementaryIntentWithDoc(
+          final matches = await _passesCriteria(
             doc,
+            settings,
           ).timeout(_sharedKeywordsTimeout, onTimeout: () => false);
           return matches ? doc : null;
         } catch (_) {
@@ -163,44 +185,6 @@ class MatchingRuntimeService {
       final intentMatches = results.whereType<NearbyDoc>().toList(
         growable: false,
       );
-
-      if (settings.normalMode == NormalMatchMode.passive &&
-          effectiveRadiusMiles(settings) > 15.0) {
-        final List<NearbyDoc> constrained = <NearbyDoc>[];
-        for (final doc in intentMatches) {
-          if (doc.distanceMiles <= 10.0) {
-            constrained.add(doc);
-            continue;
-          }
-
-          final shared = await sharedKeywordsWith(
-            doc.uid,
-          ).timeout(_sharedKeywordsTimeout, onTimeout: () => const <String>[]);
-          if (!_sessionIsCurrent(revision)) return const [];
-          if (shared.isNotEmpty) constrained.add(doc);
-        }
-        return prioritizeActivePeers(
-          constrained,
-          localNormalMode: settings.normalMode,
-        );
-      }
-
-      if (settings.keywordMode != KeywordMatchMode.similar) {
-        final effectiveKeywordMode = _effectiveKeywordModeForUnlocks(settings);
-        final List<NearbyDoc> strict = <NearbyDoc>[];
-        for (final doc in intentMatches) {
-          final include = await _passesKeywordMode(
-            otherUid: doc.uid,
-            keywordMode: effectiveKeywordMode,
-          ).timeout(_sharedKeywordsTimeout, onTimeout: () => false);
-          if (!_sessionIsCurrent(revision)) return const [];
-          if (include) strict.add(doc);
-        }
-        return prioritizeActivePeers(
-          strict,
-          localNormalMode: settings.normalMode,
-        );
-      }
 
       return prioritizeActivePeers(
         intentMatches,
@@ -242,11 +226,11 @@ class MatchingRuntimeService {
     final modeName = _readPeerSettingStringFromData(
       doc.data,
       const <List<String>>[
+        <String>["presence", "normalMode"],
         <String>["normalMode"],
         <String>["matching", "normalMode"],
         <String>["matchingSettings", "normalMode"],
         <String>["settings", "matching", "normalMode"],
-        <String>["presence", "normalMode"],
       ],
     );
     switch (_normalizePeerTokenStatic(modeName)) {
@@ -270,11 +254,6 @@ class MatchingRuntimeService {
     final theirsSearching = _normalizedKeywordSet(theirSearching);
     final theirsProviding = _normalizedKeywordSet(theirProviding);
 
-    if (mineSearching.isEmpty ||
-        mineProviding.isEmpty ||
-        theirsSearching.isEmpty ||
-        theirsProviding.isEmpty)
-      return false;
     return mineSearching.intersection(theirsProviding).isNotEmpty ||
         mineProviding.intersection(theirsSearching).isNotEmpty;
   }
@@ -318,37 +297,73 @@ class MatchingRuntimeService {
     }
   }
 
-  Future<List<TreasureTarget>> rankTreasureTargets(List<NearbyDoc> raw) async {
+  Future<bool> _passesCriteria(
+    NearbyDoc doc,
+    MatchDiscoverySettings settings,
+  ) async {
+    if (!await _hasComplementaryIntentWithDoc(doc)) return false;
+    final peer = await _peerVectorsForDoc(doc);
+    final mineSearch = _normalizedKeywordSet(_myVectors.searching);
+    final mineProvide = _normalizedKeywordSet(_myVectors.provide);
+    final peerSearch = _normalizedKeywordSet(peer.searching);
+    final peerProvide = _normalizedKeywordSet(peer.provide);
+    final forward = mineSearch.intersection(peerProvide);
+    final reverse = mineProvide.intersection(peerSearch);
+    switch (_effectiveKeywordModeForUnlocks(settings)) {
+      case KeywordMatchMode.reciprocalOpposite:
+        return forward.isNotEmpty && reverse.isNotEmpty;
+      case KeywordMatchMode.keywordChain:
+        return {
+              ...mineSearch,
+              ...mineProvide,
+            }.intersection({...peerSearch, ...peerProvide}).length >=
+            2;
+      default:
+        return forward.isNotEmpty || reverse.isNotEmpty;
+    }
+  }
+
+  Future<List<TreasureTarget>> rankTreasureTargets(
+    List<NearbyDoc> raw, {
+    MatchDiscoverySettings? settings,
+  }) async {
+    final discovery = settings ?? _settings.current.matchDiscovery;
     final revision = _synchronizeSession();
+    await _refreshMyKeywordsIfNeeded();
     if (!_sessionIsCurrent(revision)) return const [];
     final candidates =
-        (raw.toList()
+        (raw
+                .where(
+                  (doc) =>
+                      _peerModeKind(doc) == MatchingModeKind.normal ||
+                      _peerModeKind(doc) == MatchingModeKind.treasureHunt,
+                )
+                .toList()
               ..sort((a, b) => a.distanceMiles.compareTo(b.distanceMiles)))
             .take(_maxTreasureCandidates);
-    final results = await boundedAsyncMap(candidates, (d) async {
-      if (!_sessionIsCurrent(revision)) return null;
-      List<String> shared;
+    final results = await boundedAsyncMap(candidates, (doc) async {
       try {
-        shared = await sharedKeywordsWith(
-          d.uid,
-        ).timeout(_sharedKeywordsTimeout, onTimeout: () => const <String>[]);
+        if (!await _passesCriteria(
+          doc,
+          discovery,
+        ).timeout(_sharedKeywordsTimeout, onTimeout: () => false))
+          return null;
+        final peer = await _peerVectorsForDoc(doc);
+        final shared = <String>{
+          ..._normalizedKeywordSet(
+            _myVectors.searching,
+          ).intersection(_normalizedKeywordSet(peer.provide)),
+          ..._normalizedKeywordSet(
+            _myVectors.provide,
+          ).intersection(_normalizedKeywordSet(peer.searching)),
+        }.toList()..sort();
+        return TreasureTarget(doc: doc, sharedKeywords: shared);
       } catch (_) {
         return null;
       }
-      if (shared.isEmpty) return null;
-      return TreasureTarget(doc: d, sharedKeywords: shared);
     });
     if (!_sessionIsCurrent(revision)) return const [];
-    final out = results.whereType<TreasureTarget>().toList();
-
-    out.sort((a, b) {
-      final byKeywords = b.sharedKeywords.length.compareTo(
-        a.sharedKeywords.length,
-      );
-      if (byKeywords != 0) return byKeywords;
-      return a.doc.distanceMiles.compareTo(b.doc.distanceMiles);
-    });
-    return out;
+    return results.whereType<TreasureTarget>().toList(growable: false);
   }
 
   Future<List<String>> sharedKeywordsWith(String otherUid) async {
@@ -477,47 +492,6 @@ class MatchingRuntimeService {
     }
   }
 
-  Future<bool> _passesKeywordMode({
-    required String otherUid,
-    required KeywordMatchMode keywordMode,
-  }) async {
-    if (keywordMode == KeywordMatchMode.similar) return true;
-
-    final revision = _synchronizeSession();
-    await _refreshMyKeywordsIfNeeded();
-    if (!_sessionIsCurrent(revision)) return false;
-    final peerKeywords = await _peerKeywords(otherUid);
-    if (!_sessionIsCurrent(revision)) return false;
-    if (_myKeywords.isEmpty || peerKeywords.isEmpty) return false;
-
-    final mineSet = _myKeywords.toSet();
-    final sharedCount = peerKeywords.where(mineSet.contains).toSet().length;
-
-    if (keywordMode == KeywordMatchMode.strict ||
-        keywordMode == KeywordMatchMode.singleKeyword) {
-      return sharedCount >= 1;
-    }
-
-    if (keywordMode == KeywordMatchMode.keywordChain) {
-      return sharedCount >= 2;
-    }
-
-    final mineVectors = _myVectors;
-    final peerVectors = await _peerVectors(otherUid);
-    if (!_sessionIsCurrent(revision)) return false;
-    if (mineVectors.isEmpty || peerVectors.isEmpty) return false;
-
-    final searchToProvide = mineVectors.searching
-        .where(peerVectors.provide.contains)
-        .toSet()
-        .isNotEmpty;
-    final provideToSearch = mineVectors.provide
-        .where(peerVectors.searching.contains)
-        .toSet()
-        .isNotEmpty;
-    return searchToProvide && provideToSearch;
-  }
-
   Future<_MatchKeywordVectors> _peerVectors(String uid) async {
     final revision = _synchronizeSession();
     await _peerKeywords(uid);
@@ -563,11 +537,11 @@ class MatchingRuntimeService {
 
   MatchingModeKind _peerModeKind(NearbyDoc doc) {
     final String modeName = _readPeerSettingString(doc, const <List<String>>[
+      <String>["presence", "modeKind"],
       <String>["modeKind"],
       <String>["matching", "modeKind"],
       <String>["matchingSettings", "modeKind"],
       <String>["settings", "matching", "modeKind"],
-      <String>["presence", "modeKind"],
     ]);
 
     final normalized = _normalizePeerToken(modeName);
@@ -584,25 +558,6 @@ class MatchingRuntimeService {
       case "normal":
       default:
         return MatchingModeKind.normal;
-    }
-  }
-
-  ListenMatchRole? _peerListenRole(NearbyDoc doc) {
-    final String roleName = _readPeerSettingString(doc, const <List<String>>[
-      <String>["listenRole"],
-      <String>["matching", "listenRole"],
-      <String>["matchingSettings", "listenRole"],
-      <String>["settings", "matching", "listenRole"],
-      <String>["presence", "listenRole"],
-    ]);
-    final normalized = _normalizePeerToken(roleName);
-    switch (normalized) {
-      case "speak":
-        return ListenMatchRole.speak;
-      case "listen":
-        return ListenMatchRole.listen;
-      default:
-        return null;
     }
   }
 
@@ -657,5 +612,5 @@ class _MatchKeywordVectors {
     : searching = const <String>[],
       provide = const <String>[];
 
-  bool get isEmpty => searching.isEmpty || provide.isEmpty;
+  bool get isEmpty => searching.isEmpty && provide.isEmpty;
 }

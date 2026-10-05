@@ -273,21 +273,54 @@ class _DraftTile extends StatelessWidget {
 
   final SupportTicketDraft draft;
 
+  static String _formatDateTime(DateTime value) {
+    return "${value.month.toString().padLeft(2, "0")}/"
+        "${value.day.toString().padLeft(2, "0")} "
+        "${value.hour.toString().padLeft(2, "0")}:"
+        "${value.minute.toString().padLeft(2, "0")}";
+  }
+
+  Future<bool> _confirmDelete(BuildContext context) async {
+    final String title = draft.subject.trim().isEmpty
+        ? "Untitled support message"
+        : draft.subject.trim();
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Delete draft?"),
+        content: Text(
+          "This deletes \"$title\" from this device. This cannot be undone.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text("Cancel"),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text("Delete"),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final ColorScheme cs = theme.colorScheme;
     final queue = SupportTicketQueue.instance;
 
-    final String createdLabel =
-        "${draft.createdAt.month.toString().padLeft(2, "0")}/"
-        "${draft.createdAt.day.toString().padLeft(2, "0")} "
-        "${draft.createdAt.hour.toString().padLeft(2, "0")}:"
-        "${draft.createdAt.minute.toString().padLeft(2, "0")}";
+    final DateTime lastEditedAt = draft.updatedAt ?? draft.createdAt;
+    final String lastEditedLabel = _formatDateTime(lastEditedAt);
 
-    final String snippet = draft.message.length <= 80
-        ? draft.message
-        : "${draft.message.substring(0, 77)}...";
+    final String trimmedMessage = draft.message.trim();
+    final String snippet = trimmedMessage.isEmpty
+      ? "No details yet. Tap to continue this draft."
+      : trimmedMessage.length <= 80
+      ? trimmedMessage
+      : "${trimmedMessage.substring(0, 77)}...";
 
     return Card(
       elevation: 0,
@@ -321,7 +354,7 @@ class _DraftTile extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              "Draft \u2022 $createdLabel",
+              "Last edited \u2022 $lastEditedLabel",
               style: theme.textTheme.labelSmall?.copyWith(
                 color: cs.onSurfaceVariant,
               ),
@@ -346,6 +379,8 @@ class _DraftTile extends StatelessWidget {
           icon: const Icon(Icons.delete_outline),
           tooltip: "Delete draft",
           onPressed: () async {
+            final confirm = await _confirmDelete(context);
+            if (!confirm) return;
             try {
               await queue.removeDraft(draft.id);
             } catch (_) {

@@ -14,7 +14,7 @@ import "app_router.dart";
 
 import "screens/account/account_billing_screen.dart";
 import "screens/auth/auth_gate.dart";
-import "screens/chat/chat_thread_screen.dart";
+import "screens/chats/chat_thread_screen.dart";
 import "screens/chats/chat_threads_screen.dart";
 import "screens/dashboard/dashboard_screen.dart";
 import "screens/dev/dev_menu.dart";
@@ -23,6 +23,7 @@ import "screens/dev/system_health_hud_screen.dart";
 import "screens/dev/missing_sweep_check_screen.dart";
 import "dev/dev_user_simulator_screen.dart";
 import "screens/matches/match_inbox_screen.dart";
+import "screens/matches/significant_match_screen.dart";
 import "screens/meetup/meetup_live_screen.dart";
 import "screens/meetup/meetup_history_screen.dart";
 import "screens/business/business_mode_entry_screen.dart";
@@ -62,6 +63,7 @@ import "package:prox/widgets/global_top_actions_bar.dart";
 import "package:prox/widgets/update_enforcement_gate.dart";
 import "package:prox/widgets/connectivity_status_banner.dart";
 import "package:prox/services/runtime_diagnostics_service.dart";
+import "package:prox/services/growth_service.dart";
 
 class ProxApp extends StatefulWidget {
   const ProxApp({super.key});
@@ -71,6 +73,8 @@ class ProxApp extends StatefulWidget {
 }
 
 class _ProxAppState extends State<ProxApp> {
+  static const Duration _minBrandedSplashDuration = Duration(seconds: 5);
+  static const Duration _maxStartupWarmupBudget = Duration(seconds: 10);
   bool _postInitServicesScheduled = false;
   bool _appCheckActivated = false;
   final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
@@ -86,10 +90,60 @@ class _ProxAppState extends State<ProxApp> {
 
   late Future<void> _firebaseInit = _initializeFirebase();
 
-  Future<void> _initializeFirebase() => _initFirebaseWithRecovery().timeout(
-    const Duration(seconds: 30),
-    onTimeout: () => throw TimeoutException("Firebase startup timed out"),
-  );
+  Future<void> _initializeFirebase() async {
+    final splashClock = Stopwatch()..start();
+    await _initFirebaseWithRecovery().timeout(
+      const Duration(seconds: 30),
+      onTimeout: () => throw TimeoutException("Firebase startup timed out"),
+    );
+
+    final Duration warmupBudget = _maxStartupWarmupBudget - splashClock.elapsed;
+    await _runStartupWarmup(budget: warmupBudget);
+
+    final remaining =
+        _minBrandedSplashDuration -
+        Duration(milliseconds: splashClock.elapsedMilliseconds);
+    if (remaining > Duration.zero) {
+      await Future<void>.delayed(remaining);
+    }
+  }
+
+  Future<void> _runStartupWarmup({required Duration budget}) async {
+    if (budget <= Duration.zero) {
+      return;
+    }
+
+    Future<void> guardedWarmup(
+      String operation,
+      FutureOr<void> Function() action,
+    ) async {
+      try {
+        await Future<void>.sync(action);
+      } catch (error, stack) {
+        RuntimeDiagnosticsService.instance.record(
+          error,
+          stack,
+          operation: operation,
+        );
+      }
+    }
+
+    final List<Future<void>> warmups = <Future<void>>[
+      guardedWarmup(
+        "Startup warmup: preferences",
+        UserSettingsService.instance.ensureLoaded,
+      ),
+      guardedWarmup(
+        "Startup warmup: keyboard visibility",
+        ImeVisibilityService.instance.ensureStarted,
+      ),
+    ];
+
+    await Future.any(<Future<void>>[
+      Future.wait(warmups),
+      Future<void>.delayed(budget),
+    ]);
+  }
 
   Future<void> _initFirebaseWithRecovery() async {
     bool retried = false;
@@ -223,13 +277,21 @@ class _ProxAppState extends State<ProxApp> {
         .getInitialLink()
         .then((Uri? uri) {
           if (uri == null) return;
-          unawaited(ReferralAttribution.instance.captureFromLaunchUri(uri));
+          _captureReferralUri(uri);
         })
         .catchError((_) {});
 
     _referralUriSub = _appLinks.uriLinkStream.listen((Uri uri) {
-      unawaited(ReferralAttribution.instance.captureFromLaunchUri(uri));
+      _captureReferralUri(uri);
     });
+  }
+
+  void _captureReferralUri(Uri uri) {
+    if (GrowthService.referralCodeFromUri(uri) != null) {
+      unawaited(GrowthService.instance.captureReferral(uri).catchError((Object _) {}));
+    } else {
+      unawaited(ReferralAttribution.instance.captureFromLaunchUri(uri));
+    }
   }
 
   @override
@@ -327,6 +389,16 @@ class _ProxAppState extends State<ProxApp> {
 
                   "/home": (_) => const HomeRootShell(),
                   "/nearby": (_) => const MatchInboxScreen(),
+                  "/significant-match": (context) {
+                    final arguments = ModalRoute.of(
+                      context,
+                    )?.settings.arguments;
+                    return SignificantMatchScreen(
+                      opportunityId: arguments is Map
+                          ? (arguments['opportunityId'] as String? ?? '')
+                          : '',
+                    );
+                  },
                   "/inbox": (_) => const ChatThreadsScreen(),
                   "/chats": (_) => const ChatThreadsScreen(),
                   "/meetups": (_) => const MeetupHistoryScreen(),

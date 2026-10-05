@@ -6,7 +6,7 @@ import {onCall, HttpsError} from 'firebase-functions/v2/https';
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
 
-export async function recordCompletedMeetup(meetupId: string, callerUid?: string): Promise<void> {
+export async function recordCompletedMeetup(meetupId: string, callerUid?: string, completionEvidenceAt?: FirebaseFirestore.Timestamp): Promise<void> {
   if (!meetupId || meetupId.includes('/')) throw new HttpsError('invalid-argument', 'A valid meetup is required.');
   const meetupRef = db.doc(`meetups/${meetupId}`);
   const snapshot = await meetupRef.get();
@@ -27,7 +27,8 @@ export async function recordCompletedMeetup(meetupId: string, callerUid?: string
       const referral = referrer && referrer !== uid && !referrer.includes('/') ? db.doc(`users/${referrer}/referrals/${uid}`) : null;
       const referralSnap = referral ? await tx.get(referral) : null;
       const now = admin.firestore.FieldValue.serverTimestamp();
-      tx.create(receipt, {meetupId, completedAt: completed, recordedAt: now});
+      tx.create(receipt, {meetupId, completedAt: completed,
+        verifiedCompletedAt: completionEvidenceAt || fresh.updateTime, recordedAt: now});
       tx.set(db.doc(`users/${uid}/meta/points`), {completedMeetups: admin.firestore.FieldValue.increment(1), updatedAt: now}, {merge: true});
       tx.set(db.doc(`users/${uid}/stats/current`), {completedMeetups: admin.firestore.FieldValue.increment(1), updatedAt: now}, {merge: true});
       tx.create(db.doc(`users/${uid}/meta/points/events/meetup_${receiptId}`), {eventId: `meetup_${receiptId}`, amount: 0, category: 'meetup_completed', reason: 'Meetup completed', meetupId, timestamp: now});
@@ -44,7 +45,7 @@ export async function recordCompletedMeetup(meetupId: string, callerUid?: string
 export const onMeetupCompletedAccounting = onDocumentWritten({document: 'meetups/{meetupId}', retry: true}, async event => {
   const data = event.data?.after.data();
   if (data?.status !== 'completed' || event.data?.before.data()?.status === 'completed') return;
-  await recordCompletedMeetup(event.params.meetupId);
+  await recordCompletedMeetup(event.params.meetupId, undefined, event.data!.after.updateTime);
 });
 
 export const syncCompletedMeetup = onCall({region: 'us-central1'}, async request => {

@@ -1,6 +1,8 @@
+﻿import "package:flutter/foundation.dart";
 import "package:flutter/material.dart";
 import "package:firebase_auth/firebase_auth.dart";
 
+import "package:prox/screens/splash_screen.dart";
 import "package:prox/services/build_info_service.dart";
 import "package:prox/services/secure_credential_store.dart";
 
@@ -396,6 +398,26 @@ class _SignInScreenState extends State<SignInScreen> {
                   ),
                 ),
 
+                if (kDebugMode) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _busy
+                          ? null
+                          : () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) =>
+                                      const SplashScreen(previewMode: true),
+                                ),
+                              );
+                            },
+                      icon: const Icon(Icons.water_drop_outlined),
+                      label: const Text("Preview splash (continuous)"),
+                    ),
+                  ),
+                ],
                 if (_error != null) ...[
                   const SizedBox(height: 10),
                   Text(_error!, style: TextStyle(color: cs.error)),

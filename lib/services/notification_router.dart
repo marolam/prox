@@ -45,6 +45,13 @@ class NotificationRouter {
         args,
       );
     }
+    if (type == 'significant_match') {
+      final opportunity = id(item.data['opportunityId']);
+      if (opportunity.isNotEmpty)
+        return NotificationDestination('/significant-match', {
+          'opportunityId': opportunity,
+        });
+    }
     if (type.contains('match')) return const NotificationDestination('/nearby');
     if (type == 'party_request') return const NotificationDestination('/party');
     return const NotificationDestination('/home');

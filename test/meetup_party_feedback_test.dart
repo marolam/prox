@@ -168,6 +168,157 @@ void main() {
       expect(calls, ['remind', 'block']);
     },
   );
+  testWidgets('pending expiry label shows minutes when less than 1 hour remains', (
+    tester,
+  ) async {
+    final now = DateTime.utc(2026, 9, 24, 12, 0);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PendingPartyRequestCard(
+            name: 'Taylor',
+            connection: PendingPartyConnection(
+              otherUid: 'bob',
+              myDecision: 'add',
+              theirDecision: 'later',
+              expiresAt: now.add(const Duration(minutes: 30)),
+            ),
+            nowProvider: () => now,
+            onAction: (_) async => 'pending',
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      find.text('Expires in 30 minutes without activity.'),
+      findsOneWidget,
+    );
+  });
+  testWidgets(
+    'pending expiry label clamps to 1 minute for very short remaining time',
+    (tester) async {
+      final now = DateTime.utc(2026, 9, 24, 12, 0);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: PendingPartyRequestCard(
+              name: 'Taylor',
+              connection: PendingPartyConnection(
+                otherUid: 'bob',
+                myDecision: 'add',
+                theirDecision: 'later',
+                expiresAt: now.add(const Duration(seconds: 30)),
+              ),
+              nowProvider: () => now,
+              onAction: (_) async => 'pending',
+            ),
+          ),
+        ),
+      );
+
+      expect(
+        find.text('Expires in 1 minute without activity.'),
+        findsOneWidget,
+      );
+  });
+  testWidgets('pending expiry label shows hours when less than 24 hours remain', (
+    tester,
+  ) async {
+    final now = DateTime.utc(2026, 9, 24, 12, 0);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PendingPartyRequestCard(
+            name: 'Taylor',
+            connection: PendingPartyConnection(
+              otherUid: 'bob',
+              myDecision: 'add',
+              theirDecision: 'later',
+              expiresAt: now.add(const Duration(hours: 23)),
+            ),
+            nowProvider: () => now,
+            onAction: (_) async => 'pending',
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Expires in 23 hours without activity.'), findsOneWidget);
+  });
+  testWidgets('pending expiry label shows days when 24+ hours remain', (
+    tester,
+  ) async {
+    final now = DateTime.utc(2026, 9, 24, 12, 0);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PendingPartyRequestCard(
+            name: 'Taylor',
+            connection: PendingPartyConnection(
+              otherUid: 'bob',
+              myDecision: 'add',
+              theirDecision: 'later',
+              expiresAt: now.add(const Duration(hours: 25)),
+            ),
+            nowProvider: () => now,
+            onAction: (_) async => 'pending',
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Expires in 2 days without activity.'), findsOneWidget);
+  });
+  testWidgets('pending remind cooldown shows time remaining', (tester) async {
+    final now = DateTime.utc(2026, 9, 24, 12, 0);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PendingPartyRequestCard(
+            name: 'Taylor',
+            connection: PendingPartyConnection(
+              otherUid: 'bob',
+              myDecision: 'add',
+              theirDecision: 'later',
+              expiresAt: now.add(const Duration(days: 2)),
+              lastReminderAt: now.subtract(const Duration(hours: 2)),
+            ),
+            nowProvider: () => now,
+            onAction: (_) async => 'pending',
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Reminders are available in 22 hours.'), findsOneWidget);
+  });
+  testWidgets(
+    'pending remind cooldown clamps future-skewed reminder timestamps',
+    (tester) async {
+      final now = DateTime.utc(2026, 9, 24, 12, 0);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: PendingPartyRequestCard(
+              name: 'Taylor',
+              connection: PendingPartyConnection(
+                otherUid: 'bob',
+                myDecision: 'add',
+                theirDecision: 'later',
+                expiresAt: now.add(const Duration(days: 2)),
+                lastReminderAt: now.add(const Duration(minutes: 5)),
+              ),
+              nowProvider: () => now,
+              onAction: (_) async => 'pending',
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Reminders are available in 1 day.'), findsOneWidget);
+    },
+  );
   test('pending expiry and reminder cooldown use activity timestamps', () {
     final now = DateTime.utc(2026, 9, 12);
     final p = PendingPartyConnection.fromMap({

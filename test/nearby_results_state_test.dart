@@ -12,6 +12,7 @@ Widget _screen({
   bool retrying = false,
   VoidCallback? retry,
   VoidCallback? settings,
+  VoidCallback? enableMatching,
   double scale = 1,
 }) => MaterialApp(
   builder: (context, child) => MediaQuery(
@@ -28,6 +29,7 @@ Widget _screen({
       retrying: retrying,
       onRetry: retry ?? () {},
       onSettings: settings ?? () {},
+      onEnableMatching: enableMatching,
       child: const Text('No matches nearby'),
     ),
   ),
@@ -53,11 +55,20 @@ void main() {
     'a query failure has a working retry action even with a known location',
     (tester) async {
       var retries = 0;
-      await tester.pumpWidget(_screen(failed: true, retry: () => retries++));
+      var opens = 0;
+      await tester.pumpWidget(
+        _screen(
+          failed: true,
+          retry: () => retries++,
+          settings: () => opens++,
+        ),
+      );
       expect(find.text('Nearby is unavailable'), findsOneWidget);
       expect(find.text('No matches nearby'), findsNothing);
       await tester.tap(find.text('Retry'));
       expect(retries, 1);
+      await tester.tap(find.text('Location settings'));
+      expect(opens, 1);
     },
   );
 
@@ -82,8 +93,43 @@ void main() {
       await tester.pumpWidget(_screen(matchingEnabled: false));
       expect(find.text('Matching is off'), findsOneWidget);
       expect(find.text('No matches nearby'), findsNothing);
+      expect(find.text('Turn matching on'), findsNothing);
     },
   );
+
+  testWidgets(
+    'matching off offers direct action when enable callback is provided',
+    (tester) async {
+      var opens = 0;
+      await tester.pumpWidget(
+        _screen(matchingEnabled: false, enableMatching: () => opens++),
+      );
+      expect(find.text('Matching is off'), findsOneWidget);
+      expect(find.text('Turn matching on'), findsOneWidget);
+      await tester.tap(find.text('Turn matching on'));
+      expect(opens, 1);
+    },
+  );
+
+  testWidgets('idle nearby state explains warm-up before results are ready', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_screen(status: GeoQueryStatus.idle));
+    expect(find.text('Nearby is getting ready…'), findsOneWidget);
+    expect(
+      find.text('Starting location checks before loading matches.'),
+      findsOneWidget,
+    );
+    expect(find.text('No matches nearby'), findsNothing);
+  });
+
+  testWidgets('loading nearby state keeps empty-state copy hidden', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_screen(status: GeoQueryStatus.loading));
+    expect(find.text('Finding nearby matches…'), findsOneWidget);
+    expect(find.text('No matches nearby'), findsNothing);
+  });
 
   testWidgets(
     'retry and pending query hide old empty results until a successful response',

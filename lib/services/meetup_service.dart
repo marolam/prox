@@ -98,6 +98,8 @@ class MeetupService {
 
   static const Duration requestWindow = Duration(minutes: 5);
   static const int expireMinutes = 15;
+  static const Duration locationConfirmWindow = Duration(minutes: 20);
+  static const Duration travelCheckWindow = Duration(minutes: 45);
 
   static const Duration arrivalWindow = TTLPolicy.meetupLiveState;
   static const Duration minConfirmAfterCreate = Duration(seconds: 20);
@@ -116,6 +118,10 @@ class MeetupService {
 
   DocumentReference<Map<String, dynamic>> meetupRef(String meetupId) =>
       _db.collection("meetups").doc(meetupId);
+
+  Timestamp _deadlineFromNow(Duration duration) {
+    return Timestamp.fromDate(DateTime.now().add(duration));
+  }
 
   Stream<DocumentSnapshot<Map<String, dynamic>>> watch(String meetupId) =>
       meetupRef(meetupId).snapshots();
@@ -151,10 +157,53 @@ class MeetupService {
     return false;
   }
 
-  bool _hasLocation(Map<String, dynamic> d) {
-    final lat = d["lat"];
-    final lng = d["lng"];
-    return (lat is num) && (lng is num);
+  static bool _hasLocation(Map<String, dynamic> d) {
+    double? _toDouble(dynamic value) {
+      if (value is num) return value.toDouble();
+      if (value is String) return double.tryParse(value.trim());
+      return null;
+    }
+
+    final lat = _toDouble(d["lat"]);
+    final lng = _toDouble(d["lng"]);
+    if (lat == null || lng == null) return false;
+    if (!lat.isFinite || !lng.isFinite) return false;
+    return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+  }
+
+  static String requiredSessionScreenForData(Map<String, dynamic>? data) {
+    final d = data ?? const <String, dynamic>{};
+    final status = (d["status"] ?? "").toString().trim().toLowerCase();
+
+    if (status == "requested") return "chat";
+    if (status == "accepted") return "planner";
+
+    if (status == "live") {
+      final locationStatus = (d["locationStatus"] ?? "")
+          .toString()
+          .trim()
+          .toLowerCase();
+      return _hasLocation(d) && locationStatus == "confirmed"
+          ? "live"
+          : "planner";
+    }
+
+    return "chat";
+  }
+
+  String requiredSessionScreenFromData(Map<String, dynamic>? data) {
+    return requiredSessionScreenForData(data);
+  }
+
+  Future<String> requiredSessionScreen(String meetupId) async {
+    final id = meetupId.trim();
+    if (id.isEmpty) return "chat";
+    try {
+      final snap = await meetupRef(id).get();
+      return requiredSessionScreenForData(snap.data());
+    } catch (_) {
+      return "chat";
+    }
   }
 
   Future<void> _writeMeetupRecapIfMissing({
@@ -201,11 +250,14 @@ class MeetupService {
   // -----------------------------
   // Decline cooldown helpers (UI-only logic, no schema changes)
   // -----------------------------
-  Duration? declineCooldownLeftFromState(MeetupRequestState? s) {
+  static Duration? declineCooldownLeftFromState(MeetupRequestState? s) {
     if (s == null) return null;
     if (s.status != "declined") return null;
     final ts = s.declinedAt;
-    if (ts == null) return null;
+    if (ts == null) {
+      // Defensive fallback for older/partial docs: still enforce a temporary lockout.
+      return declineCooldown;
+    }
 
     final until = ts.toDate().add(declineCooldown);
     final left = until.difference(DateTime.now());
@@ -220,7 +272,7 @@ class MeetupService {
       final d = snap.data();
       if (d == null) return null;
       final s = MeetupRequestState.fromDoc(d);
-      return declineCooldownLeftFromState(s);
+      return MeetupService.declineCooldownLeftFromState(s);
     } catch (_) {
       return null;
     }
@@ -335,6 +387,8 @@ class MeetupService {
         "aUid": previous?["aUid"] ?? me.uid,
         "bUid": previous?["bUid"] ?? otherUid,
         "plannerUid": me.uid,
+        "currentStep": "requested_waiting_accept",
+        "stepDeadlineAt": _deadlineFromNow(requestWindow),
         "locationStatus": "none",
         "expiresAt": TTLPolicy.expiresAtFromNow(requestWindow),
 
@@ -433,6 +487,8 @@ class MeetupService {
         "status": "accepted",
         "acceptedBy": me.uid,
         "acceptedAt": FieldValue.serverTimestamp(),
+        "currentStep": "accepted_choose_location",
+        "stepDeadlineAt": _deadlineFromNow(locationConfirmWindow),
         "expiresAt": TTLPolicy.expiresAtFromNow(TTLPolicy.meetupLiveState),
         "plannerUid": plannerUid,
         "updatedAt": FieldValue.serverTimestamp(),
@@ -610,6 +666,12 @@ class MeetupService {
         if (etaMinutes != null) "etaMinutes": etaMinutes,
         "plannedAt": FieldValue.serverTimestamp(),
         "locationStatus": locationStatus,
+        "currentStep": locationStatus == "confirmed"
+            ? "travel_to_meetup"
+            : "confirm_location",
+        "stepDeadlineAt": _deadlineFromNow(
+          locationStatus == "confirmed" ? travelCheckWindow : locationConfirmWindow,
+        ),
         if (callerIsPlanner) "locationProposedBy": cleanAUid,
         if (callerIsPlanner) "locationProposedAt": FieldValue.serverTimestamp(),
         "startedAt": (d["startedAt"] is Timestamp)
@@ -691,6 +753,8 @@ class MeetupService {
         "locationStatus": "confirmed",
         "locationConfirmedBy": me.uid,
         "locationConfirmedAt": FieldValue.serverTimestamp(),
+        "currentStep": "travel_to_meetup",
+        "stepDeadlineAt": _deadlineFromNow(travelCheckWindow),
         "lastStatusEvent": _statusEvent(me.uid, "location_confirmed"),
         "updatedAt": FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
@@ -713,8 +777,14 @@ class MeetupService {
       if (me.uid != aUid && me.uid != bUid) throw StateError("not_participant");
 
       final field = (me.uid == aUid) ? "aOnMyWayAt" : "bOnMyWayAt";
+      final otherField = (me.uid == aUid) ? "bOnMyWayAt" : "aOnMyWayAt";
+      final bothOnMyWay = d[otherField] is Timestamp;
       tx.set(ref, <String, Object?>{
         field: FieldValue.serverTimestamp(),
+        "currentStep": bothOnMyWay
+            ? "verify_and_confirm_arrival"
+            : "waiting_partner_on_my_way",
+        "stepDeadlineAt": _deadlineFromNow(travelCheckWindow),
         "lastStatusEvent": _statusEvent(me.uid, "on_my_way"),
         "updatedAt": FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
@@ -1088,6 +1158,8 @@ class MeetupService {
           tx.set(ref, <String, Object?>{
             "aArrived": true,
             "aArrivedAt": FieldValue.serverTimestamp(),
+            "currentStep": "waiting_partner_arrival",
+            "stepDeadlineAt": _deadlineFromNow(travelCheckWindow),
             "lastStatusEvent": _statusEvent(me.uid, "arrived"),
             "updatedAt": FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
@@ -1096,6 +1168,8 @@ class MeetupService {
           tx.set(ref, <String, Object?>{
             "bArrived": true,
             "bArrivedAt": FieldValue.serverTimestamp(),
+            "currentStep": "waiting_partner_arrival",
+            "stepDeadlineAt": _deadlineFromNow(travelCheckWindow),
             "lastStatusEvent": _statusEvent(me.uid, "arrived"),
             "updatedAt": FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
@@ -1199,6 +1273,8 @@ class MeetupService {
       if (both && status == "live") {
         await ref.set(<String, Object?>{
           "status": "completed",
+          "currentStep": "completed",
+          "stepDeadlineAt": FieldValue.delete(),
           "completedAt": FieldValue.serverTimestamp(),
           "lastStatusEvent": _statusEvent(
             _auth.currentUser?.uid ?? "",

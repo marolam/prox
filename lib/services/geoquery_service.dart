@@ -8,6 +8,7 @@ import "package:prox/services/location_privacy_service.dart";
 import "package:prox/services/device_location_resolver.dart";
 import "package:prox/services/runtime_diagnostics_service.dart";
 import "package:prox/utils/bounded_async_map.dart";
+import "package:prox/utils/async_map_latest.dart";
 import "package:prox/utils/geo_query_bounds.dart";
 
 class NearbyDoc {
@@ -87,6 +88,10 @@ class GeoQueryService {
     Future<GeoPoint?> Function()? deviceCenterLoader,
     Future<bool> Function()? locationAllowed,
     Future<Map<String, dynamic>?> Function(String)? profileLoader,
+    Stream<QuerySnapshot<Map<String, dynamic>>> Function(
+      Query<Map<String, dynamic>>,
+    )?
+    snapshotsLoader,
   }) : _db = firestore ?? FirebaseFirestore.instance,
        _uidProvider =
            uidProvider ?? (() => FirebaseAuth.instance.currentUser?.uid),
@@ -97,7 +102,8 @@ class GeoQueryService {
              await LocationPrivacyService.instance.ensureLoaded();
              return LocationPrivacyService.instance.mayReadLocation;
            }),
-       _profileLoader = profileLoader;
+       _profileLoader = profileLoader,
+       _snapshotsLoader = snapshotsLoader;
 
   @visibleForTesting
   factory GeoQueryService.forTesting({
@@ -106,12 +112,17 @@ class GeoQueryService {
     required Future<GeoPoint?> Function() deviceCenterLoader,
     required Future<bool> Function() locationAllowed,
     Future<Map<String, dynamic>?> Function(String)? profileLoader,
+    Stream<QuerySnapshot<Map<String, dynamic>>> Function(
+      Query<Map<String, dynamic>>,
+    )?
+    snapshotsLoader,
   }) => GeoQueryService._(
     firestore: firestore,
     uidProvider: uidProvider,
     deviceCenterLoader: deviceCenterLoader,
     locationAllowed: locationAllowed,
     profileLoader: profileLoader,
+    snapshotsLoader: snapshotsLoader,
   );
 
   static final GeoQueryService instance = GeoQueryService._();
@@ -123,6 +134,10 @@ class GeoQueryService {
   final Future<GeoPoint?> Function()? _deviceCenterLoader;
   final Future<bool> Function() _locationAllowed;
   final Future<Map<String, dynamic>?> Function(String)? _profileLoader;
+  final Stream<QuerySnapshot<Map<String, dynamic>>> Function(
+    Query<Map<String, dynamic>>,
+  )?
+  _snapshotsLoader;
   int _sessionRevision = 0;
 
   void clearSession() {
@@ -219,6 +234,8 @@ class GeoQueryService {
     required double radiusMiles,
     int limitUsers = 50,
     bool userInitiated = false,
+    bool snapshotOnly = false,
+    bool listenOnly = false,
   }) async* {
     final meUid = _uidProvider() ?? "";
     final revision = _sessionRevision;
@@ -324,93 +341,101 @@ class GeoQueryService {
         .orderBy('longitude')
         .limit((limitUsers * 3).clamp(50, 500));
 
-    yield* presenceQuery
-      .snapshots()
-        .asyncMap((snap) async {
-          if (!isCurrent() || !await _locationAllowed() || !isCurrent())
-            return <NearbyDoc>[];
-          final docs = snap.docs;
-          int withGeo = 0;
+    final snapshots = snapshotOnly
+        ? Stream.fromFuture(presenceQuery.get())
+        : (_snapshotsLoader?.call(presenceQuery) ?? presenceQuery.snapshots());
+    yield* asyncMapLatest(snapshots, (snap) async {
+      if (!isCurrent() || !await _locationAllowed() || !isCurrent())
+        return <NearbyDoc>[];
+      final docs = snap.docs;
+      int withGeo = 0;
 
-          final results = await boundedAsyncMap(docs, (doc) async {
-            if (!isCurrent()) return null;
-            final data = doc.data();
-            if (data["kind"] != "current") return null;
-            final presenceTs = (data["ts"] as Timestamp?)?.toDate();
-            final expiresAt = (data["expiresAt"] as Timestamp?)?.toDate();
-            if (!isPresenceLive(timestamp: presenceTs, expiresAt: expiresAt)) {
-              return null;
-            }
-            final gp = data["geopoint"];
-            if (gp is! GeoPoint) return null;
-            withGeo += 1;
+      final results = await boundedAsyncMap(docs, (doc) async {
+        if (!isCurrent()) return null;
+        final data = doc.data();
+        if (data["kind"] != "current") return null;
+        // Explicit live mode takes priority over projected profile metadata.
+        // Legacy presence without a mode is still checked after hydration.
+        final mode = data['modeKind'];
+        if (listenOnly &&
+            mode is String &&
+            mode.trim().isNotEmpty &&
+            !const ['listen', 'listenmode'].contains(mode.trim().toLowerCase()))
+          return null;
+        final presenceTs = (data["ts"] as Timestamp?)?.toDate();
+        final expiresAt = (data["expiresAt"] as Timestamp?)?.toDate();
+        if (!isPresenceLive(timestamp: presenceTs, expiresAt: expiresAt)) {
+          return null;
+        }
+        final gp = data["geopoint"];
+        if (gp is! GeoPoint) return null;
+        withGeo += 1;
 
-            final uid = _uidFromPresencePath(doc.reference.path).trim();
-            if (uid.isEmpty || uid == meUid) return null;
+        final uid = _uidFromPresencePath(doc.reference.path).trim();
+        if (uid.isEmpty || uid == meUid) return null;
 
-            final miles = _distanceMiles(queryCenter!, gp);
-            if (miles > radiusMiles) return null;
+        final miles = _distanceMiles(queryCenter!, gp);
+        if (miles > radiusMiles) return null;
 
-            Map<String, dynamic> userData = const <String, dynamic>{};
-            try {
-              final loader = _profileLoader;
-              final profile =
-                  await (loader != null
-                          ? loader(uid)
-                          : _db
-                                .doc("publicProfiles/$uid")
-                                .get()
-                                .then((snap) => snap.data()))
-                      .timeout(const Duration(seconds: 4));
-              if (!isCurrent() || profile == null) return null;
-              userData = profile;
-            } catch (error, stack) {
-              // A failed profile read is not evidence that nobody is nearby.
-              RuntimeDiagnosticsService.instance.record(
-                error,
-                stack,
-                operation: 'Load nearby profile',
-              );
-              return null;
-            }
-            userData = <String, dynamic>{
-              ...userData,
-              "presence": Map<String, Object?>.from(data as Map),
-            };
-
-            return NearbyDoc(
-              uid: uid,
-              distanceMiles: miles,
-              loc: gp,
-              data: userData,
-              presenceTs: presenceTs,
-            );
-          });
-
-          if (!isCurrent() || !await _locationAllowed() || !isCurrent())
-            return <NearbyDoc>[];
-          final nearby = results.whereType<NearbyDoc>().toList();
-
-          nearby.sort((a, b) => a.distanceMiles.compareTo(b.distanceMiles));
-          debug.setCounts(
-            cgTotal: docs.length,
-            currentWithGeo: withGeo,
-            inRadius: nearby.length,
+        Map<String, dynamic> userData = const <String, dynamic>{};
+        try {
+          final loader = _profileLoader;
+          final profile =
+              await (loader != null
+                      ? loader(uid)
+                      : _db
+                            .doc("publicProfiles/$uid")
+                            .get()
+                            .then((snap) => snap.data()))
+                  .timeout(const Duration(seconds: 4));
+          if (!isCurrent() || profile == null) return null;
+          userData = profile;
+        } catch (error, stack) {
+          // A failed profile read is not evidence that nobody is nearby.
+          RuntimeDiagnosticsService.instance.record(
+            error,
+            stack,
+            operation: 'Load nearby profile',
           );
-          debug.setStatus(GeoQueryStatus.ready);
-          return nearby.take(limitUsers.clamp(1, 500)).toList(growable: false);
-        })
-        .handleError((Object error, StackTrace stack) {
-          if (isCurrent()) {
-            debug.setLastError('Nearby query failed (${error.runtimeType})');
-            debug.setStatus(GeoQueryStatus.queryError);
-            RuntimeDiagnosticsService.instance.record(
-              error,
-              stack,
-              operation: 'Load nearby results',
-            );
-          }
-          Error.throwWithStackTrace(error, stack);
-        });
+          return null;
+        }
+        userData = <String, dynamic>{
+          ...userData,
+          "presence": Map<String, Object?>.from(data as Map),
+        };
+
+        return NearbyDoc(
+          uid: uid,
+          distanceMiles: miles,
+          loc: gp,
+          data: userData,
+          presenceTs: presenceTs,
+        );
+      });
+
+      if (!isCurrent() || !await _locationAllowed() || !isCurrent())
+        return <NearbyDoc>[];
+      final nearby = results.whereType<NearbyDoc>().toList();
+
+      nearby.sort((a, b) => a.distanceMiles.compareTo(b.distanceMiles));
+      debug.setCounts(
+        cgTotal: docs.length,
+        currentWithGeo: withGeo,
+        inRadius: nearby.length,
+      );
+      debug.setStatus(GeoQueryStatus.ready);
+      return nearby.take(limitUsers.clamp(1, 500)).toList(growable: false);
+    }).handleError((Object error, StackTrace stack) {
+      if (isCurrent()) {
+        debug.setLastError('Nearby query failed (${error.runtimeType})');
+        debug.setStatus(GeoQueryStatus.queryError);
+        RuntimeDiagnosticsService.instance.record(
+          error,
+          stack,
+          operation: 'Load nearby results',
+        );
+      }
+      Error.throwWithStackTrace(error, stack);
+    });
   }
 }

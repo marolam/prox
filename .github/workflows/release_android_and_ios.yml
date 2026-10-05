@@ -27,6 +27,11 @@ on:
         description: APK asset filename for staging channel (for example app-release-staging.apk)
         required: false
         default: "app-release-staging.apk"
+      enable_android_background_matching:
+        description: Enable opt-in Android background matching after backend and device verification (staging only)
+        required: false
+        default: false
+        type: boolean
       staging_ipa_asset_name:
         description: IPA asset filename for staging channel (for example app-release-staging.ipa)
         required: false
@@ -87,6 +92,7 @@ jobs:
       INPUT_PUBLIC_APK_URL: ${{ inputs.public_apk_url }}
       INPUT_EXTERNAL_CHECKOUT_URL: ${{ inputs.external_checkout_session_url }}
       INPUT_STAGING_APK: ${{ inputs.staging_apk_asset_name }}
+      ENABLE_ANDROID_BACKGROUND_MATCHING: ${{ inputs.enable_android_background_matching || false }}
       INPUT_STAGING_IPA: ${{ inputs.staging_ipa_asset_name }}
       INPUT_NOTES_TEMPLATE: ${{ inputs.release_notes_template }}
       RELEASE_REPO: ${{ inputs.repo || vars.RELEASE_REPO || 'marolam/prox' }}
@@ -278,7 +284,12 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x android/gradlew
-          flutter build apk --release --dart-define-from-file=artifacts/release/paired_defines.json
+          background_matching_available=false
+          if [[ "$RELEASE_CHANNEL" == "staging" && "$ENABLE_ANDROID_BACKGROUND_MATCHING" == "true" ]]; then
+            background_matching_available=true
+          fi
+          flutter build apk --release --dart-define-from-file=artifacts/release/paired_defines.json \
+            "--dart-define=PROX_BACKGROUND_MATCHING_AVAILABLE=$background_matching_available"
 
       - name: Select Xcode with iOS 26+ SDK
         shell: bash

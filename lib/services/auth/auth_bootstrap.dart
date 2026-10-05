@@ -1,7 +1,10 @@
 import "dart:async";
+import "package:prox/services/matching/background_matching_service.dart";
 
 import "package:firebase_auth/firebase_auth.dart";
 import "package:prox/services/matching/matching_runtime_service.dart";
+import "package:prox/services/matching/matching_mode_service.dart";
+import "package:prox/services/matching/treasure_compass_service.dart";
 import "package:prox/services/notification_feed_service.dart";
 import "package:prox/services/points_service.dart";
 import "package:prox/services/presence_writer.dart";
@@ -12,6 +15,7 @@ import "package:prox/services/user_profile_service.dart";
 import "package:prox/services/geoquery_service.dart";
 import "package:prox/services/user_settings_service.dart";
 import "package:prox/services/billing_entitlement_sync_service.dart";
+import "package:prox/services/growth_service.dart";
 
 class AuthBootstrap {
   AuthBootstrap._();
@@ -30,9 +34,11 @@ class AuthBootstrap {
   Future<void> _start() async {
     await UserSettingsService.instance.ensureLoaded();
     _uid = FirebaseAuth.instance.currentUser?.uid;
+    unawaited(GrowthService.instance.bindAccount(_uid));
     final initialSync = BillingEntitlementSyncService.instance.bindAccount(
       _uid,
     );
+    MatchingModeService.instance.syncSessionToServer();
     _subscription = FirebaseAuth.instance.authStateChanges().listen(
       (user) {
         final next = user?.uid;
@@ -40,9 +46,12 @@ class AuthBootstrap {
         if (_uid != null)
           SecureCredentialStore.instance.invalidatePendingOperations();
         _uid = next;
+        unawaited(GrowthService.instance.bindAccount(next));
         unawaited(BillingEntitlementSyncService.instance.bindAccount(next));
+        MatchingModeService.instance.syncSessionToServer();
         PresenceWriter.instance.stopForSignOut();
         MatchingRuntimeService.instance.clearSession();
+        TreasureCompassService.instance.clearSession();
         PointsService.instance.clearSession();
         UserProfileService.instance.clearSession();
         GeoQueryService.instance.clearSession();
@@ -58,13 +67,17 @@ class AuthBootstrap {
       },
     );
     await initialSync;
+    await BackgroundMatchingService.instance.start();
   }
 
   Future<void> prepareForManualSignOut() async {
+    unawaited(GrowthService.instance.bindAccount(null));
+    await BackgroundMatchingService.instance.stopForSignOut();
     final reset = BillingEntitlementSyncService.instance.bindAccount(null);
     SecureCredentialStore.instance.invalidatePendingOperations();
     PresenceWriter.instance.stopForSignOut();
     MatchingRuntimeService.instance.clearSession();
+    TreasureCompassService.instance.clearSession();
     PointsService.instance.clearSession();
     UserProfileService.instance.clearSession();
     GeoQueryService.instance.clearSession();

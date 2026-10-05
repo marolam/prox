@@ -52,8 +52,10 @@ export async function eraseUserData(uid: string): Promise<void> {
     }
     await deleteQuery(db.collection(collection).where('participants', 'array-contains', uid));
   }
-  for (const collection of ['bugReports', 'incidents', 'feedback', 'supportTickets', 'support_tickets', 'referralCodes', 'referralSingleUseTokens', 'keywordReports', 'metricsEvents', 'referralDownloadClicks', 'checkoutSessions']) {
-    for (const field of ['uid', 'ownerUid', 'userId', 'reporterUid', 'actor', 'referrerUid', 'completedByUid', 'targetUid']) {
+  for (const collection of ['bugReports', 'incidents', 'feedback', 'supportTickets', 'support_tickets', 'referralCodes', 'referralSingleUseTokens', 'keywordReports', 'metricsEvents', 'referralDownloadClicks', 'checkoutSessions',
+    'growthInvites', 'growthReferrals', 'growthSessions', 'growthSessionEvents', 'growthActivity', 'growthRateLimits', 'growthRewardLimits', 'growthRequests', 'growthOpsAudit',
+    'businessAutomationJobs', 'businessAutomationReceipts', 'businessAutomationConsents']) {
+    for (const field of ['uid', 'ownerUid', 'userId', 'reporterUid', 'actor', 'referrerUid', 'completedByUid', 'targetUid', 'inviteeUid', 'operatorUid']) {
       await deleteQuery(db.collection(collection).where(field, '==', uid));
     }
   }
@@ -61,16 +63,36 @@ export async function eraseUserData(uid: string): Promise<void> {
   for (const group of ['party', 'blocks', 'referrals']) {
     await deleteQuery(db.collectionGroup(group).where('uid', '==', uid));
   }
+  for (const group of ['backgroundOpportunities', 'backgroundAlertPairs', 'backgroundAlertOutbox']) {
+    await deleteQuery(db.collectionGroup(group).where('otherUid', '==', uid));
+  }
   await deleteQuery(db.collection('trustFeedbackProjection').where('otherUid', '==', uid));
   await deleteQuery(db.collection('partyConnections').where('members', 'array-contains', uid));
   await deleteQuery(db.collection('paymentReconciliation').where('uid', '==', uid));
-  for (const collection of ['profiles', 'publicProfiles', 'partyNetworkRequests', 'partyNetworkRateLimits', 'keywordEnforcement', 'technician_profiles', 'referralAttributions']) {
+  for (const collection of ['profiles', 'publicProfiles', 'partyNetworkRequests', 'partyNetworkRateLimits', 'keywordEnforcement', 'technician_profiles', 'referralAttributions',
+    'growthProgress', 'growthMembers', 'growthTesterApplications']) {
     await db.recursiveDelete(db.collection(collection).doc(uid));
   }
   await db.recursiveDelete(db.doc(`users/${uid}`));
+  await db.runTransaction(async tx => {
+    const cohort = await tx.get(db.doc('growthOps/cohort'));
+    if (cohort.exists) tx.update(cohort.ref, {members: (cohort.data()?.members || []).filter((member: string) => member !== uid)});
+  });
+  const signals = await db.collection('growthIdentitySignals').where('uids', 'array-contains', uid).get();
+  for (const row of signals.docs) await db.runTransaction(async tx => {
+    const fresh = await tx.get(row.ref);
+    if (!fresh.exists) return;
+    const remaining = (fresh.data()?.uids || []).filter((member: string) => member !== uid);
+    if (remaining.length) tx.update(row.ref, {uids: remaining}); else tx.delete(row.ref);
+  });
+  // Keep financial receipt IDs so deletion cannot enable a duplicate grant,
+  // while removing the deleted invitee's identity from another user's ledger.
+  const rewardClaims = await db.collectionGroup('rewardClaims').where('inviteeUid', '==', uid).get();
+  for (const receipt of rewardClaims.docs) await receipt.ref.update({inviteeUid: admin.firestore.FieldValue.delete()});
   await Promise.all([
     admin.storage().bucket().deleteFiles({prefix: `profiles/${uid}/`}),
     admin.storage().bucket().deleteFiles({prefix: `users/${uid}/`}),
+    admin.storage().bucket().deleteFiles({prefix: `supportAttachments/${uid}/`}),
   ]);
   await deletionRef.set({status: 'complete', completedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
 }

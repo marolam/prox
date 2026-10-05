@@ -56,8 +56,9 @@ class _HomeRootShellState extends State<HomeRootShell>
     if (!focus.active || focus.meetupId == _restoredMeetupId) return;
     _restoringMeetup = true;
     try {
-      final screen =
-          await MeetupService.instance.lastSessionScreen(focus.meetupId);
+      final screen = await MeetupService.instance.requiredSessionScreen(
+        focus.meetupId,
+      );
       if (!mounted || !MeetupFocusLockService.instance.isLocked) return;
       _restoredMeetupId = focus.meetupId;
       final route = switch (screen) {

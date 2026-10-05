@@ -61,11 +61,15 @@ class ChatService {
     required String imageUrl,
     required String caption,
     required String otherUid,
+    String? expectedUid,
   }) async {
     final me = FirebaseAuth.instance.currentUser?.uid ?? "";
-    if (me.isEmpty) return;
+    if (me.isEmpty || (expectedUid != null && expectedUid != me)) {
+      throw StateError('Your account changed. Open this chat again.');
+    }
 
-    await _msgs(chatId).add(<String, Object?>{
+    final batch = _db.batch();
+    batch.set(_msgs(chatId).doc(), <String, Object?>{
       "from": me,
       "to": otherUid,
       "text": caption,
@@ -75,11 +79,12 @@ class ChatService {
       "ts": FieldValue.serverTimestamp(),
     });
 
-    await _db.collection("chats").doc(chatId).set(<String, Object?>{
+    batch.set(_db.collection("chats").doc(chatId), <String, Object?>{
       "lastMessage": caption.trim().isEmpty ? "[image]" : caption.trim(),
       "lastMessageAt": FieldValue.serverTimestamp(),
       "updatedAt": FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+    await batch.commit();
   }
 
   Future<String> createModeratedGroupChat({
@@ -88,7 +93,7 @@ class ChatService {
   }) async {
     final me = FirebaseAuth.instance.currentUser?.uid ?? "";
     final members = <String>{
-      ...memberUids.map((e) => e.trim()).where((e) => e.isNotEmpty)
+      ...memberUids.map((e) => e.trim()).where((e) => e.isNotEmpty),
     };
     if (me.isNotEmpty) members.add(me);
 
@@ -107,8 +112,10 @@ class ChatService {
     required String chatId,
     required Iterable<String> memberUids,
   }) async {
-    final incoming =
-        memberUids.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+    final incoming = memberUids
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet();
     if (incoming.isEmpty) return;
 
     final ref = _db.collection("chats").doc(chatId);
@@ -120,13 +127,10 @@ class ChatService {
           .where((e) => e.isNotEmpty)
           .toSet();
       current.addAll(incoming);
-      tx.set(
-          ref,
-          <String, Object?>{
-            "participants": current.toList(growable: false),
-            "updatedAt": FieldValue.serverTimestamp(),
-          },
-          SetOptions(merge: true));
+      tx.set(ref, <String, Object?>{
+        "participants": current.toList(growable: false),
+        "updatedAt": FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
     });
   }
 
@@ -134,8 +138,10 @@ class ChatService {
     required String chatId,
     required Iterable<String> memberUids,
   }) async {
-    final remove =
-        memberUids.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+    final remove = memberUids
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet();
     if (remove.isEmpty) return;
 
     final ref = _db.collection("chats").doc(chatId);
@@ -147,13 +153,10 @@ class ChatService {
           .where((e) => e.isNotEmpty)
           .toSet();
       current.removeAll(remove);
-      tx.set(
-          ref,
-          <String, Object?>{
-            "participants": current.toList(growable: false),
-            "updatedAt": FieldValue.serverTimestamp(),
-          },
-          SetOptions(merge: true));
+      tx.set(ref, <String, Object?>{
+        "participants": current.toList(growable: false),
+        "updatedAt": FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
     });
   }
 }

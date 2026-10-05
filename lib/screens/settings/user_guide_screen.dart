@@ -16,6 +16,17 @@ class UserGuideScreen extends StatefulWidget {
 
 class _UserGuideScreenState extends State<UserGuideScreen> {
   String _query = '';
+
+  String _normalizeSearch(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll(RegExp(r"[^a-z0-9]+"), " ")
+        .trim()
+        .replaceAll(RegExp(r"\s+"), " ");
+  }
+
+  bool get _hasActiveQuery => _query.isNotEmpty;
+
   static const _topics = <({String title, String detail, IconData icon, String action, Widget page})>[
     (
       title: 'Start here: the Prox journey',
@@ -84,10 +95,11 @@ class _UserGuideScreenState extends State<UserGuideScreen> {
   ];
   @override
   Widget build(BuildContext context) {
+    final normalizedQuery = _normalizeSearch(_query);
     final matches = _topics
         .where(
-          (t) => '${t.title} ${t.detail}'.toLowerCase().contains(
-            _query.toLowerCase(),
+          (t) => _normalizeSearch('${t.title} ${t.detail}').contains(
+            normalizedQuery,
           ),
         )
         .toList();
@@ -106,12 +118,28 @@ class _UserGuideScreenState extends State<UserGuideScreen> {
           ),
           const SizedBox(height: 16),
           TextField(
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Search the guide',
-              prefixIcon: Icon(Icons.search),
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _hasActiveQuery
+                  ? IconButton(
+                      tooltip: 'Clear search',
+                      onPressed: () => setState(() => _query = ''),
+                      icon: const Icon(Icons.clear),
+                    )
+                  : null,
             ),
-            onChanged: (v) => setState(() => _query = v.trim()),
+            onChanged: (v) => setState(() => _query = v),
           ),
+          if (_hasActiveQuery) ...[
+            const SizedBox(height: 8),
+            Text(
+              matches.length == 1
+                  ? '1 topic found'
+                  : '${matches.length} topics found',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
           const SizedBox(height: 16),
           if (matches.isEmpty)
             const Padding(

@@ -8,6 +8,7 @@ import "package:prox/widgets/meetup_outcomes_list.dart";
 import "package:prox/services/party_service.dart";
 import "package:prox/services/simple_mode/simple_mode_policy.dart";
 import "package:prox/services/user_profile_service.dart";
+import "package:prox/utils/dialog_lifecycle.dart";
 
 class MeetupHistoryScreen extends StatefulWidget {
   const MeetupHistoryScreen({super.key});
@@ -64,7 +65,9 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
   }
 
   void _ensureMeetupStreams(String uid) {
-    if (uid == _meetupStreamUid && _meetupsAsAStream != null && _meetupsAsBStream != null) {
+    if (uid == _meetupStreamUid &&
+        _meetupsAsAStream != null &&
+        _meetupsAsBStream != null) {
       return;
     }
 
@@ -84,7 +87,8 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
 
   bool _isLive(String status) => status == "live" || status == "completed";
   bool _isCompleted(String status) => status == "completed";
-  bool _isPending(String status) => status == "requested" || status == "accepted";
+  bool _isPending(String status) =>
+      status == "requested" || status == "accepted";
 
   DateTime? _dateFrom(dynamic v) {
     if (v is Timestamp) return v.toDate();
@@ -146,10 +150,18 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text("Cancel pending meetup?"),
-        content: const Text("This marks the meetup as cancelled for both participants."),
+        content: const Text(
+          "This marks the meetup as cancelled for both participants.",
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Keep")),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Cancel meetup")),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("Keep"),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text("Cancel meetup"),
+          ),
         ],
       ),
     );
@@ -164,9 +176,9 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Couldn't cancel meetup: $e")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Couldn't cancel meetup: $e")));
     } finally {
       _cancelInFlight.remove(meetupId);
     }
@@ -184,8 +196,12 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
     }
 
     _ensureMeetupStreams(uid);
-    final aMeetupsStream = _meetupsAsAStream ?? const Stream<QuerySnapshot<Map<String, dynamic>>>.empty();
-    final bMeetupsStream = _meetupsAsBStream ?? const Stream<QuerySnapshot<Map<String, dynamic>>>.empty();
+    final aMeetupsStream =
+        _meetupsAsAStream ??
+        const Stream<QuerySnapshot<Map<String, dynamic>>>.empty();
+    final bMeetupsStream =
+        _meetupsAsBStream ??
+        const Stream<QuerySnapshot<Map<String, dynamic>>>.empty();
 
     return Scaffold(
       appBar: AppBar(
@@ -195,8 +211,7 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
             : [
                 IconButton(
                   tooltip: "Clear stale now",
-                  onPressed:
-                      _manualCleanupRunning ? null : _runManualCleanup,
+                  onPressed: _manualCleanupRunning ? null : _runManualCleanup,
                   icon: _manualCleanupRunning
                       ? const SizedBox(
                           width: 18,
@@ -210,7 +225,8 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
       body: StreamBuilder<List<PartyMemberEntry>>(
         stream: PartyService.instance.watchMyPartyEntries(),
         builder: (context, partySnap) {
-          final partyUids = partySnap.data?.map((e) => e.otherUid).toSet() ?? <String>{};
+          final partyUids =
+              partySnap.data?.map((e) => e.otherUid).toSet() ?? <String>{};
 
           return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: aMeetupsStream,
@@ -218,26 +234,40 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
               return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                 stream: bMeetupsStream,
                 builder: (context, bSnap) {
-                  final byId = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{
-                    for (final d in (aSnap.data?.docs ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[])) d.id: d,
-                    for (final d in (bSnap.data?.docs ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[])) d.id: d,
-                  };
+                  final byId =
+                      <String, QueryDocumentSnapshot<Map<String, dynamic>>>{
+                        for (final d
+                            in (aSnap.data?.docs ??
+                                const <
+                                  QueryDocumentSnapshot<Map<String, dynamic>>
+                                >[]))
+                          d.id: d,
+                        for (final d
+                            in (bSnap.data?.docs ??
+                                const <
+                                  QueryDocumentSnapshot<Map<String, dynamic>>
+                                >[]))
+                          d.id: d,
+                      };
 
                   final docs = byId.values.toList(growable: true)
                     ..sort((x, y) {
                       final xd = x.data();
                       final yd = y.data();
                       final xTs = (xd["updatedAt"] is Timestamp)
-                          ? (xd["updatedAt"] as Timestamp).millisecondsSinceEpoch
+                          ? (xd["updatedAt"] as Timestamp)
+                                .millisecondsSinceEpoch
                           : 0;
                       final yTs = (yd["updatedAt"] is Timestamp)
-                          ? (yd["updatedAt"] as Timestamp).millisecondsSinceEpoch
+                          ? (yd["updatedAt"] as Timestamp)
+                                .millisecondsSinceEpoch
                           : 0;
                       return yTs.compareTo(xTs);
                     });
 
                   final now = DateTime.now();
-                  final visible = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+                  final visible =
+                      <QueryDocumentSnapshot<Map<String, dynamic>>>[];
 
                   for (final doc in docs) {
                     final data = doc.data();
@@ -257,46 +287,60 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
                       continue;
                     }
 
-
                     visible.add(doc);
                   }
 
-                  final completed = visible.where((doc) {
-                    final s = (doc.data()["status"] ?? "").toString().trim();
-                    return _isCompleted(s);
-                  }).toList(growable: false);
-                  final incomplete = visible.where((doc) {
-                    final s = (doc.data()["status"] ?? "").toString().trim();
-                    return !_isCompleted(s);
-                  }).toList(growable: false);
+                  final completed = visible
+                      .where((doc) {
+                        final s = (doc.data()["status"] ?? "")
+                            .toString()
+                            .trim();
+                        return _isCompleted(s);
+                      })
+                      .toList(growable: false);
+                  final incomplete = visible
+                      .where((doc) {
+                        final s = (doc.data()["status"] ?? "")
+                            .toString()
+                            .trim();
+                        return !_isCompleted(s);
+                      })
+                      .toList(growable: false);
 
                   return ListView(
                     padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
                     children: [
                       MeetupOutcomesList(uid: uid),
-                      _sectionHeader(context, "Active & ended meetups", incomplete.length),
+                      _sectionHeader(
+                        context,
+                        "Active & ended meetups",
+                        incomplete.length,
+                      ),
                       const SizedBox(height: 8),
                       if (incomplete.isEmpty)
-                        _emptySectionCard(context, "No incomplete meetups right now.")
+                        _emptySectionCard(
+                          context,
+                          "No incomplete meetups right now.",
+                        )
                       else
-                        ...incomplete.map((doc) => _meetupCard(
-                              context,
-                              uid: uid,
-                              cs: cs,
-                              doc: doc,
-                            )),
+                        ...incomplete.map(
+                          (doc) =>
+                              _meetupCard(context, uid: uid, cs: cs, doc: doc),
+                        ),
                       const SizedBox(height: 14),
-                      _sectionHeader(context, "Completed Meetups", completed.length),
+                      _sectionHeader(
+                        context,
+                        "Completed Meetups",
+                        completed.length,
+                      ),
                       const SizedBox(height: 8),
                       if (completed.isEmpty)
                         _emptySectionCard(context, "No completed meetups yet.")
                       else
-                        ...completed.map((doc) => _meetupCard(
-                              context,
-                              uid: uid,
-                              cs: cs,
-                              doc: doc,
-                            )),
+                        ...completed.map(
+                          (doc) =>
+                              _meetupCard(context, uid: uid, cs: cs, doc: doc),
+                        ),
                     ],
                   );
                 },
@@ -314,7 +358,9 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
       children: [
         Text(
           title,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
         ),
         const SizedBox(width: 8),
         _pill(context, "$count"),
@@ -326,10 +372,7 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Text(
-          text,
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
+        child: Text(text, style: Theme.of(context).textTheme.bodyMedium),
       ),
     );
   }
@@ -355,7 +398,9 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
           children: [
             Text(
               otherUid.isEmpty ? "Meetup" : "Meetup with",
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
             ),
             if (otherUid.isNotEmpty)
               StreamBuilder<UserProfile?>(
@@ -363,7 +408,9 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
                 builder: (context, psnap) {
                   final p = psnap.data;
                   final display = (p?.displayName ?? "").trim();
-                  final title = display.isNotEmpty ? display : _uidFallback(otherUid);
+                  final title = display.isNotEmpty
+                      ? display
+                      : _uidFallback(otherUid);
                   return Text(
                     title,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -378,9 +425,13 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                _pill(context, "Status: ${status == "auto_closed" || status == "expired" ? "Unfinished" : status}"),
+                _pill(
+                  context,
+                  "Status: ${status == "auto_closed" || status == "expired" ? "Unfinished" : status}",
+                ),
                 _pill(context, "Location: $locStatus"),
-                if (_isCompleted(status)) _myRatingFlag(context, meetupId: chatId, myUid: uid),
+                if (_isCompleted(status))
+                  _myRatingFlag(context, meetupId: chatId, myUid: uid),
               ],
             ),
             const SizedBox(height: 10),
@@ -402,7 +453,9 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
                 Expanded(
                   child: FilledButton.icon(
                     onPressed: () {
-                      final route = _isLive(status) ? "/meetup_live" : "/meetup_plan";
+                      final route = _isLive(status)
+                          ? "/meetup_live"
+                          : "/meetup_plan";
                       Navigator.of(context).pushNamed(
                         route,
                         arguments: {
@@ -412,7 +465,11 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
                         },
                       );
                     },
-                    icon: Icon(_isLive(status) ? Icons.map_outlined : Icons.edit_location_alt),
+                    icon: Icon(
+                      _isLive(status)
+                          ? Icons.map_outlined
+                          : Icons.edit_location_alt,
+                    ),
                     label: Text(_isLive(status) ? "Open live" : "Open planner"),
                   ),
                 ),
@@ -425,9 +482,16 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
                 child: OutlinedButton.icon(
                   onPressed: _cancelInFlight.contains(chatId)
                       ? null
-                      : () => _cancelPendingMeetup(meetupId: chatId, status: status),
+                      : () => _cancelPendingMeetup(
+                          meetupId: chatId,
+                          status: status,
+                        ),
                   icon: _cancelInFlight.contains(chatId)
-                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
                       : const Icon(Icons.cancel_outlined),
                   label: const Text("Cancel pending meetup"),
                 ),
@@ -441,16 +505,19 @@ class _MeetupHistoryScreenState extends State<MeetupHistoryScreen> {
     );
   }
 
-  Widget _myRatingFlag(BuildContext context, {required String meetupId, required String myUid}) {
-    final ref = FirebaseFirestore.instance.doc("ratings/$meetupId/entries/$myUid");
+  Widget _myRatingFlag(
+    BuildContext context, {
+    required String meetupId,
+    required String myUid,
+  }) {
+    final ref = FirebaseFirestore.instance.doc(
+      "ratings/$meetupId/entries/$myUid",
+    );
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: ref.snapshots(),
       builder: (context, snap) {
         final hasRated = snap.data?.exists == true;
-        return _pill(
-          context,
-          hasRated ? "Rated" : "Rating pending",
-        );
+        return _pill(context, hasRated ? "Rated" : "Rating pending");
       },
     );
   }
@@ -472,10 +539,7 @@ class _MeetupNotesPanel extends StatefulWidget {
   final String meetupId;
   final String myUid;
 
-  const _MeetupNotesPanel({
-    required this.meetupId,
-    required this.myUid,
-  });
+  const _MeetupNotesPanel({required this.meetupId, required this.myUid});
 
   @override
   State<_MeetupNotesPanel> createState() => _MeetupNotesPanelState();
@@ -509,25 +573,28 @@ class _MeetupNotesPanelState extends State<_MeetupNotesPanel> {
           .doc(widget.meetupId)
           .collection("notes")
           .add(<String, Object?>{
-        "uid": widget.myUid,
-        "text": text,
-        "createdAt": FieldValue.serverTimestamp(),
-      });
+            "uid": widget.myUid,
+            "text": text,
+            "createdAt": FieldValue.serverTimestamp(),
+          });
       _ctrl.clear();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Couldn't add note: $e")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Couldn't add note: $e")));
     } finally {
       if (mounted) setState(() => _sending = false);
     }
   }
 
-  Future<void> _editNote({required String noteId, required String currentText}) async {
+  Future<void> _editNote({
+    required String noteId,
+    required String currentText,
+  }) async {
     if (_editing) return;
     final ctrl = TextEditingController(text: currentText);
-    final String? updated = await showDialog<String>(
+    final String? updated = await showDialogUntilRemoved<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text("Edit note"),
@@ -538,14 +605,24 @@ class _MeetupNotesPanelState extends State<_MeetupNotesPanel> {
           decoration: const InputDecoration(border: OutlineInputBorder()),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
-          FilledButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: const Text("Save")),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancel"),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text("Save"),
+          ),
         ],
       ),
     );
     ctrl.dispose();
 
-    if (updated == null || updated.trim().isEmpty || updated.trim() == currentText.trim()) return;
+    if (!mounted ||
+        updated == null ||
+        updated.trim().isEmpty ||
+        updated.trim() == currentText.trim())
+      return;
 
     setState(() => _editing = true);
     try {
@@ -554,18 +631,15 @@ class _MeetupNotesPanelState extends State<_MeetupNotesPanel> {
           .doc(widget.meetupId)
           .collection("notes")
           .doc(noteId)
-          .set(
-        <String, Object?>{
-          "text": updated.trim(),
-          "editedAt": FieldValue.serverTimestamp(),
-        },
-        SetOptions(merge: true),
-      );
+          .set(<String, Object?>{
+            "text": updated.trim(),
+            "editedAt": FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Couldn't edit note: $e")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Couldn't edit note: $e")));
     } finally {
       if (mounted) setState(() => _editing = false);
     }
@@ -579,8 +653,14 @@ class _MeetupNotesPanelState extends State<_MeetupNotesPanel> {
         title: const Text("Delete note?"),
         content: const Text("This will remove this note from meetup history."),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancel")),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Delete")),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("Cancel"),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text("Delete"),
+          ),
         ],
       ),
     );
@@ -596,9 +676,9 @@ class _MeetupNotesPanelState extends State<_MeetupNotesPanel> {
           .delete();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Couldn't delete note: $e")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Couldn't delete note: $e")));
     } finally {
       if (mounted) setState(() => _editing = false);
     }
@@ -627,17 +707,23 @@ class _MeetupNotesPanelState extends State<_MeetupNotesPanel> {
         children: [
           Text(
             "Meetup Notes",
-            style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+            style: theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
           ),
           const SizedBox(height: 6),
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: notesRef.snapshots(),
             builder: (context, snap) {
-              final docs = snap.data?.docs ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+              final docs =
+                  snap.data?.docs ??
+                  const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
               if (docs.isEmpty) {
                 return Text(
                   "No notes yet. Add reminders or next steps.",
-                  style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
                 );
               }
 
@@ -668,14 +754,21 @@ class _MeetupNotesPanelState extends State<_MeetupNotesPanel> {
                               tooltip: "Edit note",
                               iconSize: 16,
                               visualDensity: VisualDensity.compact,
-                              onPressed: _editing ? null : () => _editNote(noteId: noteId, currentText: text),
+                              onPressed: _editing
+                                  ? null
+                                  : () => _editNote(
+                                      noteId: noteId,
+                                      currentText: text,
+                                    ),
                               icon: const Icon(Icons.edit_outlined),
                             ),
                             IconButton(
                               tooltip: "Delete note",
                               iconSize: 16,
                               visualDensity: VisualDensity.compact,
-                              onPressed: _editing ? null : () => _deleteNote(noteId: noteId),
+                              onPressed: _editing
+                                  ? null
+                                  : () => _deleteNote(noteId: noteId),
                               icon: const Icon(Icons.delete_outline),
                             ),
                           ],
@@ -706,7 +799,11 @@ class _MeetupNotesPanelState extends State<_MeetupNotesPanel> {
               FilledButton(
                 onPressed: _sending ? null : _send,
                 child: _sending
-                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     : const Text("Add"),
               ),
             ],

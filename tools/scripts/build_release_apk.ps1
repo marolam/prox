@@ -113,6 +113,10 @@ if ([string]::IsNullOrWhiteSpace($ExternalCheckoutSessionUrl)) {
   $ExternalCheckoutSessionUrl = $env:PROX_EXTERNAL_CHECKOUT_SESSION_URL
 }
 
+if ($ReleaseChannel -eq "prod" -and [string]::IsNullOrWhiteSpace($ExternalCheckoutSessionUrl)) {
+  throw "ReleaseChannel=prod requires PROX_EXTERNAL_CHECKOUT_SESSION_URL. Set -ExternalCheckoutSessionUrl or define PROX_EXTERNAL_CHECKOUT_SESSION_URL (for example in tools/.env/payment.local.env)."
+}
+
 if (-not $SkipBuild) {
   $pubspecVersion = Get-PubspecVersion -RepoPath $resolvedRepoPath
   $pubspecShortVersion = if ($pubspecVersion.Contains("+")) {

@@ -15,6 +15,7 @@ import "package:prox/services/privacy/block_service.dart";
 import "package:prox/services/reciprocity/reciprocity_service.dart";
 import "package:prox/services/user_settings_service.dart";
 import "package:prox/widgets/chat/chat_input_bar.dart";
+import "package:prox/widgets/chat/private_chat_image.dart";
 import "package:prox/widgets/tutorial/tutorial_overlay.dart";
 import "package:prox/widgets/tutorial/tutorial_target.dart";
 
@@ -94,6 +95,8 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
   }
 
   Future<void> _pickMedia() async {
+    final ownerUid = FirebaseAuth.instance.currentUser?.uid;
+    if (ownerUid == null) return;
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -124,18 +127,44 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
         : await media.pickFromGallery();
     if (x == null) return;
 
-    final url = await media.uploadChatImage(chatId: widget.chatId, file: x);
-    await ChatService.instance.sendImageMessage(
-      chatId: widget.chatId,
-      imageUrl: url,
-      caption: "",
-      otherUid: widget.otherUid,
-    );
+    String? uploadedPath;
+    try {
+      uploadedPath = await media.uploadChatImage(
+        chatId: widget.chatId,
+        file: x,
+        expectedUid: ownerUid,
+      );
+      await ChatService.instance.sendImageMessage(
+        chatId: widget.chatId,
+        imageUrl: uploadedPath,
+        caption: "",
+        otherUid: widget.otherUid,
+        expectedUid: ownerUid,
+      );
+    } catch (_) {
+      if (uploadedPath != null) {
+        try {
+          await media.discardImage(uploadedPath, widget.chatId, ownerUid);
+        } catch (_) {
+          /* Account deletion also removes orphaned owner uploads. */
+        }
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Photo could not be sent. Check your connection and try again.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
 
-    await MetricsEventService.instance.log("chat_send_image", meta: {
-      "chatId": widget.chatId,
-      "otherUid": widget.otherUid,
-    });
+    await MetricsEventService.instance.log(
+      "chat_send_image",
+      meta: {"chatId": widget.chatId, "otherUid": widget.otherUid},
+    );
 
     _markFirstChatIfNeeded();
   }
@@ -147,11 +176,14 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
       otherUid: widget.otherUid,
     );
 
-    await MetricsEventService.instance.log("chat_send_text", meta: {
-      "chatId": widget.chatId,
-      "otherUid": widget.otherUid,
-      "len": text.trim().length,
-    });
+    await MetricsEventService.instance.log(
+      "chat_send_text",
+      meta: {
+        "chatId": widget.chatId,
+        "otherUid": widget.otherUid,
+        "len": text.trim().length,
+      },
+    );
 
     _markFirstChatIfNeeded();
 
@@ -165,7 +197,8 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
   }
 
   void _trackIncomingBestEffort(
-      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) {
     final me = FirebaseAuth.instance.currentUser;
     if (me == null) return;
 
@@ -197,7 +230,9 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("You blocked this user. Unblock them to request meetups."),
+          content: Text(
+            "You blocked this user. Unblock them to request meetups.",
+          ),
         ),
       );
       return;
@@ -216,14 +251,12 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
       );
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Meetup request sent.")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Meetup request sent.")));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("$e")),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("$e")));
     }
   }
 
@@ -309,9 +342,9 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
       if (shouldBlock == true) {
         await BlockService.instance.block(widget.otherUid);
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("User blocked.")),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text("User blocked.")));
       } else {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -368,18 +401,16 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
             children: [
               Text(
                 "Meetup blocked",
-                style: Theme.of(context)
-                    .textTheme
-                    .titleSmall
-                    ?.copyWith(fontWeight: FontWeight.w900),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 4),
               Text(
                 "You blocked this user on this device. Their meetup request was declined.",
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: cs.onSurfaceVariant),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
               ),
             ],
           ),
@@ -401,8 +432,8 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
       final countdown = (remaining == null)
           ? ""
           : (remaining.isNegative
-              ? "Expired"
-              : "Expires in ${remaining.inMinutes}m");
+                ? "Expired"
+                : "Expires in ${remaining.inMinutes}m");
       if (countdown.isNotEmpty) {
         subtitle = "$subtitle  $countdown";
       }
@@ -446,7 +477,10 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
             onPressed: () {
               Navigator.of(context).pushNamed(
                 "/meetup_plan",
-                arguments: {"chatId": widget.chatId, "otherUid": widget.otherUid},
+                arguments: {
+                  "chatId": widget.chatId,
+                  "otherUid": widget.otherUid,
+                },
               );
             },
             icon: const Icon(Icons.location_on),
@@ -513,18 +547,16 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
         children: [
           Text(
             title,
-            style: Theme.of(context)
-                .textTheme
-                .titleSmall
-                ?.copyWith(fontWeight: FontWeight.w900),
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
           ),
           const SizedBox(height: 4),
           Text(
             subtitle,
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(color: cs.onSurfaceVariant),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
           ),
           const SizedBox(height: 10),
           Row(children: actions),
@@ -570,12 +602,16 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
                 _receiptBestEffort(
                   kind: "meetup",
                   title: "Meetup planner opened",
-                  detail: "chatId=${widget.chatId}; otherUid=${widget.otherUid}",
+                  detail:
+                      "chatId=${widget.chatId}; otherUid=${widget.otherUid}",
                 );
 
                 Navigator.of(context).pushNamed(
                   "/meetup_plan",
-                  arguments: {"chatId": widget.chatId, "otherUid": widget.otherUid},
+                  arguments: {
+                    "chatId": widget.chatId,
+                    "otherUid": widget.otherUid,
+                  },
                 );
               },
             ),
@@ -596,14 +632,17 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
             ),
           ),
           StreamBuilder<MeetupRequestState?>(
-            stream: MeetupService.instance.watchRequestState(chatId: widget.chatId),
+            stream: MeetupService.instance.watchRequestState(
+              chatId: widget.chatId,
+            ),
             builder: (context, snap) => _meetupBanner(snap.data),
           ),
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: stream,
               builder: (context, snap) {
-                final docs = snap.data?.docs ??
+                final docs =
+                    snap.data?.docs ??
                     const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
 
                 if (docs.isNotEmpty) {
@@ -612,7 +651,10 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
 
                 return ListView.builder(
                   controller: _scroll,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
                   itemCount: docs.length,
                   itemBuilder: (context, i) {
                     final d = docs[i].data();
@@ -623,7 +665,10 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
                         padding: const EdgeInsets.only(bottom: 10),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(16),
-                          child: Image.network(img),
+                          child: PrivateChatImage(
+                            path: img,
+                            chatId: widget.chatId,
+                          ),
                         ),
                       );
                     }
@@ -633,11 +678,16 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
                         alignment: Alignment.centerLeft,
                         child: DecoratedBox(
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerHighest,
                             borderRadius: BorderRadius.circular(14),
                           ),
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
                             child: Text(text),
                           ),
                         ),
@@ -648,10 +698,7 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
               },
             ),
           ),
-          ChatInputBar(
-            onSend: _sendText,
-            onPickMedia: _pickMedia,
-          ),
+          ChatInputBar(onSend: _sendText, onPickMedia: _pickMedia),
         ],
       ),
     );

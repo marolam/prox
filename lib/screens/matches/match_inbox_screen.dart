@@ -1,3 +1,7 @@
+import 'package:prox/widgets/match_chat_request_actions.dart';
+import 'package:prox/widgets/nearby_profile_sheet.dart';
+import 'package:prox/screens/matches/background_matches_screen.dart';
+import 'package:prox/services/matching/background_matching_service.dart';
 import "dart:async";
 import "dart:math" as math;
 import "dart:ui";
@@ -19,11 +23,11 @@ import "package:prox/services/matching/match_candidate.dart";
 import "package:prox/services/matching/active_mode_policy_service.dart";
 import "package:prox/services/matching/matching_mode_service.dart";
 import "package:prox/services/matching/matching_runtime_service.dart";
-import "package:prox/services/matching/prox_circle_interaction_policy.dart";
+import "package:prox/widgets/prox_circle_hold.dart";
+import "package:prox/screens/treasure_hunt/treasure_compass_panel.dart";
 import "package:prox/services/matching/match_pipeline.dart";
 import "package:prox/services/meetup_service.dart";
 import "package:prox/services/party_mode_service.dart";
-import "package:prox/services/party_service.dart";
 import "package:prox/services/presence_writer.dart";
 import "package:prox/services/runtime_diagnostics_service.dart";
 import "package:prox/services/user_profile_service.dart";
@@ -76,38 +80,30 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
 
   bool _opening = false;
   String _openingUid = "";
-  bool _showingActiveConfirmation = false;
 
   static const int _newUserWindowDays = 7;
-
-  static const Duration _kHoldToActivateDuration = Duration(seconds: 3);
-  static const Duration _kStartupTapOffWindow = Duration(seconds: 10);
-  static bool _didApplyNearbyBootDefault = false;
 
   String _topUid = "";
   String _topDistanceLabel = "Nearby";
   List<String> _topKeywords = const <String>[];
   final Map<String, Future<List<String>>> _sharedKeywordsCache =
       <String, Future<List<String>>>{};
-    final Map<String, Stream<UserProfile?>> _profileWatchStreams =
+  final Map<String, Stream<UserProfile?>> _profileWatchStreams =
       <String, Stream<UserProfile?>>{};
 
   // Ticks UI so decline cooldown chips count down live.
   // Kept intentionally low-frequency to reduce rebuild cost.
   Timer? _uiTick;
-  Timer? _holdTick;
-  Timer? _startupWindowTick;
   double _holdProgress01 = 0.0;
-  bool _holdTriggeredActivation = false;
-  DateTime? _suppressCircleTapUntil;
-  bool _cycleUnlocked = false;
-  bool _startupOffPromptActive = true;
-  late final DateTime _startupOffTapUntil;
+  bool _compassActivated = false;
+  MatchingModeKind? _circleMode;
+  DateTime? _travelRefreshAt;
   late final AnimationController _orbitController;
   Duration? _orbitDuration;
   Stream<List<NearbyDoc>>? _nearbyStream;
   double? _nearbyStreamRadiusMiles;
   String? _nearbyStreamUid;
+  MatchingModeKind? _nearbyStreamMode;
   bool? _nearbyStreamLocationEnabled;
   int _nearbyRequest = 0;
   bool _retryingNearby = false;
@@ -119,7 +115,6 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
   Future<List<NearbyDoc>>? _filterFuture;
   List<NearbyDoc>? _rankInput;
   MatchDiscoverySettings? _rankDiscovery;
-  String? _rankParty;
   Set<String>? _rankMembers;
   Future<List<MatchCandidate>>? _rankFuture;
   StreamSubscription<DateTime?>? _incomingDeadlineSub;
@@ -131,26 +126,10 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
     WidgetsBinding.instance.addObserver(this);
     GeoQueryService.instance.debug.addListener(_onNearbyStatusChanged);
     LocationPrivacyService.instance.addListener(_onNearbyStatusChanged);
-    _startupOffTapUntil = DateTime.now().add(_kStartupTapOffWindow);
-
-    if (!_didApplyNearbyBootDefault) {
-      _didApplyNearbyBootDefault = true;
-      MatchingModeService.instance.setModeKind(MatchingModeKind.normal);
-      MatchingModeService.instance.setMode(ProxMatchingMode.passive);
-    }
-
     _orbitController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2800),
     )..repeat();
-
-    _startupWindowTick = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      setState(() {});
-      if (!_startupOffWindowOpen || !_startupOffPromptActive) {
-        _startupWindowTick?.cancel();
-      }
-    });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -179,6 +158,15 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
         ),
       );
       if (!mounted) return;
+      final now = DateTime.now();
+      if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
+          MatchingModeService.instance.modeKind == MatchingModeKind.travel &&
+          (_travelRefreshAt == null ||
+              now.difference(_travelRefreshAt!) >=
+                  const Duration(seconds: 30))) {
+        _travelRefreshAt = now;
+        _invalidateNearbyStream();
+      }
       setState(() {});
     });
   }
@@ -451,19 +439,9 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
     GeoQueryService.instance.debug.removeListener(_onNearbyStatusChanged);
     LocationPrivacyService.instance.removeListener(_onNearbyStatusChanged);
     _uiTick?.cancel();
-    _holdTick?.cancel();
-    _startupWindowTick?.cancel();
     _orbitController.dispose();
     _incomingDeadlineSub?.cancel();
     super.dispose();
-  }
-
-  bool get _startupOffWindowOpen =>
-      DateTime.now().isBefore(_startupOffTapUntil);
-
-  Duration get _startupOffWindowLeft {
-    final d = _startupOffTapUntil.difference(DateTime.now());
-    return d > Duration.zero ? d : Duration.zero;
   }
 
   bool _isNewUser(UserProfile? profile) {
@@ -491,12 +469,9 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
     );
   }
 
-  bool get _showStartupOffCountdown {
-    return _startupOffPromptActive && !_cycleUnlocked && _startupOffWindowOpen;
-  }
-
   void _snack(String msg) {
-    // Intentionally no-op on Nearby to avoid transient overlays that can disrupt animation.
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   String _fmtMMSS(Duration d) {
@@ -557,126 +532,19 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
   }
 
   Future<void> _setNormalMode(NormalMatchMode mode) async {
-    final current = MatchingModeService.instance.discovery.normalMode;
-    if (current == mode) return;
-    if (mode == NormalMatchMode.active && !await _confirmActiveMode()) return;
-    MatchingModeService.instance.setMode(
-      mode == NormalMatchMode.active
-          ? ProxMatchingMode.active
-          : ProxMatchingMode.passive,
-    );
     if (mode == NormalMatchMode.active) {
-      _cycleUnlocked = true;
+      _snack("Hold the Prox Circle for 3 seconds to activate Normal Active.");
+      return;
     }
-    _snack(
-      "Normal mode: ${mode == NormalMatchMode.active ? "Active" : "Passive"}.",
-    );
-    if (mounted) setState(() {});
-  }
-
-  Future<bool> _confirmActiveMode() async {
-    if (_showingActiveConfirmation || !mounted) return false;
-    _showingActiveConfirmation = true;
-    final accepted =
-        await showDialog<bool>(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => AlertDialog(
-            icon: const Icon(Icons.bolt, color: Color(0xFF22DE74)),
-            title: const Text("Ready right now?"),
-            content: const Text(
-              "Active Mode is only for immediate availability to match, chat, "
-              "and meet up. If you do not respond to an incoming request, "
-              "Active Mode will be locked for 10 minutes.",
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text("Not now"),
-              ),
-              FilledButton.icon(
-                onPressed: () => Navigator.of(context).pop(true),
-                icon: const Icon(Icons.bolt),
-                label: const Text("I'm available"),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    _showingActiveConfirmation = false;
-    return accepted;
-  }
-
-  void _cycleModeKindFromCircle(MatchDiscoverySettings discovery) {
-    if (!_cycleUnlocked) return;
-
-    final next = ProxCircleInteractionPolicy.nextMode(discovery.modeKind);
-
-    MatchingModeService.instance.setModeKind(next);
-    _snack("Mode: ${_modeChipLabel(MatchingModeService.instance.discovery)}");
-    if (mounted) setState(() {});
+    MatchingModeService.instance.setMode(ProxMatchingMode.passive);
   }
 
   void _onCircleTap(MatchDiscoverySettings discovery) {
-    final suppressUntil = _suppressCircleTapUntil;
-    if (ProxCircleInteractionPolicy.shouldSuppressTap(
-      now: DateTime.now(),
-      suppressUntil: suppressUntil,
-    )) {
-      return;
-    }
-    _suppressCircleTapUntil = null;
-
-    // Off must never be a dead end. Restoring Normal Passive is available
-    // regardless of the startup countdown or the local cycle state.
-    if (discovery.modeKind == MatchingModeKind.off) {
-      MatchingModeService.instance.setMode(ProxMatchingMode.passive);
-      _startupOffPromptActive = false;
-      _snack("Normal Passive restored.");
-      if (mounted) setState(() {});
-      return;
-    }
-
-    final userSettings = UserSettingsService.instance.current;
-    if (userSettings.simpleModeEnabled && !userSettings.alwaysUseNormalMode) {
-      final next = discovery.normalMode == NormalMatchMode.active
-          ? NormalMatchMode.passive
-          : NormalMatchMode.active;
-      unawaited(_setNormalMode(next));
-      return;
-    }
-
-    final bool isNormalPassive =
-        discovery.modeKind == MatchingModeKind.normal &&
-        discovery.normalMode == NormalMatchMode.passive;
-
-    // Active and advanced modes prove that cycling was already unlocked,
-    // including after Nearby is rebuilt or the app resumes.
-    if (ProxCircleInteractionPolicy.canCycle(
-      discovery: discovery,
-      sessionUnlocked: _cycleUnlocked,
-    )) {
-      _cycleUnlocked = true;
-    }
-
-    if (!_cycleUnlocked && isNormalPassive && !_showStartupOffCountdown) {
-      // After the startup off window expires, a normal tap should cycle modes.
-      _cycleUnlocked = true;
-    }
-
-    if (!_cycleUnlocked) {
-      if (isNormalPassive && _showStartupOffCountdown) {
-        _startupOffPromptActive = false;
-        MatchingModeService.instance.setModeKind(MatchingModeKind.off);
-        _snack("Matching Off enabled.");
-        if (mounted) setState(() {});
-      } else if (isNormalPassive) {
-        _snack("Hold 3s to turn on Active Matching.");
-      }
-      return;
-    }
-
-    _cycleModeKindFromCircle(discovery);
+    _snack(
+      discovery.modeKind == MatchingModeKind.treasureHunt
+          ? "Hold the Prox Circle for 3 Seconds to Activate Matching Compass"
+          : "Use Mode to choose a mode. Hold the circle for 3 seconds to activate Normal Active.",
+    );
   }
 
   void _enforceSimpleDiscoveryDefaults(MatchDiscoverySettings discovery) {
@@ -750,72 +618,27 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
 
   void _turnMatchingOffFromActive() {
     MatchingModeService.instance.setModeKind(MatchingModeKind.off);
-    _startupOffPromptActive = false;
-    if (!mounted) return;
-    setState(() {});
   }
 
-  Future<void> _onHoldProxCircle(MatchDiscoverySettings discovery) async {
-    if (discovery.modeKind != MatchingModeKind.normal) {
-      _snack("Set mode to Normal first.");
-      return;
-    }
-    if (discovery.normalMode == NormalMatchMode.active) return;
-
-    if (discovery.isActiveLocked) {
-      final left = Duration(
-        milliseconds:
-            (discovery.activeLockUntilEpochMs -
-                    DateTime.now().millisecondsSinceEpoch)
-                .clamp(0, 1 << 30),
-      );
-      _snack("Active is locked for ${_fmtMMSS(left)}.");
-      return;
-    }
-
-    _holdTick?.cancel();
-    _holdTick = null;
-    _holdProgress01 = 0.0;
-    _holdTriggeredActivation = false;
-    _startupOffPromptActive = false;
-
-    if (!await _confirmActiveMode()) {
-      if (mounted) setState(() {});
-      return;
-    }
-
-    _holdTriggeredActivation = true;
-    MatchingModeService.instance.setMode(ProxMatchingMode.active);
-    _cycleUnlocked = true;
-    _suppressCircleTapUntil = DateTime.now().add(
-      const Duration(milliseconds: 450),
-    );
-    _snack("Active mode enabled.");
-    if (mounted) setState(() {});
-  }
-
-  void _beginHoldToActivate(MatchDiscoverySettings discovery) {
-    if (discovery.modeKind != MatchingModeKind.normal) return;
-    if (discovery.normalMode == NormalMatchMode.active) return;
-    if (discovery.isActiveLocked) return;
-    if (_startupOffWindowOpen && !_cycleUnlocked) return;
-
-    _holdTick?.cancel();
-    _holdTriggeredActivation = false;
-    final DateTime startedAt = DateTime.now();
-
-    _holdTick = Timer.periodic(const Duration(milliseconds: 16), (_) {
-      if (!mounted) return;
-      final int elapsedMs = DateTime.now().difference(startedAt).inMilliseconds;
-      final double p = (elapsedMs / _kHoldToActivateDuration.inMilliseconds)
-          .clamp(0.0, 1.0);
+  void _onHoldProxCircle(MatchDiscoverySettings discovery) {
+    final current = MatchingModeService.instance.discovery;
+    if (current.modeKind != discovery.modeKind) return;
+    if (current.modeKind == MatchingModeKind.treasureHunt) {
       setState(() {
-        _holdProgress01 = p;
+        _compassActivated = true;
+        _holdProgress01 = 0;
       });
-      if (p >= 1.0) {
-        unawaited(_onHoldProxCircle(discovery));
-      }
-    });
+      return;
+    }
+    if (current.modeKind != MatchingModeKind.normal ||
+        current.normalMode == NormalMatchMode.active)
+      return;
+    if (MatchingModeService.instance.isActiveLocked) {
+      _snack("Active is temporarily locked for missed responses.");
+      return;
+    }
+    MatchingModeService.instance.setMode(ProxMatchingMode.active);
+    setState(() => _holdProgress01 = 0);
   }
 
   Duration? _activePresenceTimeLeft(Map<String, dynamic> profile) {
@@ -825,21 +648,6 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
     if (expiresAt is! Timestamp) return null;
     final left = expiresAt.toDate().difference(DateTime.now());
     return left > Duration.zero ? left : Duration.zero;
-  }
-
-  void _endHoldToActivate() {
-    _holdTick?.cancel();
-    _holdTick = null;
-
-    if (_holdTriggeredActivation) {
-      _holdTriggeredActivation = false;
-      return;
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _holdProgress01 = 0.0;
-    });
   }
 
   String _modeCircleLabel(MatchDiscoverySettings discovery) {
@@ -857,7 +665,10 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
     }
   }
 
-  Future<void> _openChat({required String otherUid}) async {
+  Future<void> _openChat({
+    required String otherUid,
+    bool renewExpired = false,
+  }) async {
     final myUid = FirebaseAuth.instance.currentUser?.uid ?? "";
     if (myUid.isEmpty) {
       _snack("Sign in to open chat.");
@@ -878,9 +689,10 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
         otherUid,
       );
 
-      final Duration? left = await MeetupService.instance.declineCooldownLeft(
-        predictedChatId,
-      );
+      final Duration? left = await MeetupService.instance
+          .declineCooldownLeft(predictedChatId)
+          .timeout(const Duration(seconds: 4));
+      if (!mounted || FirebaseAuth.instance.currentUser?.uid != myUid) return;
       if (left != null && left > Duration.zero) {
         if (!mounted) return;
         _snack("Meetup declined - try again in ${_fmtMMSS(left)}.");
@@ -888,15 +700,32 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
       }
 
       final chatId = await ChatThreadService.instance
-          .ensureChat(myUid: myUid, otherUid: otherUid)
+          .ensureChat(
+            myUid: myUid,
+            otherUid: otherUid,
+            renewExpired: renewExpired,
+          )
           .timeout(const Duration(seconds: 8));
 
-      if (!mounted) return;
+      if (!mounted || FirebaseAuth.instance.currentUser?.uid != myUid) return;
       Navigator.of(
         context,
       ).pushNamed("/chat", arguments: {"chatId": chatId, "otherUid": otherUid});
-    } catch (_) {
-      _snack("Couldn't open chat right now.");
+    } on TimeoutException catch (error, stack) {
+      RuntimeDiagnosticsService.instance.record(
+        error,
+        stack,
+        operation: 'Open nearby chat',
+      );
+      if (mounted)
+        _snack('Chat is taking too long. Check your connection and try again.');
+    } catch (error, stack) {
+      RuntimeDiagnosticsService.instance.record(
+        error,
+        stack,
+        operation: 'Open nearby chat',
+      );
+      if (mounted) _snack("Couldn't open this chat. Please try again.");
     } finally {
       if (mounted) {
         setState(() {
@@ -1022,13 +851,13 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
 
     if (status == "accepted") return _chip("Chat open", strong: true);
     if (status == "declined") return _chip("Chat declined");
-    if (status == "expired") return _chip("Chat request expired");
+    if (gate.isStaleOrExpired) return _chip("Chat request expired");
 
     final byMe = gate.requestedBy.isNotEmpty && gate.requestedBy == myUid;
     return byMe ? _chip("Request sent") : _chip("Chat requested", strong: true);
   }
 
-  Widget _inlineGateActions({
+  Widget _cardGateActions({
     required String chatId,
     required String otherUid,
     required String myUid,
@@ -1036,61 +865,59 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
     required bool cooling,
     required bool openingThis,
   }) {
-    final cs = Theme.of(context).colorScheme;
-
     if (myUid.isEmpty) return const SizedBox.shrink();
     if (openingThis) return const SizedBox.shrink();
     if (cooling) return const SizedBox.shrink();
     if (gate == null) return const SizedBox.shrink();
 
+    if (gate.canRenew) {
+      return TextButton.icon(
+        onPressed: () => _openChat(otherUid: otherUid, renewExpired: true),
+        icon: const Icon(Icons.refresh),
+        label: const Text('Send new request'),
+      );
+    }
+    if (gate.isStaleOrExpired) {
+      return TextButton.icon(
+        onPressed: _retryNearby,
+        icon: const Icon(Icons.refresh),
+        label: const Text('Refresh nearby'),
+      );
+    }
     // Only show when it's pending AND requested by the other person.
-    if (gate.isAccepted || gate.isDeclined || gate.isExpired) {
+    if (gate.isAccepted || gate.isDeclined || gate.isStaleOrExpired) {
       return const SizedBox.shrink();
     }
     final String requestedBy = gate.requestedBy.trim();
     if (requestedBy.isEmpty) return const SizedBox.shrink();
     if (requestedBy == myUid) return const SizedBox.shrink();
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IconButton(
-          tooltip: "Accept chat",
-          onPressed: () async {
-            try {
-              await ChatGateService.instance.accept(
-                chatId: chatId,
-                accepterUid: myUid,
-              );
-              if (!mounted) return;
-              _snack("Chat accepted");
-              // Accept should flow directly into chat.
-              await _openChat(otherUid: otherUid);
-            } catch (_) {
-              if (!mounted) return;
-              _snack("Couldn't accept chat");
-            }
-          },
-          icon: Icon(Icons.check_circle, color: cs.primary),
-        ),
-        IconButton(
-          tooltip: "Decline chat",
-          onPressed: () async {
-            try {
-              await ChatGateService.instance.decline(
-                chatId: chatId,
-                declinerUid: myUid,
-              );
-              if (!mounted) return;
-              _snack("Chat declined");
-            } catch (_) {
-              if (!mounted) return;
-              _snack("Couldn't decline chat");
-            }
-          },
-          icon: Icon(Icons.cancel, color: cs.onSurface.withValues(alpha: 0.72)),
-        ),
-      ],
+    return MatchChatRequestActions(
+      key: ValueKey('$chatId/${gate.requestedAt}'),
+      onAccept: () async {
+        try {
+          await ChatGateService.instance.accept(
+            chatId: chatId,
+            accepterUid: myUid,
+          );
+          if (!mounted) return;
+          _snack("Chat accepted");
+          await _openChat(otherUid: otherUid);
+        } catch (_) {
+          if (mounted) _snack("Couldn't accept chat. Please try again.");
+        }
+      },
+      onDecline: () async {
+        try {
+          await ChatGateService.instance.decline(
+            chatId: chatId,
+            declinerUid: myUid,
+          );
+          if (mounted) _snack("Chat declined");
+        } catch (_) {
+          if (mounted) _snack("Couldn't decline chat. Please try again.");
+        }
+      },
     );
   }
 
@@ -1224,10 +1051,13 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
         ? "Nearby"
         : (ProxDistanceFormat.bucketMilesOrNull(miles) ?? "Nearby");
 
-    final List<String> top3 = (await _sharedKeywordsForCandidate(uid).timeout(
-      const Duration(seconds: 2),
-      onTimeout: () => const <String>[],
-    )).take(3).toList(growable: false);
+    final List<String> top3 =
+        MatchingModeService.instance.modeKind == MatchingModeKind.listen
+        ? const <String>[]
+        : (await _sharedKeywordsForCandidate(uid).timeout(
+            const Duration(seconds: 2),
+            onTimeout: () => const <String>[],
+          )).take(3).toList(growable: false);
 
     final bool changed =
         uid != _topUid ||
@@ -1279,7 +1109,8 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed || !mounted) return;
-    if (_nearbyStreamCompleted ||
+    if (MatchingModeService.instance.modeKind == MatchingModeKind.travel ||
+        _nearbyStreamCompleted ||
         GeoQueryService.instance.debug.status != GeoQueryStatus.ready) {
       setState(_invalidateNearbyStream);
     }
@@ -1341,10 +1172,9 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
       return _filterFuture!;
     _filterInput = raw;
     _filterDiscovery = discovery;
-    final nearby = _applyAgeFilter(
-      _applyBusinessFilter(raw, discovery),
-      discovery,
-    );
+    final nearby = discovery.modeKind == MatchingModeKind.listen
+        ? raw
+        : _applyAgeFilter(_applyBusinessFilter(raw, discovery), discovery);
     return _filterFuture = MatchingRuntimeService.instance
         .filterByModeForSettings(nearby, discovery)
         .timeout(const Duration(seconds: 20));
@@ -1353,23 +1183,19 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
   Future<List<MatchCandidate>> _rankedNearby(
     List<NearbyDoc> nearby,
     MatchDiscoverySettings discovery,
-    String? partyId,
     Set<String> members,
   ) {
     if (_rankFuture != null &&
         identical(nearby, _rankInput) &&
         discovery == _rankDiscovery &&
-        partyId == _rankParty &&
         setEquals(members, _rankMembers))
       return _rankFuture!;
     _rankInput = nearby;
     _rankDiscovery = discovery;
-    _rankParty = partyId;
     _rankMembers = Set.of(members);
     return _rankFuture = MatchPipeline.instance
         .buildCandidates(
           nearby: nearby,
-          myPartyId: partyId ?? '',
           discovery: discovery,
           partyMemberUids: members,
         )
@@ -1391,21 +1217,25 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
       retrying: _retryingNearby,
       onRetry: _retryNearby,
       onSettings: _openNearbyLocationSettings,
+      onEnableMatching: _openModeChooser,
       child: const SizedBox.shrink(),
     );
   }
 
   void _ensureNearbyStream(double radiusMiles) {
     final current = _nearbyStreamRadiusMiles;
+    final mode = MatchingModeService.instance.modeKind;
     final uid = FirebaseAuth.instance.currentUser?.uid;
     final locationEnabled = LocationPrivacyService.instance.locationEnabled;
     if (_nearbyStream != null &&
         _nearbyStreamUid == uid &&
+        _nearbyStreamMode == mode &&
         _nearbyStreamLocationEnabled == locationEnabled &&
         current != null &&
         (current - radiusMiles).abs() < 0.001) {
       return;
     }
+    _nearbyStreamMode = mode;
     _nearbyStreamRadiusMiles = radiusMiles;
     final userInitiated =
         uid != null &&
@@ -1426,10 +1256,16 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
         yield const <NearbyDoc>[];
         return;
       }
+      final localSample = PresenceWriter.instance.travelSample;
+      final localCenter =
+          mode == MatchingModeKind.travel && localSample['geopoint'] is GeoPoint
+          ? localSample['geopoint'] as GeoPoint
+          : null;
       yield* GeoQueryService.instance.streamNearby(
-        center: null,
+        center: localCenter,
         radiusMiles: radiusMiles,
         userInitiated: userInitiated,
+        listenOnly: mode == MatchingModeKind.listen,
       );
     }();
   }
@@ -1444,16 +1280,21 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
     final bool isNormalMode = discovery.modeKind == MatchingModeKind.normal;
     final bool isOffMode = discovery.modeKind == MatchingModeKind.off;
     final bool isListenMode = discovery.modeKind == MatchingModeKind.listen;
-    final userSettings = UserSettingsService.instance.current;
-    final bool simpleModeActive =
-      userSettings.simpleModeEnabled && !userSettings.alwaysUseNormalMode;
+
     final bool showActiveDot =
         discovery.modeKind == MatchingModeKind.normal &&
         discovery.normalMode == NormalMatchMode.active;
+    if (_circleMode != discovery.modeKind) {
+      _topUid = "";
+      _nearbyResultsReady = false;
+      _circleMode = discovery.modeKind;
+      _compassActivated = false;
+      _holdProgress01 = 0;
+    }
+    final isTreasure = discovery.modeKind == MatchingModeKind.treasureHunt;
     final bool canHoldToActivate =
-        isNormalMode &&
-        discovery.normalMode == NormalMatchMode.passive &&
-        !_showStartupOffCountdown;
+        (isNormalMode && discovery.normalMode == NormalMatchMode.passive) ||
+        (isTreasure && !_compassActivated);
     final bool showHoldProgress = canHoldToActivate && _holdProgress01 > 0;
     final bool animateOrbit = !isOffMode;
 
@@ -1463,395 +1304,406 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
         child: Column(
           key: _kNearbyProxCircleAnchorKey,
           children: [
-            GestureDetector(
-              onTapDown: canHoldToActivate
-                  ? (_) => _beginHoldToActivate(discovery)
-                  : null,
-              onTapUp: canHoldToActivate ? (_) => _endHoldToActivate() : null,
-              onTapCancel: canHoldToActivate ? _endHoldToActivate : null,
-              onTap: () => _onCircleTap(discovery),
-              child: SizedBox(
-                width: 196,
-                height: 196,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    if (showHoldProgress)
-                      CustomPaint(
-                        size: const Size.square(196),
-                        painter: _ProxHoldRingPainter(
-                          progress01: _holdProgress01,
-                          color:
-                              Color.lerp(
-                                const Color(0xFF2ECF6B),
+            if (isTreasure && _compassActivated)
+              TreasureCompassPanel(
+                key: ValueKey(discovery),
+                discovery: discovery,
+              )
+            else
+              ProxCircleHold(
+                key: ValueKey(discovery.modeKind),
+                enabled: canHoldToActivate,
+                onHold: () => _onHoldProxCircle(discovery),
+                onProgress: (value) {
+                  if (mounted) setState(() => _holdProgress01 = value);
+                },
+                onTap: () => _onCircleTap(discovery),
+                child: SizedBox(
+                  width: 196,
+                  height: 196,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      if (showHoldProgress)
+                        CustomPaint(
+                          size: const Size.square(196),
+                          painter: _ProxHoldRingPainter(
+                            progress01: _holdProgress01,
+                            color:
+                                Color.lerp(
+                                  const Color(0xFF2ECF6B),
+                                  const Color(0xFF22DE74),
+                                  _holdProgress01,
+                                ) ??
                                 const Color(0xFF22DE74),
-                                _holdProgress01,
-                              ) ??
-                              const Color(0xFF22DE74),
+                          ),
                         ),
-                      ),
-                    if (isNormalMode && showActiveDot)
-                      AnimatedBuilder(
-                        animation: _orbitController,
-                        builder: (context, _) {
-                          final pulse =
-                              0.82 +
-                              (0.18 *
-                                  math.sin(
-                                    _orbitController.value * math.pi * 2,
-                                  ));
-                          return Opacity(
-                            opacity: pulse.clamp(0.3, 1.0),
-                            child: Container(
-                              width: 194,
-                              height: 194,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: accent.withValues(alpha: 0.46),
-                                  width: 2,
+                      if (isNormalMode && showActiveDot)
+                        AnimatedBuilder(
+                          animation: _orbitController,
+                          builder: (context, _) {
+                            final pulse =
+                                0.82 +
+                                (0.18 *
+                                    math.sin(
+                                      _orbitController.value * math.pi * 2,
+                                    ));
+                            return Opacity(
+                              opacity: pulse.clamp(0.3, 1.0),
+                              child: Container(
+                                width: 194,
+                                height: 194,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: accent.withValues(alpha: 0.46),
+                                    width: 2,
+                                  ),
                                 ),
                               ),
+                            );
+                          },
+                        ),
+                      Container(
+                        width: 178,
+                        height: 178,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: accent, width: 4),
+                          gradient: RadialGradient(
+                            colors: [
+                              cs.surface.withValues(alpha: 0.82),
+                              cs.surface.withValues(alpha: 0.42),
+                            ],
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: isOffMode
+                                  ? Colors.transparent
+                                  : accent.withValues(alpha: 0.34),
+                              blurRadius: isOffMode ? 0 : 30,
+                              spreadRadius: isOffMode ? 0 : 3,
                             ),
-                          );
-                        },
-                      ),
-                    Container(
-                      width: 178,
-                      height: 178,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: accent, width: 4),
-                        gradient: RadialGradient(
-                          colors: [
-                            cs.surface.withValues(alpha: 0.82),
-                            cs.surface.withValues(alpha: 0.42),
                           ],
                         ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: isOffMode
-                                ? Colors.transparent
-                                : accent.withValues(alpha: 0.34),
-                            blurRadius: isOffMode ? 0 : 30,
-                            spreadRadius: isOffMode ? 0 : 3,
-                          ),
-                        ],
-                      ),
-                      child: AnimatedBuilder(
-                        animation: _orbitController,
-                        builder: (context, _) {
-                          final angle = animateOrbit
-                              ? _orbitController.value * (2 * math.pi)
-                              : 0.0;
-                          return Stack(
-                            children: [
-                              Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    AnimatedBuilder(
-                                      animation: _orbitController,
-                                      builder: (context, __) {
-                                        final pulse = isOffMode
-                                            ? 0.0
-                                            : (0.68 +
-                                                  (0.32 *
-                                                      math
-                                                          .sin(
-                                                            _orbitController
-                                                                    .value *
-                                                                math.pi *
-                                                                2,
-                                                          )
-                                                          .abs()));
-                                        return Container(
-                                          width: 104,
-                                          height: 104,
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: const Color(0xFF35A4FF)
-                                                    .withValues(
-                                                      alpha: pulse * 0.75,
-                                                    ),
-                                                blurRadius: 28,
-                                                spreadRadius: 2,
-                                              ),
-                                            ],
-                                          ),
-                                          child: const Center(
-                                            child: ColorFiltered(
-                                              colorFilter:
-                                                  ColorFilter.matrix(<double>[
-                                                    0,
-                                                    0,
-                                                    0,
-                                                    0,
-                                                    255,
-                                                    0,
-                                                    0,
-                                                    0,
-                                                    0,
-                                                    255,
-                                                    0,
-                                                    0,
-                                                    0,
-                                                    0,
-                                                    255,
-                                                    0.596,
-                                                    2.002,
-                                                    0.202,
-                                                    0,
-                                                    -180,
-                                                  ]),
-                                              child: Image(
-                                                image: AssetImage(
-                                                  "img/prox-logo-new-lettering.png",
-                                                ),
-                                                width: 92,
-                                                height: 92,
-                                                fit: BoxFit.contain,
-                                                filterQuality:
-                                                    FilterQuality.high,
-                                              ),
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      _modeCircleLabel(discovery),
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w800,
-                                            letterSpacing: 1.0,
-                                            color: accent.withValues(
-                                              alpha: 0.92,
-                                            ),
-                                          ),
-                                    ),
-                                    if (isNormalMode)
-                                      Text(
-                                        discovery.normalMode ==
-                                                NormalMatchMode.active
-                                            ? "ACTIVE"
-                                            : "PASSIVE",
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .labelSmall
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w800,
-                                              letterSpacing: 0.8,
-                                              color: cs.onSurface.withValues(
-                                                alpha: 0.78,
-                                              ),
-                                            ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                              Positioned.fill(
-                                child: animateOrbit
-                                    ? Transform.rotate(
-                                        angle: angle,
-                                        child: Align(
-                                          alignment: Alignment.topCenter,
-                                          child: Padding(
-                                            padding: const EdgeInsets.only(
-                                              top: 14,
-                                            ),
-                                            child: Container(
-                                              width: 10,
-                                              height: 10,
-                                              decoration: BoxDecoration(
-                                                shape: BoxShape.circle,
-                                                color: accent.withValues(
-                                                  alpha: 0.92,
-                                                ),
-                                                boxShadow: [
-                                                  BoxShadow(
-                                                    color: accent.withValues(
-                                                      alpha: 0.7,
-                                                    ),
-                                                    blurRadius: 12,
-                                                    spreadRadius: 1,
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      )
-                                    : const SizedBox.shrink(),
-                              ),
-                              if (discovery.modeKind ==
-                                      MatchingModeKind.treasureHunt &&
-                                  animateOrbit)
-                                Positioned.fill(
-                                  child: Transform.rotate(
-                                    angle: -angle,
-                                    child: Align(
-                                      alignment: Alignment.bottomCenter,
-                                      child: Padding(
-                                        padding: const EdgeInsets.only(
-                                          bottom: 13,
-                                        ),
-                                        child: Icon(
-                                          Icons.explore,
-                                          size: 16,
-                                          color: accent.withValues(alpha: 0.9),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              if (discovery.modeKind ==
-                                      MatchingModeKind.travel &&
-                                  animateOrbit)
-                                Positioned.fill(
-                                  child: Transform.rotate(
-                                    angle: angle * 1.35,
-                                    child: Align(
-                                      alignment: Alignment.centerLeft,
-                                      child: Padding(
-                                        padding: const EdgeInsets.only(
-                                          left: 12,
-                                        ),
-                                        child: Container(
-                                          width: 8,
-                                          height: 8,
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            color: accent.withValues(
-                                              alpha: 0.86,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              if (isListenMode && animateOrbit)
-                                Positioned(
-                                  left: 58,
-                                  right: 58,
-                                  bottom: 42,
-                                  child: AnimatedBuilder(
-                                    animation: _orbitController,
-                                    builder: (context, __) {
-                                      final p =
-                                          0.42 +
-                                          (0.58 *
-                                              math
-                                                  .sin(
-                                                    _orbitController.value *
-                                                        math.pi *
-                                                        2,
-                                                  )
-                                                  .abs());
-                                      return Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: List<Widget>.generate(5, (i) {
-                                          final h =
-                                              4 + ((i.isEven ? p : 1 - p) * 10);
+                        child: AnimatedBuilder(
+                          animation: _orbitController,
+                          builder: (context, _) {
+                            final angle = animateOrbit
+                                ? _orbitController.value * (2 * math.pi)
+                                : 0.0;
+                            return Stack(
+                              children: [
+                                Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      AnimatedBuilder(
+                                        animation: _orbitController,
+                                        builder: (context, __) {
+                                          final pulse = isOffMode
+                                              ? 0.0
+                                              : (0.68 +
+                                                    (0.32 *
+                                                        math
+                                                            .sin(
+                                                              _orbitController
+                                                                      .value *
+                                                                  math.pi *
+                                                                  2,
+                                                            )
+                                                            .abs()));
                                           return Container(
-                                            width: 4,
-                                            height: h,
+                                            width: 104,
+                                            height: 104,
                                             decoration: BoxDecoration(
-                                              borderRadius:
-                                                  BorderRadius.circular(999),
-                                              color: accent.withValues(
-                                                alpha: 0.88,
+                                              shape: BoxShape.circle,
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: const Color(0xFF35A4FF)
+                                                      .withValues(
+                                                        alpha: pulse * 0.75,
+                                                      ),
+                                                  blurRadius: 28,
+                                                  spreadRadius: 2,
+                                                ),
+                                              ],
+                                            ),
+                                            child: const Center(
+                                              child: ColorFiltered(
+                                                colorFilter:
+                                                    ColorFilter.matrix(<double>[
+                                                      0,
+                                                      0,
+                                                      0,
+                                                      0,
+                                                      255,
+                                                      0,
+                                                      0,
+                                                      0,
+                                                      0,
+                                                      255,
+                                                      0,
+                                                      0,
+                                                      0,
+                                                      0,
+                                                      255,
+                                                      0.596,
+                                                      2.002,
+                                                      0.202,
+                                                      0,
+                                                      -180,
+                                                    ]),
+                                                child: Image(
+                                                  image: AssetImage(
+                                                    "img/prox-logo-new-lettering.png",
+                                                  ),
+                                                  width: 92,
+                                                  height: 92,
+                                                  fit: BoxFit.contain,
+                                                  filterQuality:
+                                                      FilterQuality.high,
+                                                ),
                                               ),
                                             ),
                                           );
-                                        }),
-                                      );
-                                    },
-                                  ),
-                                ),
-                              if (showActiveDot)
-                                Positioned(
-                                  top: 18,
-                                  right: 28,
-                                  child: Container(
-                                    width: 18,
-                                    height: 18,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: accent,
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: accent.withValues(alpha: 0.5),
-                                          blurRadius: 10,
-                                          spreadRadius: 1,
+                                        },
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _modeCircleLabel(discovery),
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelMedium
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w800,
+                                              letterSpacing: 1.0,
+                                              color: accent.withValues(
+                                                alpha: 0.92,
+                                              ),
+                                            ),
+                                      ),
+                                      if (isNormalMode)
+                                        Text(
+                                          discovery.normalMode ==
+                                                  NormalMatchMode.active
+                                              ? "ACTIVE"
+                                              : "PASSIVE",
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .labelSmall
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w800,
+                                                letterSpacing: 0.8,
+                                                color: cs.onSurface.withValues(
+                                                  alpha: 0.78,
+                                                ),
+                                              ),
                                         ),
-                                      ],
-                                    ),
+                                    ],
                                   ),
                                 ),
-                              if (isListenMode)
-                                Positioned(
-                                  top: 18,
-                                  right: 28,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(7),
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: cs.surface.withValues(alpha: 0.90),
-                                      border: Border.all(
-                                        color: accent.withValues(alpha: 0.8),
+                                Positioned.fill(
+                                  child: animateOrbit
+                                      ? Transform.rotate(
+                                          angle: angle,
+                                          child: Align(
+                                            alignment: Alignment.topCenter,
+                                            child: Padding(
+                                              padding: const EdgeInsets.only(
+                                                top: 14,
+                                              ),
+                                              child: Container(
+                                                width: 10,
+                                                height: 10,
+                                                decoration: BoxDecoration(
+                                                  shape: BoxShape.circle,
+                                                  color: accent.withValues(
+                                                    alpha: 0.92,
+                                                  ),
+                                                  boxShadow: [
+                                                    BoxShadow(
+                                                      color: accent.withValues(
+                                                        alpha: 0.7,
+                                                      ),
+                                                      blurRadius: 12,
+                                                      spreadRadius: 1,
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        )
+                                      : const SizedBox.shrink(),
+                                ),
+                                if (discovery.modeKind ==
+                                        MatchingModeKind.treasureHunt &&
+                                    animateOrbit)
+                                  Positioned.fill(
+                                    child: Transform.rotate(
+                                      angle: -angle,
+                                      child: Align(
+                                        alignment: Alignment.bottomCenter,
+                                        child: Padding(
+                                          padding: const EdgeInsets.only(
+                                            bottom: 13,
+                                          ),
+                                          child: Icon(
+                                            Icons.explore,
+                                            size: 16,
+                                            color: accent.withValues(
+                                              alpha: 0.9,
+                                            ),
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                    child: Icon(
-                                      discovery.listenRole ==
-                                              ListenMatchRole.speak
-                                          ? Icons.mic_none
-                                          : Icons.hearing,
-                                      size: 14,
-                                      color: accent,
+                                  ),
+                                if (discovery.modeKind ==
+                                        MatchingModeKind.travel &&
+                                    animateOrbit)
+                                  Positioned.fill(
+                                    child: Transform.rotate(
+                                      angle: angle * 1.35,
+                                      child: Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: Padding(
+                                          padding: const EdgeInsets.only(
+                                            left: 12,
+                                          ),
+                                          child: Container(
+                                            width: 8,
+                                            height: 8,
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: accent.withValues(
+                                                alpha: 0.86,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                ),
-                            ],
-                          );
-                        },
+                                if (isListenMode && animateOrbit)
+                                  Positioned(
+                                    left: 58,
+                                    right: 58,
+                                    bottom: 42,
+                                    child: AnimatedBuilder(
+                                      animation: _orbitController,
+                                      builder: (context, __) {
+                                        final p =
+                                            0.42 +
+                                            (0.58 *
+                                                math
+                                                    .sin(
+                                                      _orbitController.value *
+                                                          math.pi *
+                                                          2,
+                                                    )
+                                                    .abs());
+                                        return Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: List<Widget>.generate(5, (
+                                            i,
+                                          ) {
+                                            final h =
+                                                4 +
+                                                ((i.isEven ? p : 1 - p) * 10);
+                                            return Container(
+                                              width: 4,
+                                              height: h,
+                                              decoration: BoxDecoration(
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
+                                                color: accent.withValues(
+                                                  alpha: 0.88,
+                                                ),
+                                              ),
+                                            );
+                                          }),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                if (showActiveDot)
+                                  Positioned(
+                                    top: 18,
+                                    right: 28,
+                                    child: Container(
+                                      width: 18,
+                                      height: 18,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: accent,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: accent.withValues(
+                                              alpha: 0.5,
+                                            ),
+                                            blurRadius: 10,
+                                            spreadRadius: 1,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                if (isListenMode)
+                                  Positioned(
+                                    top: 18,
+                                    right: 28,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(7),
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: cs.surface.withValues(
+                                          alpha: 0.90,
+                                        ),
+                                        border: Border.all(
+                                          color: accent.withValues(alpha: 0.8),
+                                        ),
+                                      ),
+                                      child: Icon(
+                                        discovery.listenRole ==
+                                                ListenMatchRole.speak
+                                            ? Icons.mic_none
+                                            : Icons.hearing,
+                                        size: 14,
+                                        color: accent,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            );
+                          },
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
             const SizedBox(height: 12),
             Text(
-              simpleModeActive
-              ? (discovery.normalMode == NormalMatchMode.active
-                ? "Tap circle to switch to Passive"
-                : "Tap circle to switch to Active")
-              : _cycleUnlocked
-                  ? "Tap circle to cycle mode"
+              isTreasure
+                  ? (_compassActivated
+                        ? "Matching Compass"
+                        : "Hold the Prox Circle for 3 Seconds to Activate Matching Compass")
                   : isOffMode
-                  ? "Matching is OFF"
-                  : (isNormalMode &&
-                        discovery.normalMode == NormalMatchMode.passive &&
-                        _showStartupOffCountdown)
-                  ? "Tap in ${_fmtMMSS(_startupOffWindowLeft)} to turn matching OFF"
+                  ? "Matching is OFF. Choose a mode to resume."
                   : (isNormalMode &&
                         discovery.normalMode == NormalMatchMode.passive)
-                  ? "Hold 3s to turn on Active Matching"
-                  : "",
+                  ? "Hold the Prox Circle for 3 seconds to activate Normal Active"
+                  : "Choose matching modes with Mode",
+              textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 color: cs.onSurface.withValues(alpha: 0.84),
                 fontWeight: FontWeight.w800,
               ),
             ),
-            if (isNormalMode && _cycleUnlocked) ...[
+            if (isNormalMode) ...[
               const SizedBox(height: 10),
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -1902,7 +1754,7 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
               ),
               const SizedBox(height: 8),
               Text(
-                "Cross-role only: Speak users match Listen users.",
+                "One nearby pool. Keywords and conversation preferences do not filter matches.",
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: cs.onSurface.withValues(alpha: 0.74),
                   fontWeight: FontWeight.w600,
@@ -1942,11 +1794,13 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
 
   Widget _buildNearbyCardsScrollableArea({
     required MatchDiscoverySettings discovery,
-    required String? myPartyId,
     required Set<String> partyMemberUids,
     required ColorScheme cs,
     required double bottomInset,
   }) {
+    if (discovery.modeKind == MatchingModeKind.treasureHunt) {
+      return const SizedBox.shrink();
+    }
     return Padding(
       padding: EdgeInsets.only(left: 10, right: 10, bottom: 16 + bottomInset),
       child: StreamBuilder<List<NearbyDoc>>(
@@ -1994,7 +1848,6 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                 future: _rankedNearby(
                   modeFilteredNearby,
                   discovery,
-                  myPartyId,
                   partyMemberUids,
                 ),
                 builder: (context, rankedSnap) {
@@ -2107,21 +1960,27 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                       }
                       final bool isBiz = nd?.isBusiness == true;
                       final int? avail = nd?.availabilityMinutes;
-                      final bool isActivePeer = c.normalModePriority == 0;
+                      final bool isActivePeer =
+                          discovery.modeKind == MatchingModeKind.normal &&
+                          nd != null &&
+                          MatchingRuntimeService.normalModeForPeer(nd) ==
+                              NormalMatchMode.active;
                       final Duration? activeTimeLeft = isActivePeer
                           ? _activePresenceTimeLeft(c.profile)
                           : null;
 
                       final String? distLabel =
                           ProxDistanceFormat.bucketMilesOrNull(c.distanceMiles);
-                      final bool isPartyScope = (myPartyId ?? "").isNotEmpty;
+                      final bool isPartyScope = partyMemberUids.contains(c.uid);
 
                       return StreamBuilder<MeetupRequestState?>(
                         stream: meetupStream,
                         builder: (context, meetupSnap) {
                           final meetupState = meetupSnap.data;
-                          final Duration? declineLeft = MeetupService.instance
-                              .declineCooldownLeftFromState(meetupState);
+                          final Duration? declineLeft =
+                              MeetupService.declineCooldownLeftFromState(
+                                meetupState,
+                              );
                           final bool cooling =
                               (declineLeft != null &&
                               declineLeft > Duration.zero);
@@ -2151,6 +2010,16 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                                   ? null
                                   : () => _openChat(otherUid: c.uid);
 
+                              final gateActions = chatId == null
+                                  ? const SizedBox.shrink()
+                                  : _cardGateActions(
+                                      chatId: chatId,
+                                      otherUid: c.uid,
+                                      myUid: myUid,
+                                      gate: gate,
+                                      cooling: cooling,
+                                      openingThis: openingThis,
+                                    );
                               Widget right;
                               if (openingThis) {
                                 right = const SizedBox(
@@ -2161,17 +2030,7 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                                   ),
                                 );
                               } else if (chatId != null) {
-                                final inline = _inlineGateActions(
-                                  chatId: chatId,
-                                  otherUid: c.uid,
-                                  myUid: myUid,
-                                  gate: gate,
-                                  cooling: cooling,
-                                  openingThis: openingThis,
-                                );
-                                if (inline is! SizedBox) {
-                                  right = inline;
-                                } else if (chatDeclined) {
+                                if (chatDeclined) {
                                   right = Icon(
                                     Icons.block_flipped,
                                     color: cs.onSurface.withValues(alpha: 0.75),
@@ -2249,153 +2108,209 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                                     stream: _profileStreamForCandidate(c.uid),
                                     builder: (context, ps) {
                                       final p = ps.data;
-                                      final photoUrl = p?.photoUrl?.trim() ?? "";
-                                      final name = ProxIdentityPolicy.displayName(
-                                        uid: c.uid,
-                                        profile: p,
-                                        isPartyScope: isPartyScope,
-                                      );
+                                      final photoUrl =
+                                          p?.photoUrl?.trim() ?? "";
+                                      final name =
+                                          ProxIdentityPolicy.displayName(
+                                            uid: c.uid,
+                                            profile: p,
+                                            isPartyScope: isPartyScope,
+                                          );
 
-                                      return Row(
+                                      return Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
                                         children: [
-                                          CircleAvatar(
-                                            radius: 18,
-                                            backgroundImage: photoUrl.isNotEmpty
-                                                ? NetworkImage(photoUrl)
-                                                : null,
-                                            child: photoUrl.isEmpty
-                                                ? const Icon(
-                                                    Icons.person,
-                                                    size: 18,
-                                                  )
-                                                : null,
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: FutureBuilder<List<String>>(
-                                              future: _sharedKeywordsForCandidate(
-                                                c.uid,
+                                          Row(
+                                            children: [
+                                              Semantics(
+                                                button: true,
+                                                label: 'View match profile',
+                                                child: GestureDetector(
+                                                  onTap: () =>
+                                                      showModalBottomSheet<
+                                                        void
+                                                      >(
+                                                        context: context,
+                                                        isScrollControlled:
+                                                            true,
+                                                        showDragHandle: true,
+                                                        builder: (_) =>
+                                                            NearbyProfileSheet(
+                                                              profile:
+                                                                  c.profile,
+                                                              displayName: name,
+                                                              photoUrl:
+                                                                  photoUrl,
+                                                            ),
+                                                      ),
+                                                  child: CircleAvatar(
+                                                    radius: 18,
+                                                    backgroundImage:
+                                                        photoUrl.isNotEmpty
+                                                        ? NetworkImage(photoUrl)
+                                                        : null,
+                                                    child: photoUrl.isEmpty
+                                                        ? const Icon(
+                                                            Icons.person,
+                                                            size: 18,
+                                                          )
+                                                        : null,
+                                                  ),
+                                                ),
                                               ),
-                                              builder: (context, kwSnap) {
-                                                final List<String>
-                                                matchedKeywords =
-                                                    (kwSnap.data ??
-                                                            const <String>[])
-                                                        .take(5)
-                                                        .toList(
-                                                          growable: false,
-                                                        );
+                                              const SizedBox(width: 12),
+                                              Expanded(
+                                                child: FutureBuilder<List<String>>(
+                                                  future:
+                                                      _sharedKeywordsForCandidate(
+                                                        c.uid,
+                                                      ),
+                                                  builder: (context, kwSnap) {
+                                                    final List<String>
+                                                    matchedKeywords =
+                                                        (kwSnap.data ??
+                                                                const <
+                                                                  String
+                                                                >[])
+                                                            .take(5)
+                                                            .toList(
+                                                              growable: false,
+                                                            );
 
-                                                return Column(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  children: [
-                                                    Row(
+                                                    return Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
                                                       children: [
-                                                        Expanded(
-                                                          child: Text(
-                                                            name,
-                                                            overflow:
-                                                                TextOverflow
-                                                                    .ellipsis,
+                                                        Row(
+                                                          children: [
+                                                            Expanded(
+                                                              child: Text(
+                                                                name,
+                                                                overflow:
+                                                                    TextOverflow
+                                                                        .ellipsis,
+                                                                style: Theme.of(context)
+                                                                    .textTheme
+                                                                    .titleMedium
+                                                                    ?.copyWith(
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w800,
+                                                                      color: cs
+                                                                          .onSurface
+                                                                          .withValues(
+                                                                            alpha:
+                                                                                0.92,
+                                                                          ),
+                                                                    ),
+                                                              ),
+                                                            ),
+                                                            if (isBiz) ...[
+                                                              const SizedBox(
+                                                                width: 8,
+                                                              ),
+                                                              _chip(
+                                                                (avail !=
+                                                                            null &&
+                                                                        avail <=
+                                                                            0)
+                                                                    ? "Business  Now"
+                                                                    : "Business",
+                                                                strong: true,
+                                                              ),
+                                                            ],
+                                                            if (_isNewUser(
+                                                              p,
+                                                            )) ...[
+                                                              const SizedBox(
+                                                                width: 8,
+                                                              ),
+                                                              _chip(
+                                                                "New User",
+                                                                strong: true,
+                                                              ),
+                                                            ],
+                                                          ],
+                                                        ),
+                                                        if (matchedKeywords
+                                                            .isNotEmpty) ...[
+                                                          const SizedBox(
+                                                            height: 4,
+                                                          ),
+                                                          Text(
+                                                            "Matches on",
                                                             style: Theme.of(context)
                                                                 .textTheme
-                                                                .titleMedium
+                                                                .labelSmall
                                                                 ?.copyWith(
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .w800,
                                                                   color: cs
                                                                       .onSurface
                                                                       .withValues(
                                                                         alpha:
-                                                                            0.92,
+                                                                            0.65,
                                                                       ),
                                                                 ),
                                                           ),
+                                                          const SizedBox(
+                                                            height: 4,
+                                                          ),
+                                                          Wrap(
+                                                            spacing: 6,
+                                                            runSpacing: 6,
+                                                            crossAxisAlignment:
+                                                                WrapCrossAlignment
+                                                                    .center,
+                                                            children: [
+                                                              for (final kw
+                                                                  in matchedKeywords)
+                                                                _matchChip(kw),
+                                                            ],
+                                                          ),
+                                                        ],
+                                                        const SizedBox(
+                                                          height: 6,
                                                         ),
-                                                        if (isBiz) ...[
-                                                          const SizedBox(
-                                                            width: 8,
-                                                          ),
-                                                          _chip(
-                                                            (avail != null &&
-                                                                    avail <= 0)
-                                                                ? "Business  Now"
-                                                                : "Business",
-                                                            strong: true,
-                                                          ),
-                                                        ],
-                                                        if (_isNewUser(p)) ...[
-                                                          const SizedBox(
-                                                            width: 8,
-                                                          ),
-                                                          _chip(
-                                                            "New User",
-                                                            strong: true,
-                                                          ),
-                                                        ],
-                                                      ],
-                                                    ),
-                                                    if (matchedKeywords
-                                                        .isNotEmpty) ...[
-                                                      const SizedBox(height: 4),
-                                                      Text(
-                                                        "Matches on",
-                                                        style: Theme.of(context)
-                                                            .textTheme
-                                                            .labelSmall
-                                                            ?.copyWith(
-                                                              color: cs
-                                                                  .onSurface
-                                                                  .withValues(
-                                                                    alpha: 0.65,
-                                                                  ),
+                                                        Wrap(
+                                                          spacing: 8,
+                                                          runSpacing: 8,
+                                                          crossAxisAlignment:
+                                                              WrapCrossAlignment
+                                                                  .center,
+                                                          children: [
+                                                            if (isActivePeer)
+                                                              _chip(
+                                                                "Active ${_fmtMMSS(activeTimeLeft ?? Duration.zero)}",
+                                                                strong: true,
+                                                              ),
+                                                            if (distLabel !=
+                                                                null)
+                                                              _chip(distLabel),
+                                                            _gateChipFrom(
+                                                              gate,
+                                                              myUid,
+                                                              cooling: cooling,
                                                             ),
-                                                      ),
-                                                      const SizedBox(height: 4),
-                                                      Wrap(
-                                                        spacing: 6,
-                                                        runSpacing: 6,
-                                                        crossAxisAlignment:
-                                                            WrapCrossAlignment
-                                                                .center,
-                                                        children: [
-                                                          for (final kw
-                                                              in matchedKeywords)
-                                                            _matchChip(kw),
-                                                        ],
-                                                      ),
-                                                    ],
-                                                    const SizedBox(height: 6),
-                                                    Wrap(
-                                                      spacing: 8,
-                                                      runSpacing: 8,
-                                                      crossAxisAlignment:
-                                                          WrapCrossAlignment
-                                                              .center,
-                                                      children: [
-                                                        if (isActivePeer)
-                                                          _chip(
-                                                            "Active ${_fmtMMSS(activeTimeLeft ?? Duration.zero)}",
-                                                            strong: true,
-                                                          ),
-                                                        if (distLabel != null)
-                                                          _chip(distLabel),
-                                                        _gateChipFrom(
-                                                          gate,
-                                                          myUid,
-                                                          cooling: cooling,
+                                                          ],
                                                         ),
                                                       ],
-                                                    ),
-                                                  ],
-                                                );
-                                              },
-                                            ),
+                                                    );
+                                                  },
+                                                ),
+                                              ),
+                                              const SizedBox(width: 10),
+                                              if (gateActions is SizedBox)
+                                                right,
+                                            ],
                                           ),
-                                          const SizedBox(width: 10),
-                                          right,
+                                          if (gateActions is! SizedBox)
+                                            Padding(
+                                              padding: const EdgeInsets.only(
+                                                top: 16,
+                                              ),
+                                              child: gateActions,
+                                            ),
                                         ],
                                       );
                                     },
@@ -2447,225 +2362,219 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                     discovery,
                   ),
                 );
-                _ensureNearbyStream(radiusMiles);
+                if (discovery.modeKind != MatchingModeKind.treasureHunt &&
+                    discovery.modeKind != MatchingModeKind.off) {
+                  _ensureNearbyStream(radiusMiles);
+                } else {
+                  _nearbyStream = null;
+                  _filterFuture = null;
+                  _rankFuture = null;
+                }
 
-                return StreamBuilder<String?>(
-                  stream: PartyModeService.instance.watchCurrentPartyId(),
-                  builder: (context, partyScopeSnap) {
-                    final myPartyId = partyScopeSnap.data;
-                    return StreamBuilder<List<PartyMemberEntry>>(
-                      stream: PartyService.instance.watchMyPartyEntries(),
-                      builder: (context, partySnap) {
-                        final partyMembers =
-                            partySnap.data ?? const <PartyMemberEntry>[];
-                        final partyMemberUids = partyMembers
-                            .map((e) => e.otherUid.trim())
-                            .where((uid) => uid.isNotEmpty)
-                            .toSet();
+                return StreamBuilder<Set<String>>(
+                  stream: PartyModeService.instance.watchApprovedPartyUids(),
+                  builder: (context, partySnap) {
+                    final partyMemberUids = partySnap.data ?? const <String>{};
 
-                        return CustomScrollView(
-                          physics: const ClampingScrollPhysics(),
-                          slivers: [
-                            SliverAppBar(
-                              pinned: true,
-                              floating: false,
-                              backgroundColor: Colors.transparent,
-                              surfaceTintColor: Colors.transparent,
-                              elevation: 0,
-                              expandedHeight: 86,
-                              flexibleSpace: ClipRRect(
-                                child: BackdropFilter(
-                                  filter: ImageFilter.blur(
-                                    sigmaX: 18,
-                                    sigmaY: 18,
-                                  ),
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      color: cs.surface.withValues(alpha: 0.08),
-                                      border: Border(
-                                        bottom: BorderSide(
-                                          color: cs.outline.withValues(
-                                            alpha: 0.12,
-                                          ),
-                                        ),
-                                      ),
+                    return CustomScrollView(
+                      physics: const ClampingScrollPhysics(),
+                      slivers: [
+                        SliverAppBar(
+                          pinned: true,
+                          floating: false,
+                          backgroundColor: Colors.transparent,
+                          surfaceTintColor: Colors.transparent,
+                          elevation: 0,
+                          expandedHeight: 86,
+                          flexibleSpace: ClipRRect(
+                            child: BackdropFilter(
+                              filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: cs.surface.withValues(alpha: 0.08),
+                                  border: Border(
+                                    bottom: BorderSide(
+                                      color: cs.outline.withValues(alpha: 0.12),
                                     ),
                                   ),
                                 ),
                               ),
-                              title: const Text("Nearby"),
-                              actions: [
-                                Padding(
-                                  padding: const EdgeInsets.only(right: 10),
-                                  child: Row(
-                                    children: [
-                                      GestureDetector(
-                                        onTap: _showMatchFoundForTop,
-                                        child: ProxGlass(
-                                          radius: 999,
-                                          blurSigma: 14,
-                                          fillOpacity: 0.10,
-                                          borderOpacity: 0.16,
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 8,
-                                          ),
-                                          child: Row(
-                                            children: [
-                                              Icon(
-                                                Icons.auto_awesome,
-                                                size: 18,
-                                                color: cs.onSurface.withValues(
-                                                  alpha: 0.85,
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Text(
-                                                "Match",
-                                                style: Theme.of(context)
-                                                    .textTheme
-                                                    .labelMedium
-                                                    ?.copyWith(
-                                                      fontWeight:
-                                                          FontWeight.w800,
-                                                      color: cs.onSurface
-                                                          .withValues(
-                                                            alpha: 0.85,
-                                                          ),
-                                                    ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                      if (!simpleMode) ...[
-                                        const SizedBox(width: 10),
-                                        GestureDetector(
-                                          onTap: _openModeChooser,
-                                          child: ProxGlass(
-                                            radius: 999,
-                                            blurSigma: 14,
-                                            fillOpacity: 0.10,
-                                            borderOpacity: 0.16,
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 8,
-                                            ),
-                                            child: Row(
-                                              children: [
-                                                Icon(
-                                                  Icons.tune,
-                                                  size: 18,
-                                                  color: cs.onSurface
-                                                      .withValues(alpha: 0.85),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Text(
-                                                  "Mode",
-                                                  style: Theme.of(context)
-                                                      .textTheme
-                                                      .labelMedium
-                                                      ?.copyWith(
-                                                        fontWeight:
-                                                            FontWeight.w700,
-                                                        color: cs.onSurface
-                                                            .withValues(
-                                                              alpha: 0.85,
-                                                            ),
-                                                      ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                      if (discovery.modeKind ==
-                                          MatchingModeKind.treasureHunt) ...[
-                                        const SizedBox(width: 10),
-                                        GestureDetector(
-                                          onTap: _openTreasureHunt,
-                                          child: ProxGlass(
-                                            radius: 999,
-                                            blurSigma: 14,
-                                            fillOpacity: 0.10,
-                                            borderOpacity: 0.16,
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 8,
-                                            ),
-                                            child: Row(
-                                              children: [
-                                                Icon(
-                                                  Icons.explore,
-                                                  size: 18,
-                                                  color: cs.onSurface
-                                                      .withValues(alpha: 0.85),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Text(
-                                                  "Compass",
-                                                  style: Theme.of(context)
-                                                      .textTheme
-                                                      .labelMedium
-                                                      ?.copyWith(
-                                                        fontWeight:
-                                                            FontWeight.w700,
-                                                        color: cs.onSurface
-                                                            .withValues(
-                                                              alpha: 0.85,
-                                                            ),
-                                                      ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                              ],
                             ),
-                            if (simpleMode)
-                              _buildSimpleSearchSettings(discovery, cs),
-                            _buildNearbyStatusPanel(discovery, cs, radiusMiles),
-                            _buildProxCircleActivatorCard(discovery, cs),
-                            if (discovery.modeKind == MatchingModeKind.normal &&
-                                discovery.normalMode ==
-                                    NormalMatchMode.active &&
-                                incomingLeft != null &&
-                                incomingLeft > Duration.zero)
-                              SliverToBoxAdapter(
-                                child: Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    18,
-                                    0,
-                                    18,
-                                    8,
-                                  ),
-                                  child: Text(
-                                    "Accept pending chat in ${_fmtMMSS(incomingLeft)} or Active auto-switches to Passive for 10:00.",
-                                    style: Theme.of(context).textTheme.bodySmall
-                                        ?.copyWith(
-                                          color: const Color(0xFFDE5353),
-                                          fontWeight: FontWeight.w700,
-                                        ),
+                          ),
+                          title: const Text("Nearby"),
+                          actions: [
+                            if (BackgroundMatchingService.available)
+                              IconButton(
+                                tooltip: 'Background matches',
+                                icon: const Icon(
+                                  Icons.notifications_paused_outlined,
+                                ),
+                                onPressed: () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) =>
+                                        const BackgroundMatchesScreen(),
                                   ),
                                 ),
                               ),
-                            SliverFillRemaining(
-                              hasScrollBody: true,
-                              child: _buildNearbyCardsScrollableArea(
-                                discovery: discovery,
-                                myPartyId: myPartyId,
-                                partyMemberUids: partyMemberUids,
-                                cs: cs,
-                                bottomInset: bottomInset,
+                            Padding(
+                              padding: const EdgeInsets.only(right: 10),
+                              child: Row(
+                                children: [
+                                  GestureDetector(
+                                    onTap: _showMatchFoundForTop,
+                                    child: ProxGlass(
+                                      radius: 999,
+                                      blurSigma: 14,
+                                      fillOpacity: 0.10,
+                                      borderOpacity: 0.16,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 8,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.auto_awesome,
+                                            size: 18,
+                                            color: cs.onSurface.withValues(
+                                              alpha: 0.85,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            "Match",
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .labelMedium
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.w800,
+                                                  color: cs.onSurface
+                                                      .withValues(alpha: 0.85),
+                                                ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  if (!simpleMode) ...[
+                                    const SizedBox(width: 10),
+                                    GestureDetector(
+                                      onTap: _openModeChooser,
+                                      child: ProxGlass(
+                                        radius: 999,
+                                        blurSigma: 14,
+                                        fillOpacity: 0.10,
+                                        borderOpacity: 0.16,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 8,
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              Icons.tune,
+                                              size: 18,
+                                              color: cs.onSurface.withValues(
+                                                alpha: 0.85,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              "Mode",
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .labelMedium
+                                                  ?.copyWith(
+                                                    fontWeight: FontWeight.w700,
+                                                    color: cs.onSurface
+                                                        .withValues(
+                                                          alpha: 0.85,
+                                                        ),
+                                                  ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                  if (discovery.modeKind ==
+                                      MatchingModeKind.treasureHunt) ...[
+                                    const SizedBox(width: 10),
+                                    GestureDetector(
+                                      onTap: _openTreasureHunt,
+                                      child: ProxGlass(
+                                        radius: 999,
+                                        blurSigma: 14,
+                                        fillOpacity: 0.10,
+                                        borderOpacity: 0.16,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 8,
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              Icons.explore,
+                                              size: 18,
+                                              color: cs.onSurface.withValues(
+                                                alpha: 0.85,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              "Compass",
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .labelMedium
+                                                  ?.copyWith(
+                                                    fontWeight: FontWeight.w700,
+                                                    color: cs.onSurface
+                                                        .withValues(
+                                                          alpha: 0.85,
+                                                        ),
+                                                  ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
                             ),
                           ],
-                        );
-                      },
+                        ),
+                        if (simpleMode)
+                          _buildSimpleSearchSettings(discovery, cs),
+                        _buildNearbyStatusPanel(discovery, cs, radiusMiles),
+                        _buildProxCircleActivatorCard(discovery, cs),
+                        if (discovery.modeKind == MatchingModeKind.normal &&
+                            discovery.normalMode == NormalMatchMode.active &&
+                            incomingLeft != null &&
+                            incomingLeft > Duration.zero)
+                          SliverToBoxAdapter(
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(18, 0, 18, 8),
+                              child: Text(
+                                "Accept pending chat in ${_fmtMMSS(incomingLeft)} or Active auto-switches to Passive for 10:00.",
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: const Color(0xFFDE5353),
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                            ),
+                          ),
+                        SliverFillRemaining(
+                          hasScrollBody: true,
+                          child: _buildNearbyCardsScrollableArea(
+                            discovery: discovery,
+                            partyMemberUids: partyMemberUids,
+                            cs: cs,
+                            bottomInset: bottomInset,
+                          ),
+                        ),
+                      ],
                     );
                   },
                 );

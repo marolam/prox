@@ -108,11 +108,13 @@ class PendingPartyRequestCard extends StatefulWidget {
     required this.name,
     required this.onAction,
     this.partyRequiresNormalMode = false,
+    this.nowProvider = DateTime.now,
   });
   final PendingPartyConnection connection;
   final String name;
   final Future<String> Function(String action) onAction;
   final bool partyRequiresNormalMode;
+  final DateTime Function() nowProvider;
   @override
   State<PendingPartyRequestCard> createState() =>
       _PendingPartyRequestCardState();
@@ -121,6 +123,43 @@ class PendingPartyRequestCard extends StatefulWidget {
 class _PendingPartyRequestCardState extends State<PendingPartyRequestCard> {
   bool _busy = false;
   String? _message;
+
+  String _cooldownLabel(Duration remaining) {
+    if (remaining < const Duration(hours: 1)) {
+      final minutes = remaining.inMinutes <= 0 ? 1 : remaining.inMinutes;
+      return '$minutes ${minutes == 1 ? 'minute' : 'minutes'}';
+    }
+    if (remaining < const Duration(hours: 24)) {
+      final hours = (remaining.inMinutes / 60).ceil();
+      final safeHours = hours <= 0 ? 1 : hours;
+      return '$safeHours ${safeHours == 1 ? 'hour' : 'hours'}';
+    }
+    final days = (remaining.inMinutes / 1440).ceil();
+    final safeDays = days <= 0 ? 1 : days;
+    return '$safeDays ${safeDays == 1 ? 'day' : 'days'}';
+  }
+
+  String _remindAvailabilityLabel(DateTime now, DateTime? lastReminderAt) {
+    if (lastReminderAt == null) {
+      return 'Reminders are available once every 24 hours.';
+    }
+    final cooldownEnds = lastReminderAt.add(const Duration(days: 1));
+    var remaining = cooldownEnds.difference(now);
+    if (remaining <= Duration.zero) {
+      return 'Reminders are available now.';
+    }
+    if (remaining > const Duration(days: 1)) {
+      // Clamp future-skewed timestamps to avoid showing misleading wait times.
+      remaining = const Duration(days: 1);
+    }
+    return 'Reminders are available in ${_cooldownLabel(remaining)}.';
+  }
+
+  String _expiryLabel(DateTime now, DateTime expiresAt) {
+    final remaining = expiresAt.difference(now);
+    return 'Expires in ${_cooldownLabel(remaining)} without activity.';
+  }
+
   Future<void> _act(String action) async {
     final title = switch (action) {
       'add' => 'Add to Party?',
@@ -189,9 +228,8 @@ class _PendingPartyRequestCardState extends State<PendingPartyRequestCard> {
   @override
   Widget build(BuildContext context) {
     final p = widget.connection;
-    final now = DateTime.now();
+    final now = widget.nowProvider();
     if (!p.isActive(now)) return const SizedBox.shrink();
-    final days = (p.expiresAt.difference(now).inMinutes / 1440).ceil();
     return Padding(
       padding: const EdgeInsets.only(top: 16),
       child: Column(
@@ -205,9 +243,7 @@ class _PendingPartyRequestCardState extends State<PendingPartyRequestCard> {
                 ? 'They would like to add you to Party.'
                 : 'You can choose to connect later.',
           ),
-          Text(
-            'Expires in $days ${days == 1 ? 'day' : 'days'} without activity.',
-          ),
+          Text(_expiryLabel(now, p.expiresAt)),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
@@ -237,7 +273,7 @@ class _PendingPartyRequestCardState extends State<PendingPartyRequestCard> {
             ],
           ),
           if (p.myDecision == 'add' && !p.canRemind(now))
-            const Text('Reminders are available once every 24 hours.'),
+            Text(_remindAvailabilityLabel(now, p.lastReminderAt)),
           if (_busy) const LinearProgressIndicator(),
           if (_message != null) Text(_message!),
           const Divider(),

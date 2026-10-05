@@ -7,6 +7,8 @@ import "package:flutter/foundation.dart";
 import "package:prox/models/user_settings.dart";
 import "package:prox/services/matching/active_mode_policy_service.dart";
 import "package:prox/services/user_settings_service.dart";
+import "package:prox/services/presence_writer.dart";
+import "package:prox/services/runtime_diagnostics_service.dart";
 
 enum ProxMatchingMode { passive, active }
 
@@ -25,7 +27,8 @@ class MatchingModeService extends ChangeNotifier {
     ActiveModePolicyService.instance.ensureWatching();
     final s = _settings.current.matchDiscovery;
     final backendLocked = ActiveModePolicyService.instance.isLockedByBackend;
-    final active = s.modeKind == MatchingModeKind.normal &&
+    final active =
+        s.modeKind == MatchingModeKind.normal &&
         s.normalMode == NormalMatchMode.active &&
         !s.isActiveLocked &&
         !backendLocked;
@@ -58,9 +61,34 @@ class MatchingModeService extends ChangeNotifier {
   }
 
   void setModeKind(MatchingModeKind next) {
-    _settings.setMatchingMode(next);
+    final current = _settings.current.matchDiscovery;
+    _settings.updateMatchDiscovery(
+      current.copyWith(
+        modeKind: next,
+        normalMode: current.modeKind == next
+            ? current.normalMode
+            : NormalMatchMode.passive,
+      ),
+    );
     _syncModeToServer();
+    if (next == MatchingModeKind.listen && current.modeKind != next) {
+      // Announce a fresh observation now rather than waiting for the next
+      // stationary pulse. The writer still enforces foreground and permissions.
+      unawaited(_announceListenPresence());
+    }
     notifyListeners();
+  }
+
+  Future<void> _announceListenPresence() async {
+    try {
+      await PresenceWriter.instance.writeOneShot(reason: 'listen_mode_enter');
+    } catch (error, stack) {
+      RuntimeDiagnosticsService.instance.record(
+        error,
+        stack,
+        operation: 'Announce Listen availability',
+      );
+    }
   }
 
   void setListenRole(ListenMatchRole next) {
@@ -83,7 +111,8 @@ class MatchingModeService extends ChangeNotifier {
 
   void registerActiveNoResponsePenalty() {
     _settings.recordActiveModePenalty(
-        lockDuration: const Duration(minutes: 10));
+      lockDuration: const Duration(minutes: 10),
+    );
     _syncModeToServer();
     notifyListeners();
   }
@@ -92,44 +121,50 @@ class MatchingModeService extends ChangeNotifier {
     setMode(isActive ? ProxMatchingMode.passive : ProxMatchingMode.active);
   }
 
+  Future<void> _syncQueue = Future<void>.value();
+  int _syncRevision = 0;
+
+  void syncSessionToServer() => _syncModeToServer();
+
   void _syncModeToServer() {
     final uid = _auth.currentUser?.uid ?? "";
     if (uid.isEmpty) return;
 
     final d = _settings.current.matchDiscovery;
-    unawaited(
-      Future.wait<void>([
-        _fs
-            .collection("users")
-            .doc(uid)
-            .collection("settings")
-            .doc("matching")
-            .set(
-          <String, Object?>{
+    final revision = ++_syncRevision;
+    _syncQueue = _syncQueue
+        .catchError((Object _) {})
+        .then((_) async {
+          if (revision != _syncRevision || _auth.currentUser?.uid != uid)
+            return;
+          final batch = _fs.batch();
+          batch.set(_fs.doc("users/$uid/settings/matching"), <String, Object?>{
             "modeKind": d.modeKind.name,
             "normalMode": d.normalMode.name,
             "listenRole": d.listenRole.name,
             "radiusMiles": d.radiusMiles,
+            "businessOnly": d.businessOnly,
+            "immediateOnly": d.immediateOnly,
+            "ageBracket": d.ageBracket.name,
+            "partyScope": d.partyScope.name,
+            "keywordMode": d.keywordMode.name,
             "treasureRadiusMiles": d.treasureRadiusMiles,
             "updatedAtClientMs": DateTime.now().millisecondsSinceEpoch,
-          },
-          SetOptions(merge: true),
-        ),
-        _fs
-            .collection("users")
-            .doc(uid)
-            .collection("presence")
-            .doc("current")
-            .set(
-          <String, Object?>{
+          }, SetOptions(merge: true));
+          batch.set(_fs.doc("users/$uid/presence/current"), <String, Object?>{
             "modeKind": d.modeKind.name,
             "normalMode": d.normalMode.name,
             "listenRole": d.listenRole.name,
             "matchingUpdatedAtClientMs": DateTime.now().millisecondsSinceEpoch,
-          },
-          SetOptions(merge: true),
-        ),
-      ]),
-    );
+          }, SetOptions(merge: true));
+          await batch.commit();
+        })
+        .catchError((Object error, StackTrace stack) {
+          RuntimeDiagnosticsService.instance.record(
+            error,
+            stack,
+            operation: "Synchronize matching mode",
+          );
+        });
   }
 }

@@ -33,6 +33,18 @@ void main() {
     expect(router.destinationFor(item('announcement')).route, '/home');
   });
 
+  test(
+    'significant alerts open a revalidated opportunity without activating matching',
+    () {
+      final destination = router.destinationFor(
+        item('significant_match', {'opportunityId': 'a' * 64}),
+      );
+      expect(destination.route, '/significant-match');
+      expect(destination.arguments, {'opportunityId': 'a' * 64});
+      expect(router.destinationFor(item('significant_match')).route, '/nearby');
+    },
+  );
+
   test('full notification context opens the correct chat or live meetup', () {
     final message = router.destinationFor(
       item('message', {'chatId': 'pair', 'senderUid': 'other'}),

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prox/services/safety_session_service.dart';
@@ -202,6 +203,14 @@ void main() {
       );
       await show({...data, 'status': 'auto_closed'});
       expect(find.text('Meetup ended without completion'), findsOneWidget);
+      await show({
+        ...data,
+        'status': 'live',
+        'expiresAt': Timestamp.fromDate(
+          DateTime.now().subtract(const Duration(minutes: 1)),
+        ),
+      });
+      expect(find.textContaining('Session deadline passed'), findsOneWidget);
       await show({...data, 'status': 'cancelled'});
       expect(find.text('Meetup cancelled'), findsOneWidget);
       expect(find.textContaining('deadline'), findsNothing);

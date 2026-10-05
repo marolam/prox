@@ -4,6 +4,7 @@ import "dart:math" as math;
 import "package:flutter/material.dart";
 
 import "package:prox/models/pro_mode_models.dart";
+import "package:prox/utils/dialog_lifecycle.dart";
 
 class ProApexScreen extends StatefulWidget {
   const ProApexScreen({super.key});
@@ -91,7 +92,7 @@ class _ProApexScreenState extends State<ProApexScreen> {
 
   Future<void> _editKeywords(ProCircleConfig circle) async {
     final controller = TextEditingController(text: circle.keywords.join(", "));
-    final result = await showDialog<List<String>>(
+    final result = await showDialogUntilRemoved<List<String>>(
       context: context,
       builder: (context) {
         return AlertDialog(
@@ -125,7 +126,7 @@ class _ProApexScreenState extends State<ProApexScreen> {
       },
     );
     controller.dispose();
-    if (result == null) return;
+    if (!mounted || result == null) return;
     setState(() {
       _circles = ProApexPolicy.setKeywords(
         circles: _circles,
@@ -151,12 +152,15 @@ class _ProApexScreenState extends State<ProApexScreen> {
         title: const Text("Pro Apex"),
         actions: [
           IconButton(
-            tooltip:
-                _hasActiveLead ? "Clear active lead" : "Simulate lead lock",
+            tooltip: _hasActiveLead
+                ? "Clear active lead"
+                : "Simulate lead lock",
             onPressed: _toggleLeadLock,
-            icon: Icon(_hasActiveLead
-                ? Icons.lock_open_outlined
-                : Icons.lock_clock_outlined),
+            icon: Icon(
+              _hasActiveLead
+                  ? Icons.lock_open_outlined
+                  : Icons.lock_clock_outlined,
+            ),
           ),
         ],
       ),
@@ -357,10 +361,13 @@ class _StatusDeck extends StatelessWidget {
             runSpacing: 8,
             children: [
               _StatusChip(
-                  icon: Icons.speed_outlined, label: "$activeCount active"),
+                icon: Icons.speed_outlined,
+                label: "$activeCount active",
+              ),
               _StatusChip(
-                icon:
-                    canReceive ? Icons.flash_on_outlined : Icons.pause_outlined,
+                icon: canReceive
+                    ? Icons.flash_on_outlined
+                    : Icons.pause_outlined,
                 label: canReceive ? "Accepting" : "Standing by",
               ),
               _StatusChip(
@@ -448,8 +455,9 @@ class _ProCircleCard extends StatelessWidget {
             ? cs.primaryContainer.withValues(alpha: 0.45)
             : cs.surfaceContainerHighest.withValues(alpha: 0.72),
         borderRadius: BorderRadius.circular(8),
-        border:
-            Border.all(color: accent.withValues(alpha: active ? 0.55 : 0.24)),
+        border: Border.all(
+          color: accent.withValues(alpha: active ? 0.55 : 0.24),
+        ),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -572,8 +580,9 @@ class _PolicyPanel extends StatelessWidget {
         children: [
           Text(
             "Pro responsibility",
-            style: theme.textTheme.titleSmall
-                ?.copyWith(fontWeight: FontWeight.w900),
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w900,
+            ),
           ),
           const SizedBox(height: 6),
           Text(

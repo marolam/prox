@@ -1,18 +1,8 @@
 import "package:cloud_firestore/cloud_firestore.dart";
 
-enum BusinessLeadScoreBand {
-  hot,
-  warm,
-  cold,
-}
+enum BusinessLeadScoreBand { hot, warm, cold }
 
-enum BusinessLeadInboxFilter {
-  open,
-  hot,
-  overdue,
-  won,
-  all,
-}
+enum BusinessLeadInboxFilter { open, hot, overdue, won, all }
 
 class BusinessLeadInboxPolicy {
   BusinessLeadInboxPolicy._();
@@ -41,20 +31,23 @@ class BusinessLeadInboxPolicy {
     DateTime? now,
   }) {
     final DateTime clock = (now ?? DateTime.now()).toUtc();
-    final List<BusinessLeadRecord> rows = leads.where((lead) {
-      switch (filter) {
-        case BusinessLeadInboxFilter.open:
-          return isOpen(lead);
-        case BusinessLeadInboxFilter.hot:
-          return isOpen(lead) && lead.scoreBand == BusinessLeadScoreBand.hot;
-        case BusinessLeadInboxFilter.overdue:
-          return isOverdue(lead, now: clock);
-        case BusinessLeadInboxFilter.won:
-          return lead.status.trim().toLowerCase() == "won";
-        case BusinessLeadInboxFilter.all:
-          return true;
-      }
-    }).toList(growable: false);
+    final List<BusinessLeadRecord> rows = leads
+        .where((lead) {
+          switch (filter) {
+            case BusinessLeadInboxFilter.open:
+              return isOpen(lead);
+            case BusinessLeadInboxFilter.hot:
+              return isOpen(lead) &&
+                  lead.scoreBand == BusinessLeadScoreBand.hot;
+            case BusinessLeadInboxFilter.overdue:
+              return isOverdue(lead, now: clock);
+            case BusinessLeadInboxFilter.won:
+              return lead.status.trim().toLowerCase() == "won";
+            case BusinessLeadInboxFilter.all:
+              return true;
+          }
+        })
+        .toList(growable: false);
 
     rows.sort((a, b) => _compareLeads(a, b, filter: filter, now: clock));
     return rows;
@@ -112,6 +105,10 @@ class BusinessLeadRecord {
     this.createdAt,
     this.respondedAt,
     this.wonAt,
+    this.preparedReply,
+    this.followupReminderAt,
+    this.followupReminderMessage,
+    this.followupReminderStep,
   });
 
   final String leadId;
@@ -127,6 +124,10 @@ class BusinessLeadRecord {
   final DateTime? createdAt;
   final DateTime? respondedAt;
   final DateTime? wonAt;
+  final String? preparedReply;
+  final DateTime? followupReminderAt;
+  final String? followupReminderMessage;
+  final String? followupReminderStep;
 
   static DateTime? _readDateTime(dynamic raw) {
     if (raw == null) return null;
@@ -147,10 +148,13 @@ class BusinessLeadRecord {
 
   factory BusinessLeadRecord.fromFirestore(Map<String, dynamic> json) {
     final String leadId = (json["leadId"] ?? "").toString().trim();
-    final int score =
-        (json["score"] is num) ? (json["score"] as num).toInt() : 0;
-    final String scoreBandRaw =
-        (json["scoreBand"] ?? "cold").toString().trim().toLowerCase();
+    final int score = (json["score"] is num)
+        ? (json["score"] as num).toInt()
+        : 0;
+    final String scoreBandRaw = (json["scoreBand"] ?? "cold")
+        .toString()
+        .trim()
+        .toLowerCase();
     final BusinessLeadScoreBand scoreBand = switch (scoreBandRaw) {
       "hot" => BusinessLeadScoreBand.hot,
       "warm" => BusinessLeadScoreBand.warm,
@@ -171,6 +175,16 @@ class BusinessLeadRecord {
       createdAt: _readDateTime(json["createdAt"]),
       respondedAt: _readDateTime(json["respondedAt"]),
       wonAt: _readDateTime(json["wonAt"]),
+      preparedReply: json["lastTemplateMessage"] is String
+          ? (json["lastTemplateMessage"] as String).trim()
+          : null,
+      followupReminderAt: _readDateTime(json["followupReminderAt"]),
+      followupReminderMessage: json["followupReminderMessage"] is String
+          ? (json["followupReminderMessage"] as String).trim()
+          : null,
+      followupReminderStep: json["followupReminderStep"] is String
+          ? (json["followupReminderStep"] as String).trim()
+          : null,
     );
   }
 }

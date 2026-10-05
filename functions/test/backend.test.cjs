@@ -11,7 +11,7 @@ const {claimReward} = require('../lib/verified_rewards');
 const {eraseUserData, deleteMyAccount} = require('../lib/account_lifecycle');
 const {recordCompletedMeetup} = require('../lib/meetup_accounting');
 const {publicProfile, publicProfilesEqual, syncPublicProfile} = require('../lib/public_profiles');
-const {linkReferralCode} = require('../lib/referral_downloads');
+const {linkReferralCode, referralApkDownload} = require('../lib/referral_downloads');
 const {onPartyWrite} = require('../lib/lib/party');
 const {updateBusinessMode, setBusinessModeActive} = require('../lib/business_mode');
 const {syncPresenceCoordinates} = require('../lib/presence_projection');
@@ -24,9 +24,79 @@ beforeEach(async () => {
 after(async () => { await admin.app().delete(); });
 
 const {endSafetySession, recordMeetupOutcome} = require('../lib/safety_sessions');
-const {closeExpiredMeetup, sweepExpiredMeetups} = require('../lib/lib/meetup_auto_close');
+const {classifyUnresolvedOutcome, closeExpiredMeetup, sweepExpiredMeetups} = require('../lib/lib/meetup_auto_close');
 const {onMeetupTransitionGuard} = require('../lib/lib/match_dashboard_enforcement');
 const {onMeetupInteractionLockProjection} = require('../lib/lib/match_dashboard_enforcement');
+
+const REFERRAL_ENV_KEYS = [
+  'PROX_REFERRAL_ANDROID_URL',
+  'PROX_PUBLIC_APK_URL',
+  'PROX_PUBLIC_APK_FALLBACK_URL',
+  'PROX_REFERRAL_IOS_URL',
+  'PROX_IOS_UPDATE_URL',
+  'PROX_IOS_UPDATE_FALLBACK_URL',
+  'PROX_IOS_FALLBACK_URL',
+];
+
+async function withReferralEnv(overrides, run) {
+  const prior = {};
+  for (const key of REFERRAL_ENV_KEYS) {
+    prior[key] = process.env[key];
+  }
+  try {
+    for (const key of REFERRAL_ENV_KEYS) {
+      const next = overrides[key];
+      if (typeof next === 'string') process.env[key] = next;
+      else delete process.env[key];
+    }
+    await run();
+  } finally {
+    for (const key of REFERRAL_ENV_KEYS) {
+      if (typeof prior[key] === 'string') process.env[key] = prior[key];
+      else delete process.env[key];
+    }
+  }
+}
+
+function makeReferralReq({method = 'GET', query = {}, headers = {}, body = {}} = {}) {
+  const normalizedHeaders = {};
+  for (const [key, value] of Object.entries(headers)) {
+    normalizedHeaders[String(key).toLowerCase()] = String(value);
+  }
+  return {
+    method,
+    query,
+    body,
+    get(name) {
+      return normalizedHeaders[String(name).toLowerCase()];
+    },
+  };
+}
+
+function makeReferralRes() {
+  const res = {
+    statusCode: 200,
+    jsonBody: null,
+    headers: {},
+    redirectStatus: 0,
+    redirectUrl: '',
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.jsonBody = payload;
+    },
+    set(name, value) {
+      this.headers[String(name)] = String(value);
+    },
+    redirect(code, url) {
+      this.redirectStatus = code;
+      this.redirectUrl = url;
+    },
+  };
+  return res;
+}
 
 test('delayed meetup lock projection cannot recreate a deleted account', async () => {
   await db.doc('accountDeletions/alice').set({status: 'complete'});
@@ -133,6 +203,114 @@ test('transition guard accepts cancellation and ignores stale events after a lat
   await ref.update({status: 'cancelled'});
   await onMeetupTransitionGuard.run({before: after, after: invalid}, {params: {meetupId: 'safe'}});
   assert.equal((await ref.get()).data().status, 'cancelled');
+});
+
+test('strict progression guard rolls back a requested->live skip when strict step metadata is present', async () => {
+  await safetyFixture('requested');
+  const ref = db.doc('meetups/safe');
+  await ref.update({currentStep: 'requested_waiting_accept', stepDeadlineAt: admin.firestore.Timestamp.fromMillis(Date.now() + 60000)});
+  const before = await ref.get();
+  await ref.update({status: 'live', currentStep: 'verify_and_confirm_arrival'});
+  const after = await ref.get();
+  await onMeetupTransitionGuard.run({before, after}, {params: {meetupId: 'safe'}});
+  const rolledBack = (await ref.get()).data();
+  assert.equal(rolledBack.status, 'requested');
+  assert.equal(rolledBack.currentStep, 'requested_waiting_accept');
+  assert.equal(rolledBack.statusPolicy.rollbackReason, 'invalid_meetup_transition');
+});
+
+test('cancel-by-request requires mutual handshake while preserving legacy safety cancellation path', async () => {
+  await safetyFixture('live');
+  const ref = db.doc('meetups/safe');
+
+  const before = await ref.get();
+  await ref.update({status: 'cancelled', cancelHandshakeByUid: {
+    alice: {requestId: 'alice-only', requestedAt: admin.firestore.Timestamp.now()},
+  }});
+  const partial = await ref.get();
+  await onMeetupTransitionGuard.run({before, after: partial}, {params: {meetupId: 'safe'}});
+  assert.equal((await ref.get()).data().status, 'live');
+
+  const beforeLegacyBoolean = await ref.get();
+  await ref.update({status: 'cancelled', cancelRequestedByA: true, cancelRequestedByB: true});
+  const legacyBoolean = await ref.get();
+  await onMeetupTransitionGuard.run({before: beforeLegacyBoolean, after: legacyBoolean}, {params: {meetupId: 'safe'}});
+  assert.equal((await ref.get()).data().status, 'live');
+
+  const beforeMutual = await ref.get();
+  await ref.update({status: 'cancelled', cancelHandshakeByUid: {
+    alice: {requestId: 'alice-confirm', requestedAt: admin.firestore.Timestamp.now()},
+    bob: {requestId: 'bob-confirm', requestedAt: admin.firestore.Timestamp.now()},
+  }});
+  const mutual = await ref.get();
+  await onMeetupTransitionGuard.run({before: beforeMutual, after: mutual}, {params: {meetupId: 'safe'}});
+  assert.equal((await ref.get()).data().status, 'cancelled');
+
+  await safetyFixture('live');
+  const safetyRef = db.doc('meetups/safe');
+  const beforeSafety = await safetyRef.get();
+  await safetyRef.update({status: 'cancelled', outcome: 'cancelled', cancelledAt: admin.firestore.Timestamp.now(), closedAt: admin.firestore.Timestamp.now()});
+  const afterSafety = await safetyRef.get();
+  await onMeetupTransitionGuard.run({before: beforeSafety, after: afterSafety}, {params: {meetupId: 'safe'}});
+  assert.equal((await safetyRef.get()).data().status, 'cancelled');
+});
+
+test('timeout outcome classification distinguishes unanswered, unfinished and no_show', async () => {
+  assert.equal(classifyUnresolvedOutcome({status: 'requested'}), 'unanswered');
+  assert.equal(classifyUnresolvedOutcome({status: 'accepted', currentStep: 'requested_waiting_accept'}), 'unanswered');
+  assert.equal(classifyUnresolvedOutcome({status: 'live', aArrived: true, bArrived: false}), 'no_show');
+  assert.equal(classifyUnresolvedOutcome({status: 'accepted', aArrived: false, bArrived: false}), 'unfinished');
+});
+
+test('no_show penalties escalate deterministically and do not apply to completed or cancelled sessions', async () => {
+  await db.doc('users/alice').set({});
+  await db.doc('users/bob').set({});
+
+  const now = Date.now();
+  for (let i = 0; i < 3; i++) {
+    const id = `noshow_${i}`;
+    const eventTime = admin.firestore.Timestamp.fromMillis(now + i * 1000);
+    await recordMeetupOutcome(id, {
+      status: 'auto_closed',
+      outcome: 'no_show',
+      autoClosedFromStatus: 'live',
+      aUid: 'alice',
+      bUid: 'bob',
+      aArrived: true,
+      bArrived: false,
+      requestedAt: admin.firestore.Timestamp.fromMillis(now - 60000),
+    }, eventTime);
+  }
+
+  const penalties = await db.collection('users/bob/meetupNoShowPenalties').orderBy('penalizedAt').get();
+  assert.equal(penalties.size, 3);
+  assert.deepEqual(penalties.docs.map(doc => doc.data().lockDurationMs), [15 * 60 * 1000, 2 * 60 * 60 * 1000, 24 * 60 * 60 * 1000]);
+  assert.equal((await db.collection('users/alice/meetupNoShowPenalties').get()).size, 0);
+
+  const bobMatching = (await db.doc('users/bob/meta/matching').get()).data();
+  assert.equal(bobMatching.noShowPenaltyCount, 3);
+  assert.ok(Number(bobMatching.lockUntilEpochMs || 0) > now);
+  const bobTrust = (await db.doc('users/bob/stats/trust').get()).data();
+  assert.equal(bobTrust.noShowCount, 3);
+  assert.equal(bobTrust.noShowTrustPenalty, 10);
+
+  await recordMeetupOutcome('done', {
+    status: 'completed',
+    outcome: 'completed',
+    aUid: 'alice',
+    bUid: 'bob',
+    aArrived: true,
+    bArrived: true,
+  }, admin.firestore.Timestamp.fromMillis(now + 5000));
+  await recordMeetupOutcome('mutual_cancel', {
+    status: 'cancelled',
+    outcome: 'cancelled',
+    aUid: 'alice',
+    bUid: 'bob',
+    cancelRequestedByA: true,
+    cancelRequestedByB: true,
+  }, admin.firestore.Timestamp.fromMillis(now + 6000));
+  assert.equal((await db.collection('users/bob/meetupNoShowPenalties').get()).size, 3);
 });
 
 async function seedPayment() {
@@ -331,6 +509,94 @@ test('wrong payment amount cannot mark paid or create partial entitlements', asy
   await paid();
 });
 
+test('paid external checkout for unlock service SKU grants ownership and entitlement exactly once', async () => {
+  await db.doc('users/alice/billing/externalCheckout/items/service_unlock').set({
+    uid: 'alice',
+    sessionId: 'service_unlock',
+    provider: 'square',
+    sku: 'service_single_keyword_match_unlock',
+    amountUsd: 0.65,
+    status: 'session_created',
+    providerOrderId: 'service_order_1',
+  });
+
+  const first = await applyExternalCheckoutStatus({
+    uid: 'alice',
+    sessionId: 'service_unlock',
+    status: 'paid',
+    providerReference: 'service_paid_event_1',
+    amountCents: 65,
+    currency: 'USD',
+    orderId: 'service_order_1',
+    paymentId: 'service_payment_1',
+    callbackPayload: null,
+  });
+  const second = await applyExternalCheckoutStatus({
+    uid: 'alice',
+    sessionId: 'service_unlock',
+    status: 'paid',
+    providerReference: 'service_paid_event_1_retry',
+    amountCents: 65,
+    currency: 'USD',
+    orderId: 'service_order_1',
+    paymentId: 'service_payment_1',
+    callbackPayload: null,
+  });
+
+  assert.equal(first.applied, true);
+  assert.equal(second.applied, false);
+
+  const entitlement = (await db.doc('users/alice/billing/entitlements').get()).data();
+  assert.equal(entitlement.singleKeywordMatchModeUnlocked, true);
+  assert.equal(entitlement.lastPaymentMethod, 'card_external');
+
+  const purchase = (await db.doc('users/alice/store/purchases/items/service_single_keyword_match_unlock').get()).data();
+  assert.equal(purchase.sku, 'service_single_keyword_match_unlock');
+  assert.equal(purchase.paymentMethod, 'card_external');
+  assert.equal(purchase.providerSessionId, 'service_unlock');
+  assert.equal(purchase.amountUsd, 0.65);
+
+  assert.equal((await db.collection('users/alice/billing/invoices/items').get()).size, 1);
+  assert.equal((await db.collection('users/alice/meta/points/events').get()).size, 0);
+});
+
+test('paid external checkout for non-entitlement service SKU grants ownership without points side effects', async () => {
+  await db.doc('users/alice/billing/externalCheckout/items/service_non_entitlement').set({
+    uid: 'alice',
+    sessionId: 'service_non_entitlement',
+    provider: 'square',
+    sku: 'service_profile_spotlight_week',
+    amountUsd: 0.8,
+    status: 'session_created',
+    providerOrderId: 'service_order_2',
+  });
+
+  const result = await applyExternalCheckoutStatus({
+    uid: 'alice',
+    sessionId: 'service_non_entitlement',
+    status: 'paid',
+    providerReference: 'service_paid_event_2',
+    amountCents: 80,
+    currency: 'USD',
+    orderId: 'service_order_2',
+    paymentId: 'service_payment_2',
+    callbackPayload: null,
+  });
+
+  assert.equal(result.applied, true);
+  const purchase = (await db.doc('users/alice/store/purchases/items/service_profile_spotlight_week').get()).data();
+  assert.equal(purchase.sku, 'service_profile_spotlight_week');
+  assert.equal(purchase.paymentMethod, 'card_external');
+  assert.equal(purchase.providerSessionId, 'service_non_entitlement');
+
+  const entitlement = (await db.doc('users/alice/billing/entitlements').get()).data();
+  assert.equal(entitlement.singleKeywordMatchModeUnlocked, undefined);
+  assert.equal(entitlement.reciprocalKeywordMatchModeUnlocked, undefined);
+  assert.equal(entitlement.keywordChainMatchModeUnlocked, undefined);
+
+  assert.equal((await db.collection('users/alice/meta/points/events').get()).size, 0);
+});
+
 test('points purchases atomically debit once and reject overspending/inert samples', async () => {
   await db.doc('users/alice/meta/points').set({currentPoints: 100, totalPoints: 100});
   const call = () => purchasePointsEntitlement('alice', 'service_single_keyword_match_unlock', 'purchase_request_12345');
@@ -463,6 +729,176 @@ test('code linking keeps the actual owner, immutable attribution and verified le
   assert.equal((await linkReferralCode.run({auth: {uid: 'alice'}, data: {code: 'PROX-ABC'}})).replayed, true);
   await db.doc('referralCodes/PROX-OTHER').set({referrerUid: 'other', active: true});
   await assert.rejects(linkReferralCode.run({auth: {uid: 'alice'}, data: {code: 'PROX-OTHER'}}), /already assigned/);
+});
+
+test('referral download android redirect keeps tracking params and tree fields', async () => {
+  await db.doc('referralCodes/PROX-ABC').set({
+    referrerUid: 'referrer',
+    rootReferrerUid: 'root_referrer',
+    active: true,
+  });
+
+  await withReferralEnv({
+    PROX_PUBLIC_APK_URL: 'https://github.com/marolam/prox/releases/latest/download/app-release.apk',
+  }, async () => {
+    const req = makeReferralReq({
+      method: 'GET',
+      query: {
+        code: 'prox-abc',
+        party: '1',
+      },
+      headers: {
+        'user-agent': 'Mozilla/5.0 (Linux; Android 14; Pixel 7)',
+        'x-forwarded-for': '203.0.113.9, 70.10.10.10',
+      },
+    });
+    const res = makeReferralRes();
+
+    await referralApkDownload(req, res);
+
+    assert.equal(res.redirectStatus, 302);
+    const redirect = new URL(res.redirectUrl);
+    assert.equal(redirect.hostname, 'github.com');
+    assert.equal(redirect.searchParams.get('ref'), 'referrer');
+    assert.equal(redirect.searchParams.get('code'), 'PROX-ABC');
+    assert.equal(redirect.searchParams.get('party'), '1');
+    assert.equal(redirect.searchParams.get('inperson'), '1');
+
+    const clicks = await db.collection('referralDownloadClicks').get();
+    assert.equal(clicks.size, 1);
+    const click = clicks.docs[0].data();
+    assert.equal(click.referrerUid, 'referrer');
+    assert.equal(click.rootReferrerUid, 'root_referrer');
+    assert.equal(click.source, 'apk_redirect');
+  });
+});
+
+test('referral download iOS user-agent redirects to configured iOS URL', async () => {
+  await db.doc('referralCodes/PROX-IOS').set({
+    referrerUid: 'ios_referrer',
+    rootReferrerUid: 'ios_root',
+    active: true,
+  });
+
+  await withReferralEnv({
+    PROX_PUBLIC_APK_URL: 'https://github.com/marolam/prox/releases/latest/download/app-release.apk',
+    PROX_IOS_UPDATE_URL: 'https://testflight.apple.com/join/AbCdEf12',
+  }, async () => {
+    const req = makeReferralReq({
+      method: 'GET',
+      query: {
+        code: 'prox-ios',
+      },
+      headers: {
+        'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)',
+      },
+    });
+    const res = makeReferralRes();
+
+    await referralApkDownload(req, res);
+
+    assert.equal(res.redirectStatus, 302);
+    const redirect = new URL(res.redirectUrl);
+    assert.equal(redirect.hostname, 'testflight.apple.com');
+    assert.equal(redirect.searchParams.get('ref'), 'ios_referrer');
+    assert.equal(redirect.searchParams.get('code'), 'PROX-IOS');
+  });
+});
+
+test('referral download iOS path fails safely when iOS URL is missing', async () => {
+  await db.doc('referralCodes/PROX-NO-IOS').set({
+    referrerUid: 'owner_no_ios',
+    active: true,
+  });
+
+  await withReferralEnv({
+    PROX_PUBLIC_APK_URL: 'https://github.com/marolam/prox/releases/latest/download/app-release.apk',
+  }, async () => {
+    const req = makeReferralReq({
+      method: 'GET',
+      query: {
+        code: 'prox-no-ios',
+      },
+      headers: {
+        'user-agent': 'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X)',
+      },
+    });
+    const res = makeReferralRes();
+
+    await referralApkDownload(req, res);
+
+    assert.equal(res.statusCode, 503);
+    assert.deepEqual(res.jsonBody, {ok: false, error: 'ios_url_not_configured'});
+    const clicks = await db.collection('referralDownloadClicks').get();
+    assert.equal(clicks.size, 0);
+  });
+});
+
+test('referral download target precedence uses explicit env then hint then fallback', async () => {
+  await db.doc('referralCodes/PROX-PRE').set({
+    referrerUid: 'pre_owner',
+    active: true,
+  });
+
+  await withReferralEnv({
+    PROX_REFERRAL_ANDROID_URL: 'https://github.com/marolam/prox/releases/download/v3/app-explicit.apk',
+    PROX_PUBLIC_APK_URL: 'https://github.com/marolam/prox/releases/download/v2/app-public.apk',
+    PROX_PUBLIC_APK_FALLBACK_URL: 'https://github.com/marolam/prox/releases/download/v1/app-fallback.apk',
+  }, async () => {
+    const explicitReq = makeReferralReq({
+      method: 'GET',
+      query: {
+        code: 'prox-pre',
+        apk: 'https://github.com/marolam/prox/releases/download/v4/app-hint.apk',
+      },
+      headers: {
+        'user-agent': 'Mozilla/5.0 (Linux; Android 14)',
+      },
+    });
+    const explicitRes = makeReferralRes();
+    await referralApkDownload(explicitReq, explicitRes);
+    assert.equal(new URL(explicitRes.redirectUrl).pathname.endsWith('/v3/app-explicit.apk'), true);
+  });
+
+  await withReferralEnv({
+    PROX_REFERRAL_ANDROID_URL: 'https://evil.example.com/app.apk',
+    PROX_PUBLIC_APK_URL: 'https://evil.example.com/app2.apk',
+    PROX_PUBLIC_APK_FALLBACK_URL: 'https://github.com/marolam/prox/releases/download/v1/app-fallback.apk',
+  }, async () => {
+    const hintReq = makeReferralReq({
+      method: 'GET',
+      query: {
+        code: 'prox-pre',
+        apk: 'https://github.com/marolam/prox/releases/download/v4/app-hint.apk',
+      },
+      headers: {
+        'user-agent': 'Mozilla/5.0 (Linux; Android 14)',
+      },
+    });
+    const hintRes = makeReferralRes();
+    await referralApkDownload(hintReq, hintRes);
+    assert.equal(new URL(hintRes.redirectUrl).pathname.endsWith('/v4/app-hint.apk'), true);
+  });
+
+  await withReferralEnv({
+    PROX_REFERRAL_ANDROID_URL: 'https://evil.example.com/app.apk',
+    PROX_PUBLIC_APK_URL: 'https://evil.example.com/app2.apk',
+    PROX_PUBLIC_APK_FALLBACK_URL: 'https://github.com/marolam/prox/releases/download/v1/app-fallback.apk',
+  }, async () => {
+    const fallbackReq = makeReferralReq({
+      method: 'GET',
+      query: {
+        code: 'prox-pre',
+        apk: 'https://evil.example.com/not-allowed.apk',
+      },
+      headers: {
+        'user-agent': 'Mozilla/5.0 (Linux; Android 14)',
+      },
+    });
+    const fallbackRes = makeReferralRes();
+    await referralApkDownload(fallbackReq, fallbackRes);
+    assert.equal(new URL(fallbackRes.redirectUrl).pathname.endsWith('/v1/app-fallback.apk'), true);
+  });
 });
 
 test('mutual party projection is retry-safe and revokes after either membership is removed', async () => {
@@ -635,4 +1071,43 @@ test('Party: a new meetup in the same chat has a fresh rating receipt and consen
   assert.equal((await partyPairRef().get()).data().status, 'pending');
   assert.equal((await db.collection('meetups/party-test/partyFeedback').get()).size, 3);
   await assertPartyPair(false);
+});
+
+
+test('chat transition guard distinguishes Listen expiry, Active deadlines and explicit renewal', async () => {
+  const {chatGateTransitionAllowed, onChatGateTransitionGuard} = require('../lib/lib/match_dashboard_enforcement');
+  const now = Date.now();
+  const before = {participants: ['alice', 'bob'], chatGate: {status: 'requested', requestedBy: 'alice', modeKind: 'listen', responseWindowSeconds: 86400, requestedAt: admin.firestore.Timestamp.fromMillis(now - 120000)}};
+  const expired = {...before, chatGate: {...before.chatGate, status: 'expired', expiredBySystem: true}};
+  assert.equal(chatGateTransitionAllowed(before, expired, now), false);
+  assert.equal(chatGateTransitionAllowed(before, expired, now + 86400000), true);
+  const active = {...before, chatGate: {...before.chatGate, modeKind: 'normal', responseWindowSeconds: 60}};
+  assert.equal(chatGateTransitionAllowed(active, {...active, chatGate: {...active.chatGate, status: 'expired'}}, now), true);
+  const renewed = {...before, chatGate: {status: 'requested', requestedBy: 'bob', requestedAt: admin.firestore.Timestamp.fromMillis(now), modeKind: 'listen', responseWindowSeconds: 86400}};
+  assert.equal(chatGateTransitionAllowed(expired, renewed, now), true);
+  assert.equal(chatGateTransitionAllowed({...expired, closedAt: admin.firestore.Timestamp.now()}, renewed, now), false);
+  assert.equal(chatGateTransitionAllowed({...expired, chatGate: {...expired.chatGate, declinedBy: 'bob'}}, renewed, now), false);
+  const ref = db.doc('chats/listen');
+  await ref.set(before);
+  const first = await ref.get();
+  await ref.set(expired);
+  const second = await ref.get();
+  await onChatGateTransitionGuard.run({before: first, after: second}, {params: {chatId: 'listen'}});
+  assert.equal((await ref.get()).data().chatGate.status, 'requested');
+  // A late guard must not roll back a newer acceptance.
+  await ref.update({'chatGate.status': 'accepted'});
+  await onChatGateTransitionGuard.run({before: first, after: second}, {params: {chatId: 'listen'}});
+  assert.equal((await ref.get()).data().chatGate.status, 'accepted');
+});
+
+test('meetup growth evidence uses Firestore completion time rather than a forged participant date', async () => {
+  await db.doc('users/alice').set({});
+  await db.doc('users/bob').set({});
+  const meetup = db.doc('meetups/clock-forgery');
+  await meetup.set({aUid: 'alice', bUid: 'bob', status: 'completed', aArrived: true, bArrived: true, completedAt: admin.firestore.Timestamp.fromMillis(1)});
+  const source = await meetup.get();
+  await recordCompletedMeetup('clock-forgery', 'alice');
+  const receipt = (await db.collection('users/alice/completedMeetups').get()).docs[0].data();
+  assert.equal(receipt.completedAt.toMillis(), 1);
+  assert.equal(receipt.verifiedCompletedAt.toMillis(), source.updateTime.toMillis());
 });

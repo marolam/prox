@@ -12,7 +12,10 @@ export async function updateBusinessMode(uid: string, active: boolean, preview =
     const data = entitlement.data() || {};
     const prepaid = data.businessSubscriptionActive === true && data.subscriptionRenewsAt instanceof admin.firestore.Timestamp && data.subscriptionRenewsAt.toMillis() > Date.now();
     if (active && data.businessPurchased !== true && !prepaid && !preview) throw new HttpsError('permission-denied', 'Current business access is required.');
-    tx.set(reference, {businessModeActive: active, updatedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
+    tx.set(reference, {businessModeActive: active,
+      ...(active && data.businessModeActive !== true && !(data.businessModeEnabledAt instanceof admin.firestore.Timestamp)
+        ? {businessModeEnabledAt: admin.firestore.FieldValue.serverTimestamp()} : {}),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
     return {active};
   });
 }

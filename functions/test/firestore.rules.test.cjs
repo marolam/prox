@@ -3,8 +3,8 @@ const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const path = require('node:path');
 const {initializeTestEnvironment, assertFails, assertSucceeds} = require('@firebase/rules-unit-testing');
-const {doc, setDoc, getDoc, updateDoc, deleteDoc, getDocs, collection, collectionGroup, query, where, and, or, orderBy, limit} = require('firebase/firestore');
-const {ref, uploadBytes, getMetadata} = require('firebase/storage');
+const {doc, setDoc, getDoc, updateDoc, deleteDoc, getDocs, collection, collectionGroup, query, where, and, or, orderBy, limit, serverTimestamp, runTransaction} = require('firebase/firestore');
+const {ref, uploadBytes, getMetadata, deleteObject} = require('firebase/storage');
 let env;
 before(async () => {
   env = await initializeTestEnvironment({projectId: 'demo-prox-audit', firestore: {
@@ -109,6 +109,26 @@ test('meetup legacy updates work but participant and status-event impersonation 
   await assertFails(updateDoc(doc(db('alice'), 'meetups/pair'), {bUid: 'mallory'}));
   await assertFails(updateDoc(doc(db('alice'), 'meetups/pair'), {lastStatusEvent: {id: 'x', actorUid: 'bob', type: 'arrived'}}));
   await assertFails(getDoc(doc(db('mallory'), 'meetups/pair')));
+});
+
+test('active meetup cancellation requires actor-scoped mutual cancel handshake evidence', async () => {
+  await seed({'meetups/handshake': {aUid: 'alice', bUid: 'bob', status: 'live', aArrived: false, bArrived: false}});
+  const ref = doc(db('alice'), 'meetups/handshake');
+  await assertFails(updateDoc(ref, {status: 'cancelled'}));
+
+  await seed({'meetups/handshake': {aUid: 'alice', bUid: 'bob', status: 'live', aArrived: false, bArrived: false}});
+  await assertFails(updateDoc(ref, {status: 'cancelled', cancelHandshakeByUid: {
+    alice: {requestId: 'alice-spoof'},
+    bob: {requestId: 'bob-spoof'},
+  }}));
+
+  await seed({'meetups/handshake': {aUid: 'alice', bUid: 'bob', status: 'live', aArrived: false, bArrived: false}});
+  await assertSucceeds(updateDoc(ref, {cancelHandshakeByUid: {alice: {requestId: 'alice-intent'}}}));
+  await assertSucceeds(updateDoc(doc(db('bob'), 'meetups/handshake'), {cancelHandshakeByUid: {
+    alice: {requestId: 'alice-intent'},
+    bob: {requestId: 'bob-intent'},
+  }}));
+  await assertSucceeds(updateDoc(ref, {status: 'cancelled'}));
 });
 
 test('threads and debug push are private, and deletion markers revoke stale-token access', async () => {
@@ -217,4 +237,134 @@ test('Party consent is server-only and pending users cannot read Party profiles 
   await assertSucceeds(getDoc(doc(db('bob'),'users/alice/partyProfile/sharing')));
   await seed({'users/bob/blocks/alice':{uid:'alice'}});
   await assertFails(getDoc(doc(db('bob'),'users/alice/partyProfile/sharing')));
+});
+
+
+test('background coordinates are private, bound to the opted-in device and reject stale or fabricated metadata', async () => {
+  await seed({'users/alice/settings/backgroundMatching': {enabled: true, deviceId: 'phone'}});
+  const sample = {enabled: true, deviceId: 'phone', latitude: 40, longitude: -74,
+    locationAt: new Date(), receivedAt: serverTimestamp(), accuracyMeters: 150, speedMps: 0,
+    utcOffsetMinutes: -240, expiresAt: new Date(Date.now() + 30 * 60000)};
+  const ref = doc(db('alice'), 'users/alice/backgroundPresence/current');
+  await assertSucceeds(setDoc(ref, sample));
+  await assertSucceeds(getDoc(ref));
+  await assertFails(getDoc(doc(db('bob'), 'users/alice/backgroundPresence/current')));
+  await assertFails(setDoc(ref, {...sample, deviceId: 'other-phone'}));
+  await assertFails(setDoc(ref, {...sample, receivedAt: new Date(0)}));
+  await assertFails(setDoc(ref, {...sample, locationAt: new Date(Date.now() - 31 * 60000)}));
+  await assertFails(setDoc(ref, {...sample, latitude: 200}));
+  await assertFails(setDoc(ref, {...sample, accuracyMeters: 500}));
+  await assertFails(setDoc(ref, {...sample, locationHistory: []}));
+  await assertFails(getDocs(query(collectionGroup(db('bob'), 'backgroundPresence'), where('enabled', '==', true))));
+  await assertSucceeds(updateDoc(doc(db('alice'), 'users/alice/settings/backgroundMatching'), {enabled: false}));
+  await assertFails(setDoc(ref, sample));
+  await assertSucceeds(deleteDoc(ref));
+});
+
+test('alert budgets, outbox and opportunities cannot be reset or forged by a client', async () => {
+  for (const collection of ['backgroundAlertState', 'backgroundAlertPairs', 'backgroundScanState', 'backgroundAlertOutbox', 'backgroundOpportunities']) {
+    const ref = doc(db('alice'), `users/alice/${collection}/current`);
+    await seed({[`users/alice/${collection}/current`]: {sentAt: [1], otherUid: 'bob'}});
+    await assertFails(getDoc(ref));
+    await assertFails(setDoc(ref, {sentAt: [], otherUid: 'carol'}));
+    await assertFails(deleteDoc(ref));
+  }
+});
+
+
+test('chat creation preflight is allowed and the second participant can open without rewriting the pair', async () => {
+  const aliceDb = db('alice');
+  const aliceRef = doc(aliceDb, 'chats/alice_bob');
+  await assertSucceeds(runTransaction(aliceDb, async tx => {
+    const row = await tx.get(aliceRef);
+    assert.equal(row.exists(), false);
+    tx.set(aliceRef, {participants: ['alice', 'bob'], chatGate: {status: 'requested', requestedBy: 'alice'}});
+  }));
+  const bobDb = db('bob');
+  const bobRef = doc(bobDb, 'chats/alice_bob');
+  await assertFails(setDoc(bobRef, {participants: ['bob', 'alice'], chatGate: {status: 'requested', requestedBy: 'bob'}}, {merge: true}));
+  await assertSucceeds(runTransaction(bobDb, async tx => {
+    const row = await tx.get(bobRef);
+    assert.deepEqual(row.data().participants, ['alice', 'bob']);
+    assert.equal(row.data().chatGate.requestedBy, 'alice');
+  }));
+  await assertFails(getDoc(doc(db('mallory'), 'chats/alice_bob')));
+});
+
+
+test('Listen and legacy requests cannot be expired by the old sixty-second client timer', async () => {
+  for (const [id, gate] of [
+    ['listen', {modeKind: 'listen', responseWindowSeconds: 86400}],
+    ['legacy', {}],
+    ['passive', {modeKind: 'normal', responseWindowSeconds: 86400}],
+  ]) {
+    await seed({[`chats/${id}`]: {participants: ['alice', 'bob'], chatGate: {status: 'requested', requestedBy: 'alice', requestedAt: new Date(Date.now() - 120000), ...gate}}});
+    await assertFails(updateDoc(doc(db('bob'), `chats/${id}`), {'chatGate.status': 'expired', 'chatGate.expiredBySystem': true}));
+    await assertSucceeds(updateDoc(doc(db('bob'), `chats/${id}`), {'chatGate.status': 'accepted', 'chatGate.acceptedBy': 'bob'}));
+  }
+  await seed({'chats/active': {participants: ['alice', 'bob'], chatGate: {status: 'requested', requestedBy: 'alice', requestedAt: new Date(Date.now() - 120000), modeKind: 'normal', responseWindowSeconds: 60}}});
+  await assertSucceeds(updateDoc(doc(db('bob'), 'chats/active'), {'chatGate.status': 'expired', 'chatGate.expiredBySystem': true}));
+});
+
+test('timed-out requests can explicitly renew without reopening declined or closed chats', async () => {
+  const old = {participants: ['alice', 'bob'], chatGate: {status: 'expired', expiredBySystem: true, requestedBy: 'alice', requestedAt: new Date(Date.now() - 120000)}};
+  await seed({'chats/renew': old});
+  const ref = doc(db('bob'), 'chats/renew');
+  const renewal = {chatGate: {status: 'requested', requestedBy: 'bob', requestedAt: serverTimestamp(), modeKind: 'listen', responseWindowSeconds: 86400}};
+  await assertSucceeds(updateDoc(ref, renewal));
+  await assertFails(updateDoc(ref, {'chatGate.requestedBy': 'alice'}));
+  await assertFails(updateDoc(ref, {'chatGate.responseWindowSeconds': 60}));
+  for (const data of [
+    {...old, closedAt: new Date()},
+    {...old, chatGate: {...old.chatGate, declinedBy: 'alice'}},
+    {...old, chatGate: {...old.chatGate, acceptedAt: new Date()}},
+    {...old, chatGate: {...old.chatGate, status: 'declined'}},
+  ]) {
+    await seed({'chats/renew': data});
+    await assertFails(updateDoc(ref, renewal));
+  }
+  await seed({'chats/renew': old, 'users/alice/blocks/bob': {uid: 'bob'}});
+  await assertFails(updateDoc(ref, renewal));
+});
+
+test('chat photos are participant-private, immutable and only their owner can discard them', async () => {
+  await seed({'chats/media-private': {participants: ['alice', 'bob'], isGroup: false}});
+  const path = 'chatMedia/media-private/alice-private-photo.png';
+  const alice = env.authenticatedContext('alice').storage();
+  const bob = env.authenticatedContext('bob').storage();
+  const outsider = env.authenticatedContext('mallory').storage();
+  const metadata = {contentType: 'image/png', customMetadata: {ownerUid: 'alice', chatId: 'media-private'}};
+  await assertSucceeds(uploadBytes(ref(alice, path), new Uint8Array([137, 80, 78, 71]), metadata));
+  await assertSucceeds(getMetadata(ref(bob, path)));
+  await assertFails(getMetadata(ref(outsider, path)));
+  await assertFails(deleteObject(ref(bob, path)));
+  await assertFails(uploadBytes(ref(alice, path), new Uint8Array([1]), metadata));
+  await assertFails(uploadBytes(ref(bob, 'chatMedia/media-private/alice-forged.png'), new Uint8Array([1]), metadata));
+  await assertFails(uploadBytes(ref(alice, 'chatMedia/media-private/alice-missing-owner.png'), new Uint8Array([1]), {contentType: 'image/png'}));
+  await seed({'chats/media-private': {participants: ['alice', 'bob'], closedAt: new Date()}});
+  await assertFails(uploadBytes(ref(alice, 'chatMedia/media-private/alice-after-close.png'), new Uint8Array([1]), metadata));
+  await assertSucceeds(deleteObject(ref(alice, path)));
+});
+
+test('chat media access is revoked after removal from participants or account deletion', async () => {
+  await seed({'chats/media-revocation': {participants: ['alice', 'bob']}});
+  const alice = env.authenticatedContext('alice').storage();
+  const bob = env.authenticatedContext('bob').storage();
+  const path = 'chatMedia/media-revocation/alice-revocation.png';
+  await assertSucceeds(uploadBytes(ref(alice, path), new Uint8Array([1]), {contentType: 'image/png', customMetadata: {ownerUid: 'alice', chatId: 'media-revocation'}}));
+  await seed({'chats/media-revocation': {participants: ['alice']}});
+  await assertFails(getMetadata(ref(bob, path)));
+  await seed({'accountDeletions/alice': {status: 'processing'}});
+  await assertFails(getMetadata(ref(alice, path)));
+  await assertFails(deleteObject(ref(alice, path)));
+});
+
+test('business automation control, jobs, receipts and consents cannot be forged or read by clients', async () => {
+  const paths = ['businessAutomation/config', 'businessAutomationJobs/job', 'businessAutomationReceipts/receipt', 'businessAutomationConsents/alice'];
+  await seed(Object.fromEntries(paths.map(path => [path, {uid: 'alice', enabled: true}])));
+  for (const path of paths) {
+    await assertFails(getDoc(doc(db('alice'), path)));
+    await assertFails(setDoc(doc(db('alice'), path), {uid: 'alice', enabled: true}));
+    await assertFails(deleteDoc(doc(db('alice'), path)));
+  }
 });

@@ -59,11 +59,6 @@ class _MeetupRequestBarState extends State<MeetupRequestBar> {
     return null;
   }
 
-  DateTime? _cooldownUntil(MeetupRequestState s) {
-    if (s.declinedAt == null) return null;
-    return s.declinedAt!.toDate().add(MeetupService.declineCooldown);
-  }
-
   Widget _lockedBanner(BuildContext context, {required String text}) {
     final cs = Theme.of(context).colorScheme;
     final theme = Theme.of(context);
@@ -290,8 +285,7 @@ class _MeetupRequestBarState extends State<MeetupRequestBar> {
 
         // Declined: block re-request until cooldown passes (block-on-decline)
         if (s.status == "declined") {
-          final DateTime? until = _cooldownUntil(s);
-          final Duration? left = until == null ? null : until.difference(DateTime.now());
+          final Duration? left = MeetupService.declineCooldownLeftFromState(s);
           final bool cooling = left != null && left > Duration.zero;
           final Duration leftSafe = left ?? Duration.zero;
 

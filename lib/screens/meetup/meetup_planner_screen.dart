@@ -35,6 +35,7 @@ class MeetupPlannerScreen extends StatefulWidget {
 
 class _MeetupPlannerScreenState extends State<MeetupPlannerScreen> {
   bool _busy = false;
+  bool _routing = false;
   LatLng? _dragPreview;
 
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? "";
@@ -309,6 +310,30 @@ class _MeetupPlannerScreenState extends State<MeetupPlannerScreen> {
     );
   }
 
+  void _routeToRequired(String requiredScreen) {
+    if (_routing || !mounted) return;
+    _routing = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) {
+        _routing = false;
+        return;
+      }
+      final route = switch (requiredScreen) {
+        "chat" => "/chat",
+        "live" => "/meetup_live",
+        _ => "/meetup_plan",
+      };
+      await Navigator.of(context).pushReplacementNamed(
+        route,
+        arguments: <String, String>{
+          "chatId": widget.chatId,
+          "otherUid": widget.otherUid,
+        },
+      );
+      _routing = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final myUid = _myUid;
@@ -347,6 +372,8 @@ class _MeetupPlannerScreenState extends State<MeetupPlannerScreen> {
               return const Center(child: CircularProgressIndicator());
             final bool exists = snap.data?.exists == true;
             final d = snap.data?.data() ?? <String, dynamic>{};
+            final requiredScreen = MeetupService.instance
+              .requiredSessionScreenFromData(d);
 
             final String plannerUid = (d["plannerUid"] ?? "").toString().trim();
             final bool iAmPlanner = plannerUid.isEmpty
@@ -396,6 +423,10 @@ class _MeetupPlannerScreenState extends State<MeetupPlannerScreen> {
                 padding: const EdgeInsets.all(16),
                 children: [MeetupProgressCard(data: d, uid: myUid)],
               );
+            }
+            if (requiredScreen != "planner") {
+              _routeToRequired(requiredScreen);
+              return const Center(child: CircularProgressIndicator());
             }
             if (d["status"] == "requested") {
               return ListView(

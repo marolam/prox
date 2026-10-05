@@ -1,5 +1,6 @@
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
+import 'package:prox/utils/dialog_lifecycle.dart';
 
 typedef SaveMeetupRating =
     Future<String> Function(bool thumb, String partyDecision, String comment);
@@ -98,7 +99,7 @@ class _MeetupRatingFormState extends State<MeetupRatingForm> {
 
   Future<void> _thumbDown() async {
     final note = TextEditingController(text: _commentDraft);
-    final comment = await showDialog<String>(
+    final comment = await showDialogUntilRemoved<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('How Did The Meetup Go?'),
@@ -133,7 +134,6 @@ class _MeetupRatingFormState extends State<MeetupRatingForm> {
         ],
       ),
     );
-    await Future<void>.delayed(const Duration(milliseconds: 300));
     note.dispose();
     if (comment != null && mounted) {
       _commentDraft = comment;

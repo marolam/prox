@@ -250,13 +250,11 @@ class ReferralAttribution {
       raw["t"] ?? raw["token"] ?? raw["tok"] ?? raw["referral_token"],
     );
     final String? rawCode = _normalizeString(
-      raw["code"] ?? raw["ref"] ?? raw["referral"] ?? raw["invite"],
+      raw["code"] ?? raw["referral"] ?? raw["invite"],
     );
     final String? ref = _normalizeString(
       raw["ref"] ?? raw["referrer"] ?? raw["r"],
     );
-    final String? codeFromRef = _normalizeString(raw["code"]);
-    final String? refFromCode = _normalizeString(raw["ref"]);
 
     final bool party =
         _parseBool(raw["party"]) ||
@@ -264,15 +262,11 @@ class ReferralAttribution {
         _parseBool(raw["in_person"]) ||
         _parseBool(raw["ip"]);
 
-    final String? chosenRef = ref ?? refFromCode;
-    final String? chosenCode = rawCode ?? codeFromRef;
+    final String? chosenRef = ref;
+    final String? chosenCode = rawCode;
 
     if ((chosenRef == null || chosenRef.isEmpty) &&
         (rawToken == null || rawToken.isEmpty)) {
-      return null;
-    }
-
-    if (rawToken != null && rawToken.isNotEmpty && chosenRef == null) {
       return null;
     }
 

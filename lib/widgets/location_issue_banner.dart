@@ -31,6 +31,7 @@ class NearbyResultsGate extends StatelessWidget {
     required this.child,
     required this.onRetry,
     required this.onSettings,
+    this.onEnableMatching,
     this.retrying = false,
   });
   final GeoQueryStatus status;
@@ -42,6 +43,7 @@ class NearbyResultsGate extends StatelessWidget {
   final Widget child;
   final VoidCallback onRetry;
   final VoidCallback onSettings;
+  final VoidCallback? onEnableMatching;
 
   @override
   Widget build(BuildContext context) {
@@ -50,6 +52,7 @@ class NearbyResultsGate extends StatelessWidget {
     var loading = false;
     var retry = false;
     var settings = false;
+    var enableMatching = false;
     if (!locationEnabled || status == GeoQueryStatus.locationOff) {
       title = 'Location is off';
       detail =
@@ -59,6 +62,7 @@ class NearbyResultsGate extends StatelessWidget {
       title = 'Matching is off';
       detail =
           'Turn matching on with the Prox Circle when you want to look nearby.';
+      enableMatching = onEnableMatching != null;
     } else if (retrying) {
       title = 'Checking nearby again…';
       detail = 'Checking your location and connection.';
@@ -72,9 +76,16 @@ class NearbyResultsGate extends StatelessWidget {
       title = 'Nearby is unavailable';
       detail = 'Check your connection and try again.';
       retry = true;
-    } else if (queryLoading ||
-        status == GeoQueryStatus.idle ||
-        status == GeoQueryStatus.loading) {
+      settings = true;
+    } else if (status == GeoQueryStatus.idle) {
+      title = 'Nearby is getting ready…';
+      detail = 'Starting location checks before loading matches.';
+      loading = true;
+    } else if (status == GeoQueryStatus.loading) {
+      title = 'Finding nearby matches…';
+      detail = 'Checking your location and connection.';
+      loading = true;
+    } else if (queryLoading) {
       title = 'Finding nearby matches…';
       detail = 'Checking your location and connection.';
       loading = true;
@@ -110,13 +121,19 @@ class NearbyResultsGate extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(detail, textAlign: TextAlign.center),
-              if (retry || settings) ...[
+              if (retry || settings || enableMatching) ...[
                 const SizedBox(height: 16),
                 Wrap(
                   alignment: WrapAlignment.center,
                   spacing: 12,
                   runSpacing: 8,
                   children: [
+                    if (enableMatching)
+                      FilledButton.icon(
+                        onPressed: onEnableMatching,
+                        icon: const Icon(Icons.tune),
+                        label: const Text('Turn matching on'),
+                      ),
                     if (retry)
                       FilledButton.icon(
                         onPressed: onRetry,

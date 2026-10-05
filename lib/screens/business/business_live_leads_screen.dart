@@ -1,4 +1,5 @@
 import "package:flutter/material.dart";
+import "package:flutter/services.dart";
 
 import "package:prox/models/business_lead_models.dart";
 import "package:prox/services/business_mode/business_lead_automation_service.dart";
@@ -24,17 +25,15 @@ class _BusinessLiveLeadsScreenState extends State<BusinessLiveLeadsScreen> {
         leadId: leadId,
         templateId: templateId,
       );
-      await BusinessLeadScoringService.instance
-          .markLeadResponded(leadId: leadId);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Template applied.")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Reply template prepared.")));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Could not apply template: $e")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Could not apply template: $e")));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -50,7 +49,8 @@ class _BusinessLiveLeadsScreenState extends State<BusinessLiveLeadsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text("Follow-up sequence scheduled (15m, 24h, 72h).")),
+          content: Text("Follow-up sequence saved (15m, 24h, 72h)."),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -88,14 +88,35 @@ class _BusinessLiveLeadsScreenState extends State<BusinessLiveLeadsScreen> {
     try {
       await BusinessLeadScoringService.instance.markLeadWon(leadId: leadId);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Lead marked won.")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Lead marked won.")));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Could not mark lead won: $e")),
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Could not mark lead won: $e")));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _markReplied(String leadId) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await BusinessLeadScoringService.instance.markLeadResponded(
+        leadId: leadId,
       );
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Reply recorded.")));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Could not record reply: $error")));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -221,29 +242,29 @@ class _BusinessLiveLeadsScreenState extends State<BusinessLiveLeadsScreen> {
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: SegmentedButton<BusinessLeadInboxFilter>(
-                        segments: const <ButtonSegment<
-                            BusinessLeadInboxFilter>>[
-                          ButtonSegment(
-                            value: BusinessLeadInboxFilter.open,
-                            label: Text("Open"),
-                          ),
-                          ButtonSegment(
-                            value: BusinessLeadInboxFilter.hot,
-                            label: Text("Hot"),
-                          ),
-                          ButtonSegment(
-                            value: BusinessLeadInboxFilter.overdue,
-                            label: Text("Overdue"),
-                          ),
-                          ButtonSegment(
-                            value: BusinessLeadInboxFilter.won,
-                            label: Text("Won"),
-                          ),
-                          ButtonSegment(
-                            value: BusinessLeadInboxFilter.all,
-                            label: Text("All"),
-                          ),
-                        ],
+                        segments:
+                            const <ButtonSegment<BusinessLeadInboxFilter>>[
+                              ButtonSegment(
+                                value: BusinessLeadInboxFilter.open,
+                                label: Text("Open"),
+                              ),
+                              ButtonSegment(
+                                value: BusinessLeadInboxFilter.hot,
+                                label: Text("Hot"),
+                              ),
+                              ButtonSegment(
+                                value: BusinessLeadInboxFilter.overdue,
+                                label: Text("Overdue"),
+                              ),
+                              ButtonSegment(
+                                value: BusinessLeadInboxFilter.won,
+                                label: Text("Won"),
+                              ),
+                              ButtonSegment(
+                                value: BusinessLeadInboxFilter.all,
+                                label: Text("All"),
+                              ),
+                            ],
                         selected: <BusinessLeadInboxFilter>{_filter},
                         onSelectionChanged: (selection) {
                           setState(() => _filter = selection.first);
@@ -301,7 +322,9 @@ class _BusinessLiveLeadsScreenState extends State<BusinessLiveLeadsScreen> {
                         ),
                         child: ListTile(
                           contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
+                            horizontal: 14,
+                            vertical: 8,
+                          ),
                           title: Row(
                             children: [
                               Container(
@@ -361,6 +384,38 @@ class _BusinessLiveLeadsScreenState extends State<BusinessLiveLeadsScreen> {
                                     style: theme.textTheme.bodySmall,
                                   ),
                                 ],
+                                if (r.preparedReply?.isNotEmpty == true) ...[
+                                  const SizedBox(height: 8),
+                                  const Text("Prepared reply"),
+                                  SelectableText(r.preparedReply!),
+                                  TextButton.icon(
+                                    onPressed: () async {
+                                      await Clipboard.setData(
+                                        ClipboardData(text: r.preparedReply!),
+                                      );
+                                      if (!context.mounted) return;
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        const SnackBar(
+                                          content: Text("Reply copied"),
+                                        ),
+                                      );
+                                    },
+                                    icon: const Icon(Icons.copy),
+                                    label: const Text("Copy reply"),
+                                  ),
+                                ],
+                                if (r.followupReminderAt != null &&
+                                    r.followupReminderMessage?.isNotEmpty ==
+                                        true) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    "Follow-up reminder",
+                                    style: theme.textTheme.titleSmall,
+                                  ),
+                                  SelectableText(r.followupReminderMessage!),
+                                ],
                                 const SizedBox(height: 10),
                                 Wrap(
                                   spacing: 8,
@@ -387,19 +442,21 @@ class _BusinessLiveLeadsScreenState extends State<BusinessLiveLeadsScreen> {
                                         ),
                                         decoration: BoxDecoration(
                                           color: cs.primaryContainer,
-                                          borderRadius:
-                                              BorderRadius.circular(999),
+                                          borderRadius: BorderRadius.circular(
+                                            999,
+                                          ),
                                           border: Border.all(
-                                            color: cs.primary
-                                                .withValues(alpha: 0.4),
+                                            color: cs.primary.withValues(
+                                              alpha: 0.4,
+                                            ),
                                           ),
                                         ),
                                         child: Text(
                                           "Quick template",
                                           style: theme.textTheme.labelMedium
                                               ?.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                          ),
+                                                fontWeight: FontWeight.w700,
+                                              ),
                                         ),
                                       ),
                                     ),
@@ -414,6 +471,12 @@ class _BusinessLiveLeadsScreenState extends State<BusinessLiveLeadsScreen> {
                                           ? null
                                           : () => _cancelFollowups(r.leadId),
                                       child: const Text("Cancel follow-ups"),
+                                    ),
+                                    FilledButton.tonal(
+                                      onPressed: _busy || r.respondedAt != null
+                                          ? null
+                                          : () => _markReplied(r.leadId),
+                                      child: const Text("Mark replied"),
                                     ),
                                     FilledButton.tonal(
                                       onPressed: _busy

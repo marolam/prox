@@ -42,9 +42,15 @@ class ProxPointsStoreScreen extends StatefulWidget {
 
 class _ProxPointsStoreScreenState extends State<ProxPointsStoreScreen> {
   static const _implementedSkus = <String>{
+    "service_priority_support_pass",
+    "service_profile_spotlight_week",
+    "service_message_boost_pack",
     "service_single_keyword_match_unlock",
     "service_reciprocal_match_unlock",
     "service_keyword_chain_unlock",
+    "biz_boost_visibility",
+    "biz_provider_tools",
+    "biz_auto_reply_templates",
     "biz_high_radius_unlock",
   };
 
@@ -914,7 +920,7 @@ class _ProxPointsStoreScreenState extends State<ProxPointsStoreScreen> {
                     final businessUnlocked =
                         gate == BusinessGateState.eligible ||
                         gate == BusinessGateState.active;
-                    final businessPurchaseAllowed = false;
+                    final businessPurchaseAllowed = businessUnlocked;
 
                     return Scaffold(
                       appBar: AppBar(title: const Text("Prox Points Store")),
@@ -1276,14 +1282,14 @@ class _ProxPointsStoreScreenState extends State<ProxPointsStoreScreen> {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    "Business tools & examples",
+                                    "Business tools",
                                     style: theme.textTheme.titleSmall?.copyWith(
                                       fontWeight: FontWeight.w900,
                                     ),
                                   ),
                                 ),
                                 Text(
-                                  "Explore",
+                                  businessPurchaseAllowed ? "Live" : "Locked",
                                   style: theme.textTheme.labelSmall?.copyWith(
                                     color: Colors.orange,
                                     fontWeight: FontWeight.w900,
@@ -1300,8 +1306,10 @@ class _ProxPointsStoreScreenState extends State<ProxPointsStoreScreen> {
                             ),
                           ),
                           const SizedBox(height: 10),
-                          const Text(
-                            "Explore local examples of business requests, service areas, promotions, and replies. Live Pro access remains restricted to the approved preview account.",
+                          Text(
+                            businessPurchaseAllowed
+                                ? "Business tools are live for your unlocked Business access. Purchases persist to your account and can be used immediately."
+                                : "Unlock Business access to buy Business tools. Until then, example previews remain available.",
                           ),
                           const SizedBox(height: 10),
                           tile(

@@ -13,6 +13,20 @@ service firebase.storage {
         && request.resource.contentType in ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
     }
 
+    function isSupportAdmin() {
+      return signedIn() && request.auth.token.get('admin', false) == true;
+    }
+
+    // Uploaded before ticket submission; no download URL or public access.
+    match /supportAttachments/{uid}/{ticketId}/{fileName} {
+      allow read: if signedIn() && (request.auth.uid == uid || isSupportAdmin());
+      allow create, update: if signedIn() && request.auth.uid == uid &&
+        ticketId.matches('[A-Za-z0-9_-]{8,120}') && fileName.matches('[A-Za-z0-9_.-]+') &&
+        request.resource != null && request.resource.size <= 5 * 1024 * 1024 &&
+        request.resource.contentType in ['image/jpeg', 'image/png', 'image/webp'];
+      allow delete: if signedIn() && (request.auth.uid == uid || isSupportAdmin());
+    }
+
     function isChatParticipant(chatId) {
       return signedIn()
         && request.auth.uid in firestore.get(
@@ -23,9 +37,16 @@ service firebase.storage {
     match /chatMedia/{chatId}/{fileName} {
       allow read: if isChatParticipant(chatId);
       allow create: if isChatParticipant(chatId)
+        && resource == null
+        && firestore.get(/databases/(default)/documents/chats/$(chatId)).data.get('closedAt', null) == null
         && fileName.matches(request.auth.uid + '-.*')
+        && request.resource.metadata.get('ownerUid', '') == request.auth.uid
+        && request.resource.metadata.get('chatId', '') == chatId
         && validImageUpload();
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if isChatParticipant(chatId)
+        && resource.metadata.get('ownerUid', '') == request.auth.uid
+        && fileName.matches(request.auth.uid + '-.*');
     }
 
     match /profiles/{uid}/{fileName} {

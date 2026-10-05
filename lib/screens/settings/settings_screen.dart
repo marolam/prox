@@ -27,6 +27,9 @@ import "package:prox/screens/settings/sound_alert_settings_screen.dart";
 import "package:prox/screens/settings/party_profile_sharing_screen.dart";
 import "package:prox/screens/settings/user_guide_screen.dart";
 import "package:prox/screens/settings/account/account_screen.dart";
+import "package:prox/screens/dev/growth_ops_screen.dart";
+import "package:prox/screens/review/growth_hub_screen.dart";
+import 'package:prox/screens/business/business_offers_screen.dart';
 
 import "package:prox/screens/trust/trust_rules_screen.dart";
 import "package:prox/screens/trust/trust_timeline_screen.dart";
@@ -1057,6 +1060,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   );
                 },
               ),
+              const GrowthReferralEntry(),
+              ListTile(
+                leading: const Icon(Icons.local_offer_outlined),
+                title: const Text('Local offers'),
+                subtitle: const Text('Browse reviewed offers from local Pros.'),
+                onTap: () => _pushWithHelpContext(context,
+                  contextKey: 'settings:local_offers',
+                  page: const BusinessOffersScreen(initialBrowse: true)),
+              ),
+              const GrowthOpsEntry(),
               ListTile(
                 leading: const Icon(Icons.info_outline),
                 title: const Text("About"),

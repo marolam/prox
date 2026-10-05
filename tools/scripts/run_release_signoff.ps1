@@ -1,6 +1,7 @@
 Param(
   [string]$RepoPath = "",
   [switch]$SkipBuild,
+  [switch]$SkipReferralEnvGate,
   [switch]$SkipExternalPaymentEnvGate,
   [switch]$RequireSquareSecrets,
   [switch]$RequireStableWebhookDomain,
@@ -178,6 +179,31 @@ function Invoke-ExternalPaymentEnvGate {
   return "FAIL"
 }
 
+function Invoke-ReferralEnvGate {
+  Param(
+    [string]$RepoRoot,
+    [switch]$Skip
+  )
+
+  if ($Skip) {
+    return "NOT-RUN"
+  }
+
+  $scriptPath = Join-Path $RepoRoot "tools/scripts/check_referral_download_env.ps1"
+  if (-not (Test-Path $scriptPath)) {
+    throw "Missing referral env gate script: $scriptPath"
+  }
+
+  $gateOutput = & powershell -ExecutionPolicy Bypass -File $scriptPath 2>&1
+  foreach ($line in $gateOutput) {
+    Write-Host $line
+  }
+  if ($LASTEXITCODE -eq 0) {
+    return "PASS"
+  }
+  return "FAIL"
+}
+
 function Invoke-ExternalCallbackSmokeGate {
   Param(
     [string]$RepoRoot,
@@ -271,6 +297,9 @@ Write-Host "Running endpoint gate checks..." -ForegroundColor Cyan
 $publicGate = Invoke-EndpointGate -RepoRoot $repoRoot -Url $PublicApkUrl -ExpectedAccess "public"
 $restrictedGate = Invoke-EndpointGate -RepoRoot $repoRoot -Url $RestrictedApkUrl -ExpectedAccess "restricted"
 
+Write-Host "Running referral env gate..." -ForegroundColor Cyan
+$referralEnvGate = Invoke-ReferralEnvGate -RepoRoot $repoRoot -Skip:$SkipReferralEnvGate
+
 Write-Host "Running external payment env gate..." -ForegroundColor Cyan
 $externalPaymentEnvGate = Invoke-ExternalPaymentEnvGate `
   -RepoRoot $repoRoot `
@@ -300,9 +329,10 @@ foreach ($test in $BlockerTests) {
 $endpointPass = ($publicGate -eq "PASS") -and ($restrictedGate -eq "PASS")
 $fatalPass = $FatalLogGate -eq "PASS"
 $permissionPass = $PermissionDeniedGate -eq "PASS"
+$referralEnvPass = ($referralEnvGate -eq "PASS") -or ($referralEnvGate -eq "NOT-RUN")
 $externalPaymentEnvPass = ($externalPaymentEnvGate -eq "PASS") -or ($externalPaymentEnvGate -eq "NOT-RUN")
 $externalCallbackSmokePass = ($externalCallbackSmokeGate -eq "PASS") -or ($externalCallbackSmokeGate -eq "NOT-RUN")
-$go = ($blockerFailures.Count -eq 0) -and $endpointPass -and $fatalPass -and $permissionPass -and $externalPaymentEnvPass -and $externalCallbackSmokePass
+$go = ($blockerFailures.Count -eq 0) -and $endpointPass -and $fatalPass -and $permissionPass -and $referralEnvPass -and $externalPaymentEnvPass -and $externalCallbackSmokePass
 
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $reportDir = Join-Path $repoRoot "logs/release_reports"
@@ -335,6 +365,7 @@ $report = @(
   "- Restricted endpoint check: $restrictedGate",
   "- Content-Type validated: $(if ($publicGate -eq 'PASS') { 'PASS' } else { 'FAIL/PENDING' })",
   "- No login redirect on public endpoint: $(if ($publicGate -eq 'PASS') { 'PASS' } else { 'FAIL/PENDING' })",
+  "- Referral env gate: $referralEnvGate",
   "- External payment env gate: $externalPaymentEnvGate",
   "- External callback smoke gate: $externalCallbackSmokeGate",
   "",

@@ -40,6 +40,7 @@ class MeetupLiveScreen extends StatefulWidget {
 
 class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
   bool _busy = false;
+  bool _routing = false;
   bool _pushedRate = false;
   bool _ensuredRating = false;
   Timer? _locationTimer;
@@ -131,6 +132,30 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
     _targetLat = lat;
     _targetLng = lng;
     WidgetsBinding.instance.addPostFrameCallback((_) => _updateMyPosition());
+  }
+
+  void _routeToRequired(String requiredScreen) {
+    if (_routing || !mounted) return;
+    _routing = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) {
+        _routing = false;
+        return;
+      }
+      final route = switch (requiredScreen) {
+        "chat" => "/chat",
+        "planner" => "/meetup_plan",
+        _ => "/meetup_live",
+      };
+      await Navigator.of(context).pushReplacementNamed(
+        route,
+        arguments: <String, String>{
+          "chatId": widget.chatId,
+          "otherUid": widget.otherUid,
+        },
+      );
+      _routing = false;
+    });
   }
 
   Future<bool> _confirmStatus(String title, String message) async {
@@ -375,6 +400,8 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
             final d = snap.data?.data() ?? <String, dynamic>{};
             final active = meetupIsActive(d);
             final completed = d["status"] == "completed";
+            final requiredScreen = MeetupService.instance
+              .requiredSessionScreenFromData(d);
             final confirmed = d["locationStatus"] == "confirmed";
             final lat = (d["lat"] as num?)?.toDouble();
             final lng = (d["lng"] as num?)?.toDouble();
@@ -385,6 +412,10 @@ class _MeetupLiveScreenState extends State<MeetupLiveScreen> {
                 d[myUid == d["aUid"] ? "aOnMyWayAt" : "bOnMyWayAt"] != null;
             if (hasPin && active) _setTarget(lat, lng);
             if (!active) _locationTimer?.cancel();
+            if (active && requiredScreen != "live") {
+              _routeToRequired(requiredScreen);
+              return const Center(child: CircularProgressIndicator());
+            }
             if (completed) {
               _ensureRatingWindowOnce();
               _pushRateOnce();

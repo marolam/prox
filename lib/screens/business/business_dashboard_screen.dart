@@ -3,6 +3,7 @@ import "package:cloud_firestore/cloud_firestore.dart";
 import "package:flutter/material.dart";
 
 import "package:prox/models/dashboard_metrics.dart";
+import "package:prox/screens/dashboard/dashboard_metrics_updated_label.dart";
 import "package:share_plus/share_plus.dart";
 
 import "package:prox/screens/profile/profile_edit_screen.dart";
@@ -10,7 +11,9 @@ import "package:prox/services/help/context_help_service.dart";
 import "package:prox/screens/services/points_service.dart";
 import "package:prox/services/dashboard_metrics_service.dart";
 import "package:prox/services/user_profile_service.dart";
-import "package:prox/screens/store/feature_example_screen.dart";
+import 'package:prox/screens/business/business_offers_screen.dart';
+import 'package:prox/screens/pro/pro_storefront_screen.dart';
+import 'package:prox/screens/pro/pro_insights_screen.dart';
 
 class BusinessDashboardScreen extends StatelessWidget {
   const BusinessDashboardScreen({super.key});
@@ -94,8 +97,7 @@ class BusinessDashboardScreen extends StatelessWidget {
     void postOffer() {
       Navigator.of(context).push<void>(
         MaterialPageRoute<void>(
-          builder: (_) =>
-              const FeatureExampleScreen(title: 'Promotion example'),
+          builder: (_) => const BusinessOffersScreen(startCreating: true),
         ),
       );
     }
@@ -161,6 +163,13 @@ class BusinessDashboardScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
+          card(child: Column(children: [
+            ListTile(leading: const Icon(Icons.storefront_outlined), title: const Text('Storefront and service details'),
+              subtitle: const Text('Hours, service area, meetup terms and offers'), onTap: () => Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => const ProStorefrontScreen()))),
+            ListTile(leading: const Icon(Icons.insights_outlined), title: const Text('Business insights'),
+              subtitle: const Text('Response and won timings from your actual leads'), onTap: () => Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => const ProInsightsScreen()))),
+          ])),
+          const SizedBox(height: 16),
           card(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -212,8 +221,9 @@ class BusinessDashboardScreen extends StatelessWidget {
             child: StreamBuilder<DashboardMetrics?>(
               stream: DashboardMetricsService.instance.watchMetrics(),
               builder: (context, snap) {
-                final metrics = snap.data;
-                final top = metrics?.topKeywords ?? const <KeywordMetric>[];
+                final metrics = snap.hasError ? null : snap.data;
+                final fresh = metrics?.isFresh() == true;
+                final top = fresh ? metrics!.topKeywords : const <KeywordMetric>[];
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -224,22 +234,34 @@ class BusinessDashboardScreen extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 12),
+                    if (!fresh) ...[
+                      Text(snap.connectionState == ConnectionState.waiting
+                          ? 'Loading market metrics...'
+                          : metrics?.updatedAt != null
+                          ? 'Market metrics are out of date. A current snapshot is unavailable.'
+                          : 'Market metrics are unavailable.'),
+                      const SizedBox(height: 8),
+                    ],
                     Wrap(
                       spacing: 12,
                       runSpacing: 12,
                       children: [
                         metricChip(
                           "Total users",
-                          metrics?.totalUsers.toString() ?? "-",
+                          metrics?.hasCurrentMetric('totalUsers') == true ? metrics!.totalUsers.toString() : "-",
                           Icons.groups_outlined,
                         ),
                         metricChip(
                           "New today",
-                          metrics?.newUsersToday.toString() ?? "-",
+                          metrics?.hasCurrentMetric('newUsersToday') == true ? metrics!.newUsersToday.toString() : "-",
                           Icons.trending_up,
                         ),
                       ],
                     ),
+                    if (metrics?.updatedAt != null) ...[
+                      const SizedBox(height: 8),
+                      Text(formatDashboardMetricsUpdatedLabel(updatedAt: metrics!.updatedAt!)),
+                    ],
                     if (top.isNotEmpty) ...[
                       const SizedBox(height: 12),
                       Text(

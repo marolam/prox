@@ -1,4 +1,5 @@
 import "package:flutter/material.dart";
+import "package:prox/widgets/background_matching_settings.dart";
 
 import "package:prox/services/match_signal_service.dart";
 import "package:prox/services/user_settings_service.dart";
@@ -17,15 +18,22 @@ class SoundAlertSettingsScreen extends StatelessWidget {
         builder: (context, _) {
           final settings = service.current;
           final soundOn = settings.matchSoundEnabled;
+            final highFitPaused = !soundOn && settings.rareMatchSoundEnabled;
+          final previewHint = !soundOn
+              ? "Enable Match sounds to preview cues."
+              : settings.matchSoundVolume <= 0
+              ? "Increase in-app sound volume above 0% to preview cues."
+              : null;
 
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             children: [
+              const BackgroundMatchingSettings(),
               SwitchListTile(
                 secondary: const Icon(Icons.notifications_active_outlined),
                 title: const Text("Match notifications"),
                 subtitle: const Text(
-                  "Show a notification when a new nearby match appears.",
+                  "Allow significant-match notifications. Ordinary background matches stay quiet.",
                 ),
                 value: settings.matchNotificationsEnabled,
                 onChanged: service.setMatchNotificationsEnabled,
@@ -61,19 +69,41 @@ class SoundAlertSettingsScreen extends StatelessWidget {
               ),
               SwitchListTile(
                 secondary: const Icon(Icons.bolt_outlined),
-                title: const Text("Urgent high-fit cue"),
-                subtitle: const Text(
-                  "Use a more noticeable cue for unusually strong matches.",
+                title: const Text("Significant-match sound"),
+                subtitle: Text(
+                  !soundOn
+                      ? "Turn on Match sounds to use this cue."
+                      : "Allow a noticeable cue when multiple keywords match in both directions.",
                 ),
                 value: settings.rareMatchSoundEnabled,
                 onChanged: soundOn ? service.setRareMatchSoundEnabled : null,
               ),
+              if (highFitPaused)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text(
+                    "High-fit cue is paused while Match sounds is off.",
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
               const Divider(height: 28),
               const ListTile(
                 leading: Icon(Icons.hearing_outlined),
                 title: Text("Preview cues"),
                 subtitle: Text("Play each cue at your selected in-app volume."),
               ),
+              if (previewHint != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text(
+                    previewHint,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,

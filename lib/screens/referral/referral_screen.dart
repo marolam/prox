@@ -8,6 +8,7 @@ import "package:share_plus/share_plus.dart";
 import "package:prox/screens/monetization/business_paywall_screen.dart";
 import "package:prox/services/points_service.dart";
 import "package:prox/services/referral/referral_service.dart" as refsvc;
+import "package:prox/screens/review/growth_hub_screen.dart";
 
 class ReferralScreen extends StatefulWidget {
   const ReferralScreen({super.key});
@@ -127,6 +128,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
         children: [
+          const GrowthReferralEntry(),
           StreamBuilder<List<refsvc.ReferralCodeDoc>>(
             stream: refsvc.ReferralService.instance.streamMyCodes(uid),
             builder: (context, snapshot) {
@@ -278,11 +280,6 @@ class _ReferralScreenState extends State<ReferralScreen> {
             stream: PointsService.instance.watchMeta(uid),
             builder: (context, snap) {
               final meta = snap.data ?? PointsService.instance.peekMeta(uid);
-              const int businessModeTarget = 50;
-              final int left = (businessModeTarget - meta.currentPoints).clamp(
-                0,
-                999999,
-              );
 
               return Card(
                 elevation: 0,
@@ -307,7 +304,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
                       Text("Referral count: ${meta.referrals}"),
                       Text("Support sessions: ${meta.supportSessions}"),
                       Text(
-                        "Points needed for Business Mode target (50): $left",
+                        "Business Mode access depends on your verified referrals and current plan. View its eligibility below.",
                       ),
                     ],
                   ),

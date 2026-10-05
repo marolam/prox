@@ -8,6 +8,21 @@ class MeetupProgressCard extends StatelessWidget {
   const MeetupProgressCard({super.key, required this.data, required this.uid});
   final Map<String, dynamic> data;
   final String uid;
+
+  String _deadlineGuidance(BuildContext context, Timestamp? expiry) {
+    if (expiry == null) {
+      return 'This meetup is step-locked until completion or approved cancellation.';
+    }
+    final expiresAt = expiry.toDate();
+    if (!expiresAt.isAfter(DateTime.now())) {
+      return 'Session deadline passed. Automatic closure is in progress. Use Safety if you need to cancel by request now.';
+    }
+    final deadline = MaterialLocalizations.of(
+      context,
+    ).formatTimeOfDay(TimeOfDay.fromDateTime(expiresAt));
+    return 'Session deadline: $deadline. This meetup stays step-locked until completion or approved cancellation.';
+  }
+
   @override
   Widget build(BuildContext context) {
     final status = data['status'];
@@ -63,12 +78,7 @@ class MeetupProgressCard extends StatelessWidget {
         'The pin is confirmed. Tap On my way when you leave, then open directions. Opening Maps does not confirm your arrival. Return to Prox to finish.',
       ),
     };
-    final expiry = data['expiresAt'];
-    final deadline = expiry is Timestamp
-        ? MaterialLocalizations.of(
-            context,
-          ).formatTimeOfDay(TimeOfDay.fromDateTime(expiry.toDate()))
-        : null;
+    final expiry = data['expiresAt'] is Timestamp ? data['expiresAt'] as Timestamp : null;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -81,12 +91,14 @@ class MeetupProgressCard extends StatelessWidget {
             if (meetupIsActive(data)) ...[
               const SizedBox(height: 8),
               Text(
-                deadline == null
-                    ? 'Leaving this screen keeps the meetup pending until its deadline.'
-                    : 'Session deadline: $deadline. Leaving this screen does not cancel it.',
+                _deadlineGuidance(context, expiry),
               ),
               const Text(
-                'Complete the steps or use Safety to cancel. Unfinished sessions close automatically and do not count as completed meetups.',
+                'Do the exact next step shown above. Use Safety if you need to cancel by request. Unfinished sessions close automatically and do not count as completed meetups.',
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Warning: no response or no-show can reduce trust and trigger temporary meetup lockouts.',
               ),
             ],
           ],

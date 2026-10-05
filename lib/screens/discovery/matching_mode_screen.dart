@@ -195,7 +195,7 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
 
     if (_kind == MatchingModeKind.listen) {
       suggestions.add(
-        "Listen mode only pairs opposite roles. Speak matches Listeners, and Listen matches Speakers.",
+        "Everyone in Listen shares one nearby pool. Keywords and roles do not filter matches.",
       );
     }
 
@@ -217,10 +217,29 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
   }
 
   void _setKind(MatchingModeKind kind) {
-    setState(() => _kind = kind);
+    setState(() {
+      _kind = kind;
+      if (kind == MatchingModeKind.treasureHunt &&
+          _treasureRadius <= _radiusMiles) {
+        _treasureRadius = (_radiusMiles * 2).clamp(
+          1.0,
+          MatchDiscoverySettings.maxRadiusMiles,
+        );
+      }
+    });
   }
 
   void _setNormalMode(NormalMatchMode mode) {
+    if (mode == NormalMatchMode.active) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Hold the Prox Circle for 3 seconds on Nearby to activate Normal Active.",
+          ),
+        ),
+      );
+      return;
+    }
     setState(() => _normalMode = mode);
   }
 
@@ -231,6 +250,7 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
   void _commitAndClose() {
     try {
       final svc = MatchingModeService.instance;
+      final wasActive = svc.isActive;
       final effectiveKeywordMode = _isKeywordModeUnlocked(_keywordMode)
           ? _keywordMode
           : KeywordMatchMode.similar;
@@ -255,7 +275,7 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
       MatchSettingsService.instance.setKeywordMode(effectiveKeywordMode);
       if (_kind == MatchingModeKind.normal) {
         svc.setMode(
-          _normalMode == NormalMatchMode.active
+          _normalMode == NormalMatchMode.active && wasActive
               ? ProxMatchingMode.active
               : ProxMatchingMode.passive,
         );
@@ -546,7 +566,7 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                                 child: _ModeCardInner(
                                   icon: Icons.hearing,
                                   title: "Listen Mode",
-                                  subtitle: "Speak or Listen role matching",
+                                  subtitle: "One pool, no keyword filters",
                                   selected: _kind == MatchingModeKind.listen,
                                   accent: aqua,
                                 ),
@@ -560,7 +580,7 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                                 child: _ModeCardInner(
                                   icon: Icons.explore,
                                   title: "Treasure Hunt",
-                                  subtitle: "Keyword overlap compass",
+                                  subtitle: "Approximate areas worth exploring",
                                   selected:
                                       _kind == MatchingModeKind.treasureHunt,
                                   accent: green,
@@ -574,7 +594,8 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                                 child: _ModeCardInner(
                                   icon: Icons.directions,
                                   title: "Travel",
-                                  subtitle: "Recent movers only (last ~30 min)",
+                                  subtitle:
+                                      "Moving Travel users, fresh locations",
                                   selected: _kind == MatchingModeKind.travel,
                                   accent: orange,
                                 ),
@@ -593,7 +614,7 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    "Listen mode role",
+                                    "Conversation preference (optional)",
                                     style: theme.textTheme.titleSmall?.copyWith(
                                       fontWeight: FontWeight.w800,
                                     ),
@@ -624,8 +645,8 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                                   const SizedBox(height: 8),
                                   Text(
                                     _listenRole == ListenMatchRole.speak
-                                        ? "Speak role finds nearby users in Listen role."
-                                        : "Listen role finds nearby users in Speak role.",
+                                        ? "You prefer speaking. Everyone in Listen can still match."
+                                        : "You prefer listening. Everyone in Listen can still match.",
                                     style: theme.textTheme.bodySmall?.copyWith(
                                       color: cs.onSurface.withValues(
                                         alpha: 0.78,
@@ -680,7 +701,7 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                                   Text(
                                     _activeLocked
                                         ? "Active is temporarily locked for missed responses."
-                                        : "Active requires replying to new matches within 10 minutes.",
+                                        : "Hold the Prox Circle for 3 seconds on Nearby to activate. Active requires replying within 10 minutes.",
                                     style: theme.textTheme.bodySmall?.copyWith(
                                       color: cs.onSurface.withValues(
                                         alpha: 0.78,
@@ -725,7 +746,7 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                               borderOpacity: 0.16,
                               padding: const EdgeInsets.all(12),
                               child: Text(
-                                "Travel mode is strict: it only shows profiles with very recent movement signals. If Nearby looks empty, switch to Normal.",
+                                "Travel matches other moving Travel users using recent location samples and your keywords. Results refresh as you move; proximity can change quickly.",
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: cs.onSurface.withValues(alpha: 0.78),
                                 ),

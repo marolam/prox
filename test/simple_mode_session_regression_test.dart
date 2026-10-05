@@ -75,7 +75,9 @@ void main() {
 
     expect(planner, contains('screen: "planner"'));
     expect(live, contains('screen: "live"'));
-    expect(recovery, contains("lastSessionScreen"));
+    // Recovery follows the authoritative active-meetup step so stale local
+    // navigation cannot open Live before location confirmation.
+    expect(recovery, contains("requiredSessionScreen"));
     expect(recovery, contains("didChangeAppLifecycleState"));
   });
 }

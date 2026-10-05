@@ -6,6 +6,8 @@ class SupportTicketDraft {
     required this.createdAt,
     this.context,
     this.updatedAt,
+    this.category = 'question',
+    this.firstHuhMoment = '',
   });
 
   final String id;
@@ -14,6 +16,8 @@ class SupportTicketDraft {
   final DateTime createdAt;
   final Object? context;
   final DateTime? updatedAt;
+  final String category;
+  final String firstHuhMoment;
 
   SupportTicketDraft copyWith({
     String? id,
@@ -21,6 +25,8 @@ class SupportTicketDraft {
     String? message,
     DateTime? createdAt,
     DateTime? updatedAt,
+    String? category,
+    String? firstHuhMoment,
   }) {
     return SupportTicketDraft(
       id: id ?? this.id,
@@ -28,6 +34,9 @@ class SupportTicketDraft {
       message: message ?? this.message,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      context: context,
+      category: category ?? this.category,
+      firstHuhMoment: firstHuhMoment ?? this.firstHuhMoment,
     );
   }
 }

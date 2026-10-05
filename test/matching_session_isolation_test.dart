@@ -13,6 +13,13 @@ UserProfile profile(String uid) => UserProfile(
   canProvide: const ['cooking'],
 );
 
+const peerWithoutKeywords = NearbyDoc(
+  uid: 'peer',
+  distanceMiles: 1,
+  loc: GeoPoint(0, 0),
+  data: {'modeKind': 'normal', 'normalMode': 'active'},
+);
+
 const peer = NearbyDoc(
   uid: 'peer',
   distanceMiles: 1,
@@ -97,7 +104,7 @@ void main() {
         },
       );
       final result = service.filterByModeForSettings(
-        [peer],
+        [peerWithoutKeywords],
         const MatchDiscoverySettings.defaults().copyWith(
           modeKind: MatchingModeKind.normal,
           normalMode: NormalMatchMode.active,
@@ -127,7 +134,7 @@ void main() {
         },
       );
       final shared = service.sharedKeywordsWith('peer');
-      final ranked = service.rankTreasureTargets([peer]);
+      final ranked = service.rankTreasureTargets([peerWithoutKeywords]);
       await peerRequested.future;
       service.clearSession();
       pendingPeer.complete(profile('peer'));

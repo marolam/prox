@@ -9,14 +9,27 @@ export async function claimReward(uid: string, category: string, contextId: stri
   if (!['policy_ack', 'support', 'feedback'].includes(category)) throw new HttpsError('invalid-argument', 'Unsupported reward.');
   const policy = category === 'policy_ack' ? {conduct: {version: 'conduct_v1', points: 10}, business_rules: {version: 'business_rules_v1', points: 15}}[contextId] : null;
   if (category === 'policy_ack' && !policy) throw new HttpsError('invalid-argument', 'Unsupported policy.');
-  const source = policy ? db.doc(`users/${uid}/meta/policyAcks`) : db.doc(`${category === 'support' ? 'support_tickets' : 'feedback'}/${contextId}`);
-  const reward = db.doc(`users/${uid}/rewardClaims/${category}_${policy?.version || contextId}`);
+  const canonicalFeedback = db.doc(`supportTickets/${contextId}`);
+  let verifiedContextId = contextId;
+  if (category === 'feedback') {
+    const projected = (await canonicalFeedback.get()).data();
+    if (projected?.sourceCollection === 'feedback') {
+      const originalId = String(projected.sourceId || '');
+      if (!/^[A-Za-z0-9_-]{1,120}$/.test(originalId)) throw new HttpsError('failed-precondition', 'This legacy feedback source cannot receive a reward.');
+      verifiedContextId = originalId;
+    }
+  }
+  const source = policy ? db.doc(`users/${uid}/meta/policyAcks`) : db.doc(`${category === 'support' ? 'support_tickets' : 'feedback'}/${verifiedContextId}`);
+  const reward = db.doc(`users/${uid}/rewardClaims/${category}_${policy?.version || verifiedContextId}`);
   const daily = db.doc(`users/${uid}/rewardLimits/${new Date().toISOString().slice(0, 10)}`);
   return db.runTransaction(async tx => {
-    const [prior, verified, limit, deletion] = await tx.getAll(reward, source, daily, db.doc(`accountDeletions/${uid}`));
+    const [prior, verified, limit, deletion, canonical] = await tx.getAll(reward, source, daily, db.doc(`accountDeletions/${uid}`), canonicalFeedback);
     if (deletion.exists) throw new HttpsError('failed-precondition', 'Account is being deleted.');
     if (prior.exists) return {awarded: false, points: 0, alreadyClaimed: true};
-    const data = verified.data() || {};
+    const canonicalData = canonical.data() || {};
+    if (category === 'feedback' && canonicalData.sourceCollection === 'feedback' && canonicalData.sourceId !== verifiedContextId) throw new HttpsError('failed-precondition', 'The verified feedback source changed.');
+    const data = verified.data() || (category === 'feedback' && !canonicalData.sourceCollection && canonicalData.workflow === 'growth' && canonicalData.source === 'settings_support_feedback'
+      ? {...canonicalData, text: canonicalData.message} : {});
     let points = 0;
     if (policy) {
       const ack = data.versions?.[policy.version] || data[`versions.${policy.version}`];
@@ -37,7 +50,7 @@ export async function claimReward(uid: string, category: string, contextId: stri
       tx.set(daily, {feedback: admin.firestore.FieldValue.increment(1)}, {merge: true});
     }
     const now = admin.firestore.FieldValue.serverTimestamp();
-    tx.create(reward, {category, contextId, points, createdAt: now});
+    tx.create(reward, {category, contextId: verifiedContextId, points, createdAt: now});
     tx.set(db.doc(`users/${uid}/meta/points`), {currentPoints: admin.firestore.FieldValue.increment(points), totalPoints: admin.firestore.FieldValue.increment(points), updatedAt: now}, {merge: true});
     tx.create(db.doc(`users/${uid}/meta/points/events/${reward.id}`), {eventId: reward.id, amount: points, category, reason: contextId, timestamp: now});
     return {awarded: true, points};

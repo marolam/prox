@@ -37,7 +37,9 @@ service cloud.firestore {
         request.auth.uid == data.get('aUid', '') ||
         request.auth.uid == data.get('bUid', '') ||
         request.auth.uid == data.get('requesterUid', '') ||
-        request.auth.uid == data.get('recipientUid', '')
+        request.auth.uid == data.get('recipientUid', '') ||
+        request.auth.uid == data.get('fromUid', '') ||
+        request.auth.uid == data.get('toUid', '')
       );
     }
 
@@ -57,6 +59,14 @@ service cloud.firestore {
 
     function isDocOwner(data) {
       return authed() && ownerUid(data) != "" && request.auth.uid == ownerUid(data);
+    }
+
+    function consistentOwnerAliases(data) {
+      return data.get('uid', request.auth.uid) == request.auth.uid &&
+        data.get('ownerUid', request.auth.uid) == request.auth.uid &&
+        data.get('userId', request.auth.uid) == request.auth.uid &&
+        data.get('createdBy', request.auth.uid) == request.auth.uid &&
+        data.get('reporterUid', request.auth.uid) == request.auth.uid;
     }
 
     function supportCanRead(data) {
@@ -83,6 +93,34 @@ service cloud.firestore {
         (data.participants.size() != 2 || noBlock(data.participants[0], data.participants[1]));
     }
 
+    function chatResponseWindow(gate) {
+      return gate.get('modeKind', '') == 'normal' && gate.get('responseWindowSeconds', 0) == 60 ? 60 : 86400;
+    }
+
+    function chatGateWriteAllowed(old, next) {
+      let before = old.get('chatGate', {});
+      let after = next.get('chatGate', {});
+      let from = before.get('status', '');
+      let to = after.get('status', '');
+      let deadline = before.get('requestedAt', request.time) + duration.value(chatResponseWindow(before), 's');
+      return (from != 'requested' || to != 'expired' ||
+          (before.get('requestedAt', null) is timestamp && request.time >= deadline)) &&
+        (from != 'requested' || !(to in ['accepted', 'declined']) ||
+          (request.auth.uid != before.get('requestedBy', '') && request.time < deadline)) &&
+        (!(from in ['accepted', 'declined']) || to != 'requested') &&
+        (from != 'requested' || to != 'requested' ||
+          (after.get('requestedAt', null) == before.get('requestedAt', null) &&
+           after.get('requestedBy', '') == before.get('requestedBy', '') &&
+           after.get('modeKind', '') == before.get('modeKind', '') &&
+           after.get('responseWindowSeconds', 0) == before.get('responseWindowSeconds', 0))) &&
+        (from != 'expired' || to != 'requested' ||
+          (old.get('closedAt', null) == null && before.get('expiredBySystem', false) == true &&
+           before.get('acceptedAt', null) == null && before.get('declinedAt', null) == null &&
+           before.get('acceptedBy', '') == '' && before.get('declinedBy', '') == '' &&
+           after.get('requestedBy', '') == request.auth.uid && after.get('requestedAt', null) == request.time &&
+           validChat(next)));
+    }
+
     function immutablePair() {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
         'participants', 'aUid', 'bUid', 'requesterUid', 'recipientUid'
@@ -107,9 +145,12 @@ service cloud.firestore {
     }
 
     function safeSupportCreate(data) {
-      return isDocOwner(data) && !data.keys().hasAny([
+      return isDocOwner(data) && consistentOwnerAliases(data) && !data.keys().hasAny([
         'technicianId', 'managerId', 'payoutGranted', 'payoutCredited',
-        'doneDealConfirmed', 'rewardGranted', 'rewardCredited'
+        'doneDealConfirmed', 'rewardGranted', 'rewardCredited',
+        'firstResponseAt', 'fixedVersion', 'fixedBuild', 'resolvedAt',
+        'acknowledgedAt', 'acknowledgedAutomaticallyAt', 'responseDueAt',
+        'workflow', 'submissionHash', 'lastReply', 'lastReplyAt'
       ]) && data.get('status', 'open') in ['open', 'new', 'submitted', 0];
     }
 
@@ -145,18 +186,89 @@ service cloud.firestore {
         );
     }
 
+    function cancelEvidenceValid(value) {
+      return value is timestamp ||
+        (value is string && value.size() > 0) ||
+        (value is map && (
+          (value.get('requestId', '') is string && value.get('requestId', '').size() > 0) ||
+          value.get('requestedAt', null) is timestamp ||
+          value.get('confirmedAt', null) is timestamp ||
+          value.get('ts', null) is timestamp ||
+          value.get('at', null) is timestamp
+        ));
+    }
+
+    function handshakeEvidenceByUid(next) {
+      return next.get('cancelHandshakeByUid', null) is map
+        ? next.get('cancelHandshakeByUid', {})
+        : next.get('cancelHandshake', null) is map
+          ? next.get('cancelHandshake', {})
+          : {};
+    }
+
+    function mutualCancelHandshake(next) {
+      let aUid = next.get('aUid', '');
+      let bUid = next.get('bUid', '');
+      let evidence = handshakeEvidenceByUid(next);
+      return aUid is string && aUid != '' &&
+        bUid is string && bUid != '' &&
+        cancelEvidenceValid(evidence.get(aUid, null)) &&
+        cancelEvidenceValid(evidence.get(bUid, null));
+    }
+
+    function validCancelHandshakeActorWrite(old, next) {
+      let changed = next.diff(old).affectedKeys();
+      let touched = changed.hasAny([
+        'cancelRequestedByA', 'cancelConfirmedByA',
+        'cancelRequestedByB', 'cancelConfirmedByB',
+        'cancelRequestedBy', 'cancelConfirmedBy',
+        'cancelHandshake', 'cancelHandshakeByUid'
+      ]);
+      let aUid = old.get('aUid', '');
+      let bUid = old.get('bUid', '');
+      let isA = request.auth.uid == aUid;
+      let isB = request.auth.uid == bUid;
+      let oldByUid = old.get('cancelHandshakeByUid', null) is map ? old.get('cancelHandshakeByUid', {}) : {};
+      let nextByUid = next.get('cancelHandshakeByUid', null) is map ? next.get('cancelHandshakeByUid', {}) : {};
+      return !touched || (
+        (isA || isB) &&
+        !changed.hasAny(['cancelRequestedBy', 'cancelConfirmedBy', 'cancelHandshake']) &&
+        (isA
+          ? (
+              next.get('cancelRequestedByB', false) == old.get('cancelRequestedByB', false) &&
+              next.get('cancelConfirmedByB', false) == old.get('cancelConfirmedByB', false) &&
+              (!changed.hasAny(['cancelHandshakeByUid']) || (
+                nextByUid.get(bUid, null) == oldByUid.get(bUid, null) &&
+                cancelEvidenceValid(nextByUid.get(aUid, null))
+              ))
+            )
+          : (
+              next.get('cancelRequestedByA', false) == old.get('cancelRequestedByA', false) &&
+              next.get('cancelConfirmedByA', false) == old.get('cancelConfirmedByA', false) &&
+              (!changed.hasAny(['cancelHandshakeByUid']) || (
+                nextByUid.get(aUid, null) == oldByUid.get(aUid, null) &&
+                cancelEvidenceValid(nextByUid.get(bUid, null))
+              ))
+            )
+        )
+      );
+    }
+
     function validMeetupProgress() {
       let old = resource.data;
       let next = request.resource.data;
       let from = old.get('status', '');
       let to = next.get('status', '');
       let fresh = to == 'requested' && from in ['completed', 'expired', 'cancelled', 'auto_closed', 'declined'];
+      let cancelByHandshake = from in ['requested', 'accepted', 'live'] && to == 'cancelled' && mutualCancelHandshake(next);
       return !next.diff(old).affectedKeys().hasAny(['outcome', 'closedAt', 'cancelledAt', 'autoClosedAt']) &&
+        validCancelHandshakeActorWrite(old, next) &&
         (fresh || from in ['requested', 'accepted', 'live'] || next.diff(old).affectedKeys().hasOnly(['sessionScreens', 'updatedAt', 'ratingStartedAt', 'ratingExpiresAt'])) &&
         (from == to || fresh ||
           (from == 'requested' && to in ['accepted', 'live', 'declined', 'expired']) ||
           (from == 'accepted' && to in ['live', 'completed', 'expired']) ||
-          (from == 'live' && to in ['completed', 'expired'])) &&
+          (from == 'live' && to in ['completed', 'expired']) ||
+          cancelByHandshake) &&
         (fresh || old.get('locationStatus', '') != 'confirmed' ||
           (next.get('lat', null) == old.get('lat', null) && next.get('lng', null) == old.get('lng', null) && next.get('locationStatus', '') == 'confirmed')) &&
         (fresh || (old.get('aArrived', false) != true || next.get('aArrived', false) == true)) &&
@@ -200,6 +312,35 @@ service cloud.firestore {
         allow read: if authed();
         allow write: if isOwner(uid);
       }
+
+      // Background location is private to its owner and the trusted matcher.
+      match /backgroundPresence/{docId} {
+        allow read: if isOwner(uid);
+        allow delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && docId == 'current' &&
+          get(/databases/$(database)/documents/users/$(uid)/settings/backgroundMatching).data.get('enabled', false) == true &&
+          request.resource.data.keys().hasOnly(['enabled', 'deviceId', 'latitude', 'longitude', 'locationAt', 'receivedAt', 'accuracyMeters', 'speedMps', 'utcOffsetMinutes', 'expiresAt']) &&
+          request.resource.data.enabled == true &&
+          request.resource.data.deviceId == get(/databases/$(database)/documents/users/$(uid)/settings/backgroundMatching).data.deviceId &&
+          request.resource.data.latitude is number && request.resource.data.latitude >= -90 && request.resource.data.latitude <= 90 &&
+          request.resource.data.longitude is number && request.resource.data.longitude >= -180 && request.resource.data.longitude <= 180 &&
+          request.resource.data.locationAt is timestamp &&
+          request.resource.data.locationAt >= request.time - duration.value(30, 'm') &&
+          request.resource.data.locationAt <= request.time + duration.value(1, 'm') &&
+          request.resource.data.receivedAt == request.time &&
+          request.resource.data.accuracyMeters is number && request.resource.data.accuracyMeters >= 0 && request.resource.data.accuracyMeters <= 300 &&
+          request.resource.data.speedMps is number && request.resource.data.speedMps >= -1 && request.resource.data.speedMps <= 100 &&
+          request.resource.data.utcOffsetMinutes is number && request.resource.data.utcOffsetMinutes >= -720 && request.resource.data.utcOffsetMinutes <= 840 &&
+          request.resource.data.expiresAt is timestamp && request.resource.data.expiresAt > request.time &&
+          request.resource.data.expiresAt <= request.time + duration.value(31, 'm');
+      }
+      // Budgets, delivery receipts and opportunities are server-owned. The callable
+      // rechecks freshness and blocks before revealing an opportunity.
+      match /backgroundAlertState/{id} { allow read, write: if false; }
+      match /backgroundAlertPairs/{id} { allow read, write: if false; }
+      match /backgroundScanState/{id} { allow read, write: if false; }
+      match /backgroundAlertOutbox/{id} { allow read, write: if false; }
+      match /backgroundOpportunities/{id} { allow read, write: if false; }
 
       match /deviceTokens/{tokenId} {
         allow read, write: if isOwner(uid);
@@ -362,6 +503,7 @@ service cloud.firestore {
       // otherwise tx.get(chats/{id}) can fail before create on brand-new pairs.
       allow read: if authed() && (resource == null || request.auth.uid in resource.data.participants);
       allow update: if authed() && request.auth.uid in resource.data.participants &&
+        chatGateWriteAllowed(resource.data, request.resource.data) &&
         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['ownerUid', 'moderatorUid', 'isGroup', 'closedAt']) &&
         (resource.data.get('closedAt', null) == null || request.resource.data.get('chatGate', {}) == resource.data.get('chatGate', {})) &&
         (request.resource.data.participants == resource.data.participants ||
@@ -448,6 +590,27 @@ service cloud.firestore {
           get(/databases/$(database)/documents/meetups/$(meetupId)).data.status == 'live' &&
           pairNotBlocked(get(/databases/$(database)/documents/meetups/$(meetupId)).data);
       }
+
+      match /notes/{noteId} {
+        allow read: if authed() &&
+          meetupParticipant(get(/databases/$(database)/documents/meetups/$(meetupId)).data);
+        allow create: if authed() &&
+          meetupParticipant(get(/databases/$(database)/documents/meetups/$(meetupId)).data) &&
+          request.resource.data.uid == request.auth.uid &&
+          request.resource.data.text is string &&
+          request.resource.data.text.size() > 0 &&
+          request.resource.data.createdAt == request.time;
+        allow update: if authed() &&
+          meetupParticipant(get(/databases/$(database)/documents/meetups/$(meetupId)).data) &&
+          resource.data.uid == request.auth.uid &&
+          request.resource.data.uid == resource.data.uid &&
+          request.resource.data.createdAt == resource.data.createdAt &&
+          request.resource.data.text is string &&
+          request.resource.data.text.size() > 0;
+        allow delete: if authed() &&
+          meetupParticipant(get(/databases/$(database)/documents/meetups/$(meetupId)).data) &&
+          resource.data.uid == request.auth.uid;
+      }
     }
 
     match /meetupRequests/{requestId} {
@@ -488,13 +651,14 @@ service cloud.firestore {
 
     match /referralCodes/{code} {
       allow read: if authed();
-      allow create: if authed() && request.resource.data.get('referrerUid', ownerUid(request.resource.data)) == request.auth.uid &&
+      allow create: if authed() && request.resource.data.get('source', '') != 'growth' &&
+        request.resource.data.get('referrerUid', ownerUid(request.resource.data)) == request.auth.uid &&
         request.resource.data.get('ownerUid', request.auth.uid) == request.auth.uid &&
         request.resource.data.get('uid', request.auth.uid) == request.auth.uid &&
         request.resource.data.get('userId', request.auth.uid) == request.auth.uid;
-      allow update: if isAdmin() || (authed() && resource.data.get('referrerUid', ownerUid(resource.data)) == request.auth.uid &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['referrerUid', 'rootReferrerUid', 'ownerUid', 'uid', 'userId', 'blocked', 'flagged']));
-      allow delete: if isAdmin() || (authed() && resource.data.get('referrerUid', ownerUid(resource.data)) == request.auth.uid);
+      allow update: if resource.data.get('source', '') != 'growth' && (isAdmin() || (authed() && resource.data.get('referrerUid', ownerUid(resource.data)) == request.auth.uid &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['referrerUid', 'rootReferrerUid', 'ownerUid', 'uid', 'userId', 'blocked', 'flagged', 'source'])));
+      allow delete: if resource.data.get('source', '') != 'growth' && (isAdmin() || (authed() && resource.data.get('referrerUid', ownerUid(resource.data)) == request.auth.uid));
     }
 
     match /partyConnections/{connectionId} {
@@ -541,8 +705,13 @@ service cloud.firestore {
     match /supportTickets/{ticketId} {
       allow create: if authed() && safeSupportCreate(request.resource.data);
       allow read: if authed() && supportCanRead(resource.data);
-      allow update: if isAdmin() || ownerReportUpdate();
+      allow update: if resource.data.get('workflow', '') != 'growth' && (isAdmin() || ownerReportUpdate());
       allow delete: if isAdmin();
+
+      match /replies/{replyId} {
+        allow read: if authed() && supportCanRead(get(/databases/$(database)/documents/supportTickets/$(ticketId)).data);
+        allow write: if false;
+      }
     }
 
     match /keywordReports/{reportId} {
@@ -569,9 +738,11 @@ service cloud.firestore {
     }
 
     match /feedback/{feedbackId} {
-      allow create: if authed() && isDocOwner(request.resource.data);
+      allow create: if authed() && isDocOwner(request.resource.data) && consistentOwnerAliases(request.resource.data);
       allow read: if authed() && (isDocOwner(resource.data) || isAdmin());
-      allow update, delete: if authed() && (isDocOwner(resource.data) || isAdmin());
+      allow update: if isAdmin() || (isDocOwner(resource.data) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['uid', 'ownerUid', 'userId', 'createdBy', 'reporterUid']));
+      allow delete: if authed() && (isDocOwner(resource.data) || isAdmin());
     }
 
     // --- APP METRICS / UTIL ---
@@ -620,6 +791,36 @@ service cloud.firestore {
       allow update: if isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['operatorStatus', 'operatorNote', 'operatorUpdatedAt']);
       allow create, delete: if false;
     }
+
+    // Growth grants, eligibility, diagnostics and operational timestamps are
+    // exclusively written by authenticated callables and evidence triggers.
+    match /growthMembers/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if false;
+    }
+    match /growthDailyMetrics/{day} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    match /growthOpsAudit/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Owner drafts and the moderation queue are private; publication is only
+    // written by paid-entitlement checked callables and human administrator review.
+    match /businessOffers/{offerId} {
+      allow read: if isAdmin() || (authed() && resource.data.uid == request.auth.uid);
+      allow write: if false;
+    }
+    // The public audience still needs live entitlement, block and mutual Party
+    // checks, so customers obtain a bounded allowlisted page through the callable.
+    match /publicBusinessOffers/{offerId} {
+      allow read, write: if false;
+    }
+    match /businessOfferRequests/{id} { allow read, write: if false; }
+    match /businessOfferBudgets/{id} { allow read, write: if false; }
+    match /businessOfferTombstones/{id} { allow read, write: if false; }
 
     // Deny unknown paths by default.
     match /{document=**} {

@@ -3,6 +3,8 @@ import "dart:io";
 import "package:flutter/material.dart";
 import "package:flutter_test/flutter_test.dart";
 
+import "package:prox/models/user_settings.dart";
+import "package:prox/screens/services/user_settings_service.dart";
 import "package:prox/screens/simple_mode/simple_mode_choice_screen.dart";
 
 void main() {
@@ -71,6 +73,26 @@ void main() {
       expect(source, contains("setSimpleModeCompleted(true)"));
       expect(
           source, contains("setState(() => _view = _ExperienceGateView.home)"));
+    });
+
+    test("simple mode stage index clamps to the valid progression range", () {
+      final service = UserSettingsService.forTesting();
+
+      service.setSimpleModeStageIndex(-12);
+      expect(service.current.simpleModeStageIndex, 0);
+
+      service.setSimpleModeStageIndex(99);
+      expect(service.current.simpleModeStageIndex, 5);
+    });
+
+    test("user settings copyWith clamps the simple mode stage index", () {
+      final settings = const UserSettings.defaults();
+
+      final low = settings.copyWith(simpleModeStageIndex: -12);
+      expect(low.simpleModeStageIndex, 0);
+
+      final high = settings.copyWith(simpleModeStageIndex: 99);
+      expect(high.simpleModeStageIndex, 5);
     });
   });
 }

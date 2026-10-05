@@ -37,6 +37,27 @@ export { onBugReportScoreFeedback, onSupportTicketScoreFeedback } from "./lib/te
 export {
   createReferralSingleUseToken,
   referralApkDownload,
+  restrictedApkDownload,
   finalizeReferralSingleUseToken,
   linkReferralCode,
 } from "./referral_downloads";
+
+export {onBackgroundPresence, onBackgroundMatchAlert, getBackgroundOpportunity, listBackgroundOpportunities} from './background_matching';
+export {
+  getGrowthStatus, joinTesterCohort, createGrowthInvite, acceptGrowthReferral,
+  syncGrowthProgress, recordGrowthSession, submitGrowthSupport, replyToSupportTicket,
+  updateSupportTicket, getGrowthOps, reviewGrowthReward, reviewTesterApplication, updateGrowthConfig,
+  onGrowthAuthCreate, onGrowthProfile, onGrowthChatMessage, onGrowthMeetupReceipt,
+  recomputeGrowthDailyMetrics,
+} from './growth_ops';
+export {
+  onLegacyFeedbackSupport, onLegacyBugReportSupport, onLegacySupportTicket,
+  backfillLegacySupport,
+} from './growth_legacy_support';
+export {
+  onBusinessAutomationWritten, runBusinessFollowupAutomation, configureBusinessAutomation,
+} from './lib/business_automation_runner';
+export {
+  upsertBusinessOffer, changeBusinessOfferState, reviewBusinessOffer,
+  listPublicBusinessOffers, onBusinessOfferAccountDeleted,
+} from './lib/business_offers';

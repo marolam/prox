@@ -124,6 +124,24 @@ class PresenceWriter {
   double? _lastLat;
   double? _lastLng;
   DateTime? _lastTs;
+  Map<String, dynamic> _travelSample = const {};
+  Map<String, dynamic> get travelSample => Map.unmodifiable(_travelSample);
+
+  void _recordTravelSample(
+    Position pos, {
+    required bool cached,
+    double? speed,
+  }) {
+    _travelSample = {
+      "locationTs": Timestamp.fromDate(pos.timestamp),
+      "geopoint": GeoPoint(pos.latitude, pos.longitude),
+      "speedMps": pos.speed.isFinite && pos.speed >= 0
+          ? pos.speed
+          : (speed ?? -1),
+      "accuracyMeters": pos.accuracy,
+      "cached": cached,
+    };
+  }
 
   double? _lastWriteLat;
   double? _lastWriteLng;
@@ -277,6 +295,7 @@ class PresenceWriter {
     _lastLat = null;
     _lastLng = null;
     _lastTs = null;
+    _travelSample = const {};
     _lastWrite = null;
     _lastWriteLat = null;
     _lastWriteLng = null;
@@ -435,6 +454,7 @@ class PresenceWriter {
       _lastLat = null;
       _lastLng = null;
       _lastTs = null;
+      _travelSample = const {};
       _positionPending = null;
       _motion.reset();
       _currentMotion = MotionState.unknown;
@@ -570,6 +590,7 @@ class PresenceWriter {
       }
     }
 
+    _recordTravelSample(pos, cached: usedCached, speed: speedMps);
     _lastLat = pos.latitude;
     _lastLng = pos.longitude;
     _lastTs = pos.timestamp;
@@ -580,7 +601,7 @@ class PresenceWriter {
         MotionSnapshot(
           lat: pos.latitude,
           lng: pos.longitude,
-          ts: now,
+          ts: pos.timestamp,
           motion: _currentMotion,
           speedMps: speedMps,
         ),
@@ -870,6 +891,7 @@ class PresenceWriter {
 
       _lastLat = pos.latitude;
       _lastLng = pos.longitude;
+      _recordTravelSample(pos, cached: usedCached);
       _lastTs = pos.timestamp;
       _lastCached = usedCached;
 
@@ -916,6 +938,25 @@ class PresenceWriter {
       if (!_sessionIsCurrent(uid, revision)) return false;
       await ref
           .set(<String, Object?>{
+            ..._travelSample,
+            "modeKind": UserSettingsService
+                .instance
+                .current
+                .matchDiscovery
+                .modeKind
+                .name,
+            "normalMode": UserSettingsService
+                .instance
+                .current
+                .matchDiscovery
+                .normalMode
+                .name,
+            "listenRole": UserSettingsService
+                .instance
+                .current
+                .matchDiscovery
+                .listenRole
+                .name,
             "kind": "current",
             "geopoint": GeoPoint(demoAdjusted.lat, demoAdjusted.lon),
             "latitude": demoAdjusted.lat,

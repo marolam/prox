@@ -69,8 +69,8 @@ class BusinessModeScreen extends StatelessWidget {
           ),
           ListTile(
             leading: const Icon(Icons.smart_toy_outlined),
-            title: const Text('Try an away message'),
-            subtitle: const Text('Preview and copy a reply'),
+            title: const Text('Business avatar reply'),
+            subtitle: const Text('Configure and save your reply message'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => open(const BusinessAvatarSettingsScreen()),
           ),

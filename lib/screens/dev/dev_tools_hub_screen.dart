@@ -6,6 +6,7 @@ import 'package:prox/screens/review/release_candidate_checklist_screen.dart';
 import 'package:prox/screens/review/tester_mission_screen.dart';
 import 'package:prox/dev/dev_user_simulator_screen.dart';
 import 'package:prox/screens/store/feature_example_screen.dart';
+import 'package:prox/screens/dev/growth_ops_screen.dart';
 
 class DevToolsHubScreen extends StatelessWidget {
   const DevToolsHubScreen({super.key, this.title = 'Tester tools'});
@@ -16,6 +17,7 @@ class DevToolsHubScreen extends StatelessWidget {
     body: ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        const GrowthOpsEntry(),
         const Text(
           'Check the running app, complete a repeatable mission, and practice with isolated examples.',
         ),
