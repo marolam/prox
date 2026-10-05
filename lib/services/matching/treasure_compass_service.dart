@@ -6,7 +6,7 @@ import 'package:prox/services/device_location_resolver.dart';
 import 'package:prox/services/geoquery_service.dart';
 import 'package:prox/services/location_privacy_service.dart';
 import 'package:prox/services/matching/matching_runtime_service.dart';
-import 'package:prox/services/party_service.dart';
+import 'package:prox/services/party_mode_service.dart';
 import 'package:prox/services/privacy/block_service.dart';
 
 export 'package:prox/services/matching/treasure_area_snapshot.dart';
@@ -81,11 +81,9 @@ class TreasureCompassService {
       if (settings.partyScope == MatchPartyScope.partyOnly ||
           settings.partyScope == MatchPartyScope.tree ||
           settings.partyScope == MatchPartyScope.extendedOnly) {
-        final entries = await PartyService.instance
-            .watchMyPartyEntries()
-            .first
+        members = await PartyModeService.instance
+            .loadApprovedPartyUids(uid)
             .timeout(const Duration(seconds: 5));
-        members = entries.map((entry) => entry.otherUid).toSet();
       }
       await BlockService.instance.ready.timeout(const Duration(seconds: 5));
       if (!current()) throw StateError('Compass session changed.');

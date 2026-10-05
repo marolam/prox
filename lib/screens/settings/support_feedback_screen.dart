@@ -45,6 +45,7 @@ class _SupportFeedbackScreenState extends State<SupportFeedbackScreen> {
   Map<String, String> _metadata = const {};
   SupportAttachment? _attachment;
   SupportReportRequest? _pendingRequest;
+  bool _deliveryUncertain = false;
   String? _lastTicketId;
   String? _attachmentError;
   bool _picking = false;
@@ -203,15 +204,31 @@ class _SupportFeedbackScreenState extends State<SupportFeedbackScreen> {
           attachment: _attachment,
           expectedUid: _ownerUid,
         );
-        _lastTicketId =
+        final ticketId =
             await (widget.submitReport ?? SupportService.instance.submitReport)(
               _pendingRequest!,
             );
+        if (_ownerUid != null &&
+            FirebaseAuth.instance.currentUser?.uid != _ownerUid) {
+          throw StateError(
+            'Your account changed. Return to the original account to retry.',
+          );
+        }
         if (widget.submitReport == null) {
           try {
-            await SupportTicketQueue.instance.removeDraft(_requestId);
+            await SupportTicketQueue.instance.removeDraft(
+              _requestId,
+              expectedOwner: _ownerUid,
+            );
           } catch (_) {}
         }
+        if (_ownerUid != null &&
+            FirebaseAuth.instance.currentUser?.uid != _ownerUid) {
+          throw StateError(
+            'Your account changed. Return to the original account to retry.',
+          );
+        }
+        _lastTicketId = ticketId;
       }
 
       if (!mounted) return;
@@ -219,6 +236,7 @@ class _SupportFeedbackScreenState extends State<SupportFeedbackScreen> {
       _text.clear();
       _huh.clear();
       _pendingRequest = null;
+      _deliveryUncertain = false;
       _requestId = SupportService.newRequestId();
       _attachment = null;
 
@@ -226,14 +244,17 @@ class _SupportFeedbackScreenState extends State<SupportFeedbackScreen> {
       messenger.showSnackBar(
         SnackBar(content: Text("${_category.label} sent. Thank you.")),
       );
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text("Couldn't send right now. Please try again."),
-        ),
+      final rejected = supportSubmissionWasRejected(error);
+      final errorMessage = supportSubmissionErrorMessage(
+        error,
+        deliveryUncertain: _deliveryUncertain,
       );
+      if (rejected && !_deliveryUncertain) _pendingRequest = null;
+      if (!rejected) _deliveryUncertain = true;
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(content: Text(errorMessage)));
     } finally {
       if (mounted) setState(() => _submitting = false);
     }

@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:prox/services/auth/authenticated_callable.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -22,6 +23,56 @@ enum SupportCategory {
   const SupportCategory(this.label);
   final String label;
 }
+
+/// Keep uncertain deliveries retryable without treating every rejection as
+/// a connection failure or exposing server exception payloads.
+String supportSubmissionErrorMessage(
+  Object error, {
+  bool deliveryUncertain = false,
+}) {
+  if (deliveryUncertain && supportSubmissionWasRejected(error)) {
+    return 'The latest attempt was rejected, but an earlier attempt may have arrived. Check My support tickets or retry this saved report with the same details.';
+  }
+  if (error is FirebaseFunctionsException) {
+    return switch (error.code) {
+      'unauthenticated' =>
+        'Your sign-in could not be verified. Sign in again, then retry. Your draft is kept.',
+      'permission-denied' =>
+        'This account could not submit the report. Check your account and screenshot, then retry. Your draft is kept.',
+      'invalid-argument' =>
+        'Check the subject, message, category, and screenshot, then try again. Your draft is kept.',
+      'resource-exhausted' =>
+        'The support submission limit has been reached. Your draft is kept; try again later.',
+      'failed-precondition' =>
+        'Reopen your saved draft and check your account and screenshot before retrying.',
+      'already-exists' =>
+        'This draft differs from an earlier submission. Check My support tickets before sending a new report.',
+      _ =>
+        'Submission could not be confirmed. Retry with this saved draft; it will keep the same report reference.',
+    };
+  }
+  if (error is FirebaseAuthException ||
+      (error is StateError &&
+          const {
+            'Sign in to the account that created this report.',
+            'Your account changed. Return to the original account to retry.',
+            'Sign in to the account that opened this screen.',
+            'Your account changed. Reopen this screen.',
+          }.contains(error.message))) {
+    return 'Return to the account that created this draft, then retry. Your draft is kept.';
+  }
+  return 'Submission could not be confirmed. Retry with this saved draft; it will keep the same report reference.';
+}
+
+bool supportSubmissionWasRejected(Object error) =>
+    error is FirebaseFunctionsException &&
+    const {
+      'unauthenticated',
+      'permission-denied',
+      'invalid-argument',
+      'resource-exhausted',
+      'failed-precondition',
+    }.contains(error.code);
 
 /// An image stays private: the callable receives a Storage path, never a URL.
 class SupportAttachment {

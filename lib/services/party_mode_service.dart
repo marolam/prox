@@ -5,6 +5,7 @@ import 'package:prox/utils/auth_bound_stream.dart';
 /// Party membership comes from server-projected mutual connections.
 class PartyModeService {
   PartyModeService({
+    FirebaseFirestore? firestore,
     Stream<String?> Function()? accountChanges,
     String? Function()? currentUid,
     Stream<Set<String>> Function(String uid)? approvedMembers,
@@ -15,15 +16,20 @@ class PartyModeService {
            )),
        _currentUid =
            currentUid ?? (() => FirebaseAuth.instance.currentUser?.uid),
-       _members = approvedMembers ?? _firestoreMembers;
+       _members =
+           approvedMembers ??
+           ((uid) =>
+               _firestoreMembers(firestore ?? FirebaseFirestore.instance, uid));
 
   static final PartyModeService instance = PartyModeService();
   final Stream<String?> Function() _accounts;
   final String? Function() _currentUid;
   final Stream<Set<String>> Function(String) _members;
 
-  static Stream<Set<String>> _firestoreMembers(String uid) => FirebaseFirestore
-      .instance
+  static Stream<Set<String>> _firestoreMembers(
+    FirebaseFirestore db,
+    String uid,
+  ) => db
       .collection('users')
       .doc(uid)
       .collection('party')
@@ -48,5 +54,20 @@ class PartyModeService {
       watch: (uid) => _members(uid).map((values) => Set.unmodifiable(values)),
       empty: const <String>{},
     );
+  }
+
+  /// A loaded snapshot for one-shot matching; unlike the live stream, this does
+  /// not include the empty account-reset event emitted before Firestore loads.
+  Future<Set<String>> loadApprovedPartyUids(String expectedUid) async {
+    void checkAccount() {
+      if (expectedUid.isEmpty || _currentUid() != expectedUid) {
+        throw StateError('Party account changed.');
+      }
+    }
+
+    checkAccount();
+    final members = await _members(expectedUid).first;
+    checkAccount();
+    return Set.unmodifiable(members);
   }
 }

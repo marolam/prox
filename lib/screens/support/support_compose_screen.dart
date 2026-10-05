@@ -10,8 +10,19 @@ import 'package:prox/services/support_email.dart';
 import 'package:prox/widgets/safe_snack.dart';
 
 class SupportComposeScreen extends StatefulWidget {
-  const SupportComposeScreen({super.key, this.existingDraft});
+  const SupportComposeScreen({
+    super.key,
+    this.existingDraft,
+    this.submitReport,
+    this.loadMetadata,
+    this.currentUid,
+    this.draftQueue,
+  });
   final SupportTicketDraft? existingDraft;
+  final Future<String> Function(SupportReportRequest request)? submitReport;
+  final Future<Map<String, String>> Function()? loadMetadata;
+  final String? Function()? currentUid;
+  final SupportTicketQueue? draftQueue;
   @override
   State<SupportComposeScreen> createState() => _SupportComposeScreenState();
 }
@@ -30,8 +41,13 @@ class _SupportComposeScreenState extends State<SupportComposeScreen> {
   SupportAttachment? _attachment;
   Map<String, String> _metadata = const {};
   SupportReportRequest? _pendingReport;
+  bool _deliveryUncertain = false;
+
+  SupportTicketQueue get _queue =>
+      widget.draftQueue ?? SupportTicketQueue.instance;
 
   String? _currentUid() {
+    if (widget.currentUid != null) return widget.currentUid!();
     try {
       return FirebaseAuth.instance.currentUser?.uid;
     } catch (_) {
@@ -52,12 +68,12 @@ class _SupportComposeScreenState extends State<SupportComposeScreen> {
       (value) => value.name == draft?.category,
       orElse: () => SupportCategory.question,
     );
-    SupportService.collectMetadata()
+    (widget.loadMetadata ?? SupportService.collectMetadata)()
         .then((value) {
           if (mounted) setState(() => _metadata = value);
         })
         .catchError((Object _) {});
-    SupportTicketQueue.instance.ensureLoaded().catchError((Object _) {
+    _queue.ensureLoaded().catchError((Object _) {
       if (mounted)
         setState(
           () => _error =
@@ -80,7 +96,7 @@ class _SupportComposeScreenState extends State<SupportComposeScreen> {
     if (subject.isEmpty && message.isEmpty) return false;
     if (_ownerUid != _currentUid()) return false;
     try {
-      await SupportTicketQueue.instance.upsertDraft(
+      await _queue.upsertDraft(
         SupportTicketDraft(
           id: _draftId,
           createdAt: _createdAt,
@@ -185,22 +201,39 @@ class _SupportComposeScreenState extends State<SupportComposeScreen> {
         source: 'support_compose',
         firstHuhMoment: widget.existingDraft?.firstHuhMoment ?? '',
       );
-      await SupportService.instance.submitReport(_pendingReport!);
+      await (widget.submitReport ?? SupportService.instance.submitReport)(
+        _pendingReport!,
+      );
+      if (_currentUid() != _ownerUid) {
+        throw StateError(
+          'Your account changed. Return to the original account to retry.',
+        );
+      }
       _submitted = true;
       try {
-        await SupportTicketQueue.instance.removeDraft(_draftId);
+        await _queue.removeDraft(_draftId, expectedOwner: _ownerUid);
       } catch (_) {
         /* Submission is confirmed even if local cleanup fails. */
+      }
+      if (_currentUid() != _ownerUid) {
+        throw StateError(
+          'Your account changed. Return to the original account to retry.',
+        );
       }
       if (!mounted) return;
       safeShowSnackBar(context, 'Support ticket submitted.');
       Navigator.of(context).maybePop();
-    } catch (_) {
+    } catch (error) {
       if (mounted)
-        setState(
-          () => _error =
-              'Submission could not be confirmed. Check your connection and retry; your saved draft stays on this device.',
-        );
+        setState(() {
+          final rejected = supportSubmissionWasRejected(error);
+          _error = supportSubmissionErrorMessage(
+            error,
+            deliveryUncertain: _deliveryUncertain,
+          );
+          if (rejected && !_deliveryUncertain) _pendingReport = null;
+          if (!rejected) _deliveryUncertain = true;
+        });
     } finally {
       if (mounted) setState(() => _busy = false);
     }

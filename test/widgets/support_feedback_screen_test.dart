@@ -23,7 +23,10 @@ void main() {
     );
     expect(sendButton.onPressed, isNull);
 
-    await tester.enterText(find.widgetWithText(TextField, "What broke?"), "   ");
+    await tester.enterText(
+      find.widgetWithText(TextField, "What broke?"),
+      "   ",
+    );
     await tester.pump();
 
     sendButton = tester.widget<FilledButton>(
@@ -31,7 +34,10 @@ void main() {
     );
     expect(sendButton.onPressed, isNull);
 
-    await tester.enterText(find.widgetWithText(TextField, "What broke?"), "Map jump");
+    await tester.enterText(
+      find.widgetWithText(TextField, "What broke?"),
+      "Map jump",
+    );
     await tester.pump();
 
     sendButton = tester.widget<FilledButton>(
@@ -47,14 +53,15 @@ void main() {
 
     await tester.pumpWidget(
       wrap(
-        submitFeedback: ({
-          required ProxFeedbackType type,
-          required String text,
-          String? firstHuhMoment,
-          String source = "in_app",
-        }) {
-          return completer.future;
-        },
+        submitFeedback:
+            ({
+              required ProxFeedbackType type,
+              required String text,
+              String? firstHuhMoment,
+              String source = "in_app",
+            }) {
+              return completer.future;
+            },
       ),
     );
 
@@ -98,14 +105,15 @@ void main() {
   testWidgets("shows stable retry message on submit failure", (tester) async {
     await tester.pumpWidget(
       wrap(
-        submitFeedback: ({
-          required ProxFeedbackType type,
-          required String text,
-          String? firstHuhMoment,
-          String source = "in_app",
-        }) async {
-          throw StateError("backend unavailable");
-        },
+        submitFeedback:
+            ({
+              required ProxFeedbackType type,
+              required String text,
+              String? firstHuhMoment,
+              String source = "in_app",
+            }) async {
+              throw StateError("backend unavailable");
+            },
       ),
     );
 
@@ -118,7 +126,9 @@ void main() {
     await tester.pump();
 
     expect(
-      find.text("Couldn't send right now. Please try again."),
+      find.text(
+        'Submission could not be confirmed. Retry with this saved draft; it will keep the same report reference.',
+      ),
       findsOneWidget,
     );
   });

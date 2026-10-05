@@ -126,8 +126,11 @@ class SupportTicketQueue extends ChangeNotifier {
     );
   }
 
-  Future<void> removeDraft(String draftId) async {
+  Future<void> removeDraft(String draftId, {String? expectedOwner}) async {
     final owner = _currentOwner;
+    if (expectedOwner != null && owner != expectedOwner) {
+      throw StateError('Account changed');
+    }
     await ensureLoaded();
     if (_owner != owner || _currentOwner != owner)
       throw StateError('Account changed');
