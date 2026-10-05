@@ -154,8 +154,18 @@ test('explicitly configured provider gets one stable idempotency key despite con
   assert.equal(calls[0].token, 'test-only-token');
   assert.equal((await db.doc(`businessAutomationReceipts/${first.receiptId}`).get()).get('state'), 'sent');
   assert.equal((await db.collection('users/alice/business/events/items').get()).size, 1);
-  assert.equal(await processBusinessAutomation(first.jobId, {transport}), 'noop');
+  // Either duplicate source can win the shared receipt. Settle a worker that
+  // saw the active lease, then require both jobs to remain terminal on replay.
+  for (const jobId of [first.jobId, second.jobId]) {
+    const result = await processBusinessAutomation(jobId, {transport});
+    assert.ok(['noop', 'deduplicated'].includes(result));
+  }
+  for (const jobId of [first.jobId, second.jobId]) {
+    assert.equal(await processBusinessAutomation(jobId, {transport}), 'noop');
+  }
   assert.equal(calls.length, 1);
+  assert.equal((await db.collection('users/alice/business/events/items').get()).size, 1);
+  assert.equal((await db.doc(`businessAutomationReceipts/${first.receiptId}`).get()).get('state'), 'sent');
 });
 
 test('ambiguous provider outcomes hold for review and never blindly resend', async () => {
