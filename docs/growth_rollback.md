@@ -1,5 +1,7 @@
 # Prox growth rollout rollback baseline
 
+The verified [0.20.1, build 28 hotfix](growth_hotfix_20261005.md) retains this original pre-growth recovery baseline. A separate checkpoint of the exact published build 27 is preserved at `artifacts/rollback/hotfix27-pre-fix-20261005T132543511961Z` and mirrored under `C:/Users/marty/Documents/ProxRollback/`; all 17 files/108,255,976 bytes matched SHA-256 and size. The build-28 installer change has its own exact private environment-byte backup. Apple accepted build 28; future uploaded recovery packages must use a new build number above 28.
+
 The October 5, 2026 baseline preserves the working app before growth work. Source
 restoration was actually performed in a new directory and checked against every
 captured file. A separate cloud drill imported the database export into an

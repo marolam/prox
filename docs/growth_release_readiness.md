@@ -1,5 +1,7 @@
 # Prox growth candidate release audit — 2026-10-05
 
+The subsequent [0.20.1, build 28 hotfix](growth_hotfix_20261005.md) is now the latest verified paired staging release and internal TestFlight build. It repairs Dashboard/Offers stream remounts, approved Party matching and support draft/retry/account cleanup. The build-27 audit below remains historical evidence for the full growth implementation; public latest remains build 26.
+
 This audit covers the published `0.20.0+27` paired staging release. The selected backend deployment, Android/iOS GitHub publication, and internal iOS TestFlight availability are complete and verified. External TestFlight beta submission/review and real cohort recruitment remain operator steps. The preserved source and live backend baseline are described in [growth_rollback.md](growth_rollback.md).
 
 ## Verified status
