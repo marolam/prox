@@ -17,6 +17,7 @@ import "package:prox/services/meetup_service.dart";
 import "package:prox/services/keyword_moderation_service.dart";
 import "package:prox/services/keyword_quality_service.dart";
 import "package:prox/services/party_service.dart";
+import "package:prox/services/party_referral_badge_service.dart";
 import "package:prox/services/user_profile_service.dart";
 import "package:prox/utils/bounded_async_map.dart";
 import "package:prox/screens/party/party_member_profile_screen.dart";
@@ -43,24 +44,24 @@ class PartyListScreen extends StatelessWidget {
   }
 
   static String? inPersonPartyReferralUid({
-    required String docId,
-    required Map<String, dynamic> data,
-  }) {
-    if (data["partyInPersonQrRequested"] != true) return null;
-    final uid = (data["uid"] ?? docId).toString().trim();
-    return uid.isEmpty ? null : uid;
-  }
-
-  static String? inPersonPartyReferrerUid({
-    required String referrerUid,
+    required String documentPath,
     required Map<String, dynamic> data,
     required String myUid,
-  }) {
-    final referrer = referrerUid.trim();
-    if (data["partyInPersonQrRequested"] != true) return null;
-    if (referrer.isEmpty || referrer == myUid.trim()) return null;
-    return referrer;
-  }
+  }) => PartyReferralBadgeService.verifiedInviteeUid(
+    documentPath: documentPath,
+    data: data,
+    myUid: myUid,
+  );
+
+  static String? inPersonPartyReferrerUid({
+    required String documentPath,
+    required Map<String, dynamic> data,
+    required String myUid,
+  }) => PartyReferralBadgeService.verifiedReferrerUid(
+    documentPath: documentPath,
+    data: data,
+    myUid: myUid,
+  );
 
   Future<Map<String, UserProfile>> _loadProfilesForUids(
     Iterable<String> uids,
@@ -789,14 +790,15 @@ class PartyListScreen extends StatelessWidget {
                             .collection("referrals")
                             .snapshots(),
                   builder: (context, myReferralsSnap) {
-                    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                    return StreamBuilder<Set<String>>(
+                      key: ValueKey('incoming-referrals-$myUid'),
                       stream: myUid.trim().isEmpty
                           ? null
-                          : FirebaseFirestore.instance
-                                .collectionGroup("referrals")
-                                .where("uid", isEqualTo: myUid)
-                                .limit(20)
-                                .snapshots(),
+                          : PartyReferralBadgeService.instance
+                                .watchIncomingReferrerUids(
+                                  expectedUid: myUid,
+                                  confirmedPartyUids: partyByUid.keys,
+                                ),
                       builder: (context, referredBySnap) {
                         final Set<String> referredByMeUids = <String>{};
                         final referralDocs =
@@ -806,28 +808,15 @@ class PartyListScreen extends StatelessWidget {
                             >[];
                         for (final doc in referralDocs) {
                           final uid = inPersonPartyReferralUid(
-                            docId: doc.id,
+                            documentPath: doc.reference.path,
                             data: doc.data(),
+                            myUid: myUid,
                           );
                           if (uid != null) referredByMeUids.add(uid);
                         }
 
-                        final Set<String> referredMeUids = <String>{};
-                        final referredByDocs =
-                            referredBySnap.data?.docs ??
-                            const <
-                              QueryDocumentSnapshot<Map<String, dynamic>>
-                            >[];
-                        for (final doc in referredByDocs) {
-                          final referrerUid = inPersonPartyReferrerUid(
-                            referrerUid: doc.reference.parent.parent?.id ?? "",
-                            data: doc.data(),
-                            myUid: myUid,
-                          );
-                          if (referrerUid != null) {
-                            referredMeUids.add(referrerUid);
-                          }
-                        }
+                        final Set<String> referredMeUids =
+                            referredBySnap.data ?? const <String>{};
 
                         final Set<String> visibleUidSet =
                             visibleRelationshipUids(

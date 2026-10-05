@@ -634,7 +634,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     Text("Trust", style: textTheme.titleMedium),
                     const SizedBox(height: 8),
-                    const ProxTrustBar(),
+                    const CurrentUserTrustBar(),
                   ],
                 ),
               ),

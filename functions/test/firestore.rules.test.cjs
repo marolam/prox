@@ -182,6 +182,76 @@ test('referral code owners are immutable and meetup counts and mutual-party flag
   await assertFails(updateDoc(doc(db('alice'), 'users/alice/referrals/bob'), {meetupsCompleted: 4}));
 });
 
+test('Party referral badges can read exact own invitee documents, including absent rows, without a group grant', async () => {
+  await seed({
+    'users/referrer/referrals/alice': {uid: 'alice', partyInPersonQrRequested: true, inPersonVerified: true},
+    'users/referrer/referrals/bob': {uid: 'bob', partyInPersonQrRequested: true, inPersonVerified: true},
+    'users/other/referrals/alice': {uid: 'alice', partyInPersonQrRequested: true, inPersonVerified: false},
+  });
+  const received = await assertSucceeds(getDoc(doc(db('alice'), 'users/referrer/referrals/alice')));
+  assert.equal(received.data().inPersonVerified, true);
+  const pending = await assertSucceeds(getDoc(doc(db('alice'), 'users/other/referrals/alice')));
+  assert.equal(pending.data().inPersonVerified, false);
+  const missing = await assertSucceeds(getDoc(doc(db('alice'), 'users/missing/referrals/alice')));
+  assert.equal(missing.exists(), false);
+  await assertSucceeds(getDoc(doc(db('referrer'), 'users/referrer/referrals/alice')));
+  const owned = await assertSucceeds(getDocs(collection(db('referrer'), 'users/referrer/referrals')));
+  assert.equal(owned.size, 2);
+  await assertFails(getDoc(doc(db('alice'), 'users/referrer/referrals/bob')));
+  await assertFails(getDoc(doc(db('mallory'), 'users/referrer/referrals/alice')));
+  await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(), 'users/referrer/referrals/alice')));
+  await assertFails(getDocs(query(collectionGroup(db('alice'), 'referrals'), where('uid', '==', 'alice'), limit(20))));
+});
+
+test('account deletion revokes exact referral reads even when the invitee document is absent', async () => {
+  await seed({
+    'users/referrer/referrals/alice': {uid: 'alice', partyInPersonQrRequested: true, inPersonVerified: true},
+    'accountDeletions/alice': {status: 'processing'},
+    'accountDeletions/referrer': {status: 'processing'},
+  });
+  await assertFails(getDoc(doc(db('alice'), 'users/referrer/referrals/alice')));
+  await assertFails(getDoc(doc(db('alice'), 'users/missing/referrals/alice')));
+  await assertFails(getDoc(doc(db('referrer'), 'users/referrer/referrals/alice')));
+});
+
+test('owner-written business descendants cannot become readable Party referrals through a group query', async () => {
+  const nested = 'users/referrer/business/draft/referrals/alice';
+  await assertSucceeds(setDoc(doc(db('referrer'), nested), {
+    uid: 'alice', partyInPersonQrRequested: true, inPersonVerified: true,
+  }));
+  await assertSucceeds(getDoc(doc(db('referrer'), nested)));
+  await assertFails(getDoc(doc(db('alice'), nested)));
+  await assertFails(getDocs(query(collectionGroup(db('alice'), 'referrals'),
+    where('uid', '==', 'alice'), where('partyInPersonQrRequested', '==', true),
+    where('inPersonVerified', '==', true), limit(20))));
+  const canonical = doc(db('referrer'), 'users/referrer/referrals/alice');
+  await assertFails(setDoc(canonical, {uid: 'alice', inPersonVerified: true}));
+  await seed({'users/referrer/referrals/alice': {uid: 'alice', partyInPersonQrRequested: true, inPersonVerified: false}});
+  await assertFails(updateDoc(canonical, {inPersonVerified: true}));
+  await assertFails(updateDoc(doc(db('alice'), 'users/referrer/referrals/alice'), {partyInPersonQrRequested: true}));
+});
+
+test('referral reminder merges and legacy Party grant notes preserve server-owned verification and rewards', async () => {
+  const reminder = doc(db('referrer'), 'users/referrer/referrals/reminder_only');
+  await assertSucceeds(setDoc(reminder, {lastReminderAt: serverTimestamp()}, {merge: true}));
+  await assertSucceeds(setDoc(reminder, {lastReminderAt: serverTimestamp()}, {merge: true}));
+  assert.equal((await assertSucceeds(getDoc(reminder))).data().uid, undefined);
+  await seed({'users/referrer/referrals/alice': {
+    uid: 'alice', inPersonVerified: true, rewardEligible: true,
+    partyInPersonQrRequested: true, meetupsCompleted: 1,
+  }});
+  const verified = doc(db('referrer'), 'users/referrer/referrals/alice');
+  await assertSucceeds(updateDoc(verified, {lastReminderAt: serverTimestamp()}));
+  await assertSucceeds(updateDoc(verified, {partyInPersonQrGrantedAt: serverTimestamp(), updatedAt: serverTimestamp()}));
+  for (const [field, value] of Object.entries({
+    inPersonVerified: false, rewardEligible: false, rewardGranted: true,
+    rewardCredited: true, meetupsCompleted: 5, referralsCompleted: 5,
+  })) {
+    await assertFails(updateDoc(verified, {[field]: value}));
+  }
+  await assertFails(deleteDoc(verified));
+});
+
 test('Storage enforces media ownership, image types and deletion-marker revocation', async () => {
   const alice = env.authenticatedContext('alice').storage();
   const bob = env.authenticatedContext('bob').storage();
