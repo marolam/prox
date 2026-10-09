@@ -154,12 +154,11 @@ Read-only live audit (October 8, 2026)
 - The protected remote `v1.0` rollback digest passes. The local canonical APK
   differs from that rollback digest; the full local rollback check does not pass.
 
-Next production candidate (October 9, 2026)
+Production release preparation (October 9, 2026)
 - The approved package version is `0.21.0+30`, newer than both published
   production `0.19.0+26` and the phones' installed `0.20.2+29`.
-- This is a source version bump, not a completed build or publication.
-  Existing production/staging download targets and live update policy remain
-  unchanged until the verified candidate and required backend changes are ready.
+- At preparation start this was a source version bump, not a publication.
+  Download targets and policy were held until package and backend verification.
 - Release preparation restored the local rollback reference from the exact
   protected `v1.0` bytes after preserving the previous local APK separately.
   The remote release was not overwritten, and the full safety gate passed.
@@ -170,6 +169,44 @@ Next production candidate (October 9, 2026)
   update gate, download and user-approved installation rather than USB delivery.
 - Continue patch versions and build numbers monotonically for later candidates.
   Do not reuse a published version/build or replace the protected rollback.
+
+Verified production publication (October 9, 2026)
+- Published `v0.21.0+30` as the stable GitHub latest release from commit
+  `2f216d9c83318ae3c748a1f43075029254754e66`. Paired workflow
+  `37883374643` completed successfully.
+- Android APK SHA-256:
+  `af11a7b00ff99ecf2e6a88e8aa0369e2a77d331fda66c512d51545de5af95f25`.
+  Package `com.prox.app`, version `0.21.0`, build `30`, signing identity and
+  manifest size/hash were verified. Anonymous pinned and permanent latest
+  downloads serve identical verified bytes.
+- iOS IPA SHA-256:
+  `b9ef133ef01647f2ff4ecdf77522a90fc2d697580621d90e43a77b5d7350cb82`.
+  Bundle `com.prox-us.prox`, version/build and manifest size/hash were verified.
+  TestFlight upload succeeded. Apple processing, tester availability and
+  App Store publication were not verified; no new iOS mandatory policy was
+  activated without a valid available installation destination.
+- Backend functions, Firestore/Storage rules and indexes deployed successfully.
+  The matching index is `READY`; legacy `licenseApi` was preserved.
+  Validation passed: clean Flutter analyzer, 428 Flutter tests (3 skipped),
+  221 backend emulator tests, 24 release Python tests and offline policy tests.
+  Both backend dependency audits reported zero vulnerabilities.
+- Remote Config version `20` activates Android latest/minimum `0.21.0+30`,
+  including the legacy Android condition. Mandatory minimum and force-latest
+  are enabled, with a pinned build-30 APK URL. Existing build-29 source also
+  honors this explicit minimum even for tester packages.
+- Ordinary referral HEAD verification passed without consuming an invitation.
+  The growth pilot Android target was intentionally promoted to production
+  latest, and only `referralApkDownload` was redeployed for that target change.
+  No active, unexpired growth invitation was available for a live growth HEAD
+  probe. The live download endpoint is `ACTIVE`, and its ordinary, fallback
+  and growth Android target variables were separately verified as production
+  latest, which resolves to the same verified build-30 APK as the updater.
+- Both phones were left on their existing packages for ordinary-user update
+  delivery. Opening online should fetch the mandatory gate; Android still
+  requires user approval to install. On-device gate/install UX remains pending
+  user observation; no USB install, downgrade or app-data clearing was done.
+- Protected `v1.0` and the local canonical rollback digest passed verification
+  again after publication. New release assets are stored separately.
 
 Operational notes
 - Keep QR payload stable over time; rotate only environment values per release.
