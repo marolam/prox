@@ -1,5 +1,5 @@
 param(
-  [string]$Repo = "marolam/prox-us",
+  [string]$Repo = "marolam/prox",
   [string]$PubspecPath = "pubspec.yaml",
   [string]$AssetName = "app-release.apk"
 )

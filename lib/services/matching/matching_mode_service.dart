@@ -123,8 +123,34 @@ class MatchingModeService extends ChangeNotifier {
 
   Future<void> _syncQueue = Future<void>.value();
   int _syncRevision = 0;
+  int _scopeRevision = 0;
 
   void syncSessionToServer() => _syncModeToServer();
+
+  /// Scope is written only for an explicit choice. Session/mode refreshes must
+  /// not overwrite the account's saved scope before server access has loaded.
+  void syncPartyScopeToServer() {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+    final scope = _settings.current.matchDiscovery.partyScope;
+    final revision = ++_scopeRevision;
+    _syncQueue = _syncQueue
+        .catchError((Object _) {})
+        .then((_) async {
+          if (revision != _scopeRevision || _auth.currentUser?.uid != uid)
+            return;
+          await _fs.doc('users/$uid/settings/matching').set({
+            'partyScope': scope.name,
+          }, SetOptions(merge: true));
+        })
+        .catchError((Object error, StackTrace stack) {
+          RuntimeDiagnosticsService.instance.record(
+            error,
+            stack,
+            operation: 'Save matching scope',
+          );
+        });
+  }
 
   void _syncModeToServer() {
     final uid = _auth.currentUser?.uid ?? "";
@@ -146,7 +172,6 @@ class MatchingModeService extends ChangeNotifier {
             "businessOnly": d.businessOnly,
             "immediateOnly": d.immediateOnly,
             "ageBracket": d.ageBracket.name,
-            "partyScope": d.partyScope.name,
             "keywordMode": d.keywordMode.name,
             "treasureRadiusMiles": d.treasureRadiusMiles,
             "updatedAtClientMs": DateTime.now().millisecondsSinceEpoch,

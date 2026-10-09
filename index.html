@@ -2,6 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <script>
+      (() => {
+        const query = new URLSearchParams(location.search);
+        if (query.has('t') || query.has('token') || query.has('code') || query.has('growth')) {
+          location.replace('referral.html' + location.search);
+        }
+      })();
+    </script>
     <title>Prox – Let What You Seek Find You</title>
     <meta
       name="description"

@@ -4,6 +4,8 @@ service firebase.storage {
   match /b/{bucket}/o {
     function signedIn() {
       return request.auth != null
+        && (!firestore.exists(/databases/(default)/documents/accountEnforcements/$(request.auth.uid))
+          || firestore.get(/databases/(default)/documents/accountEnforcements/$(request.auth.uid)).data.get('status', 'suspended') == 'active')
         && !firestore.exists(/databases/(default)/documents/accountDeletions/$(request.auth.uid));
     }
 

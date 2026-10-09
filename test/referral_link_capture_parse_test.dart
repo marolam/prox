@@ -30,6 +30,20 @@ void main() {
     expect(payload["ref"], "user_abc");
   });
 
+  test(
+    "captures code-only landing links with server-resolved ownership",
+    () async {
+      for (final url in [
+        "https://www.prox-us.com/referral.html?code=INV123",
+        "prox://referral?code=INV123",
+      ]) {
+        final payload = await _capture(url);
+        expect(payload!["code"], "INV123");
+        expect(payload["ref"], isNull);
+      }
+    },
+  );
+
   test("captures code aliases but never treats ref as code", () async {
     final fromReferralAlias = await _capture(
       "https://prox-us.com/?referral=ALIAS42&ref=user_abc",
@@ -46,11 +60,14 @@ void main() {
     expect(fromInviteAlias["ref"], "user_abc");
   });
 
-  test("ignores ref-only links so uid is not mis-read as referral code", () async {
-    final payload = await _capture("https://prox-us.com/?ref=user_abc");
+  test(
+    "ignores ref-only links so uid is not mis-read as referral code",
+    () async {
+      final payload = await _capture("https://prox-us.com/?ref=user_abc");
 
-    expect(payload, isEmpty);
-  });
+      expect(payload, isEmpty);
+    },
+  );
 
   test("accepts token links without code when ref is present", () async {
     final payload = await _capture(

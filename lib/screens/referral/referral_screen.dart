@@ -1,5 +1,7 @@
 import "package:firebase_auth/firebase_auth.dart";
+import "dart:async";
 import "package:cloud_firestore/cloud_firestore.dart";
+import "package:cloud_functions/cloud_functions.dart";
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 import "package:qr_flutter/qr_flutter.dart";
@@ -9,6 +11,8 @@ import "package:prox/screens/monetization/business_paywall_screen.dart";
 import "package:prox/services/points_service.dart";
 import "package:prox/services/referral/referral_service.dart" as refsvc;
 import "package:prox/screens/review/growth_hub_screen.dart";
+import "package:prox/services/in_person_referral_service.dart";
+import "package:prox/widgets/referral_mentor_card.dart";
 
 class ReferralScreen extends StatefulWidget {
   const ReferralScreen({super.key});
@@ -18,16 +22,42 @@ class ReferralScreen extends StatefulWidget {
 }
 
 class _ReferralScreenState extends State<ReferralScreen> {
-  bool _creating = false;
   bool _allowInPersonQrPartyJoin = false;
   bool _loadingPartyToggle = true;
+  String? _partyToggleError;
+  bool _creatingPartyQr = false;
+  InPersonReferralQr? _partyQr;
+  Timer? _partyQrTimer;
 
-  String _buildLink({required String code, required String uid}) {
-    return "https://prox-us.com/?code=$code&ref=$uid";
+  Future<void> _createInPersonQr() async {
+    if (_creatingPartyQr) return;
+    setState(() => _creatingPartyQr = true);
+    try {
+      final qr = await InPersonReferralService.createQr(
+        addToParty: _allowInPersonQrPartyJoin,
+      );
+      if (!mounted) return;
+      _partyQrTimer?.cancel();
+      setState(() => _partyQr = qr);
+      _partyQrTimer = Timer(qr.expiresAt.difference(DateTime.now()), () {
+        if (mounted) setState(() => _partyQr = null);
+      });
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Bad state: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _creatingPartyQr = false);
+    }
   }
 
-  String _buildInPersonQrLink({required String code, required String uid}) {
-    return "https://prox-us.com/?code=$code&ref=$uid&party=1&inperson=1";
+  @override
+  void dispose() {
+    _partyQrTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -44,25 +74,47 @@ class _ReferralScreenState extends State<ReferralScreen> {
       return;
     }
 
-    final allowed = await refsvc.ReferralService.instance
-        .getAllowInPersonQrPartyJoin(uid);
-    if (!mounted) return;
     setState(() {
-      _allowInPersonQrPartyJoin = allowed;
-      _loadingPartyToggle = false;
+      _loadingPartyToggle = true;
+      _partyToggleError = null;
     });
+    try {
+      final allowed = await refsvc.ReferralService.instance
+          .getAllowInPersonQrPartyJoin(uid);
+      if (!mounted) return;
+      setState(() => _allowInPersonQrPartyJoin = allowed);
+    } catch (error) {
+      if (mounted)
+        setState(
+          () => _partyToggleError =
+              'Could not load your Party invite setting: $error',
+        );
+    } finally {
+      if (mounted) setState(() => _loadingPartyToggle = false);
+    }
   }
 
   Future<void> _setReferralPartyToggle(String uid, bool value) async {
+    final previous = _allowInPersonQrPartyJoin;
+    _partyQrTimer?.cancel();
     setState(() {
       _loadingPartyToggle = true;
       _allowInPersonQrPartyJoin = value;
+      _partyQr = null;
     });
 
     try {
       await refsvc.ReferralService.instance.setAllowInPersonQrPartyJoin(
         uid,
         value,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _allowInPersonQrPartyJoin = previous);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not save your Party invite setting: $error'),
+        ),
       );
     } finally {
       if (!mounted) return;
@@ -87,30 +139,6 @@ class _ReferralScreenState extends State<ReferralScreen> {
     }
   }
 
-  Future<void> _createCode(String uid) async {
-    if (_creating) return;
-    setState(() => _creating = true);
-
-    final code = await refsvc.ReferralService.instance.createNewCode(
-      uid: uid,
-      remaining: 5,
-      allowInPersonQrPartyJoin: _allowInPersonQrPartyJoin,
-    );
-
-    if (!mounted) return;
-    setState(() => _creating = false);
-
-    if (code == null || code.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Could not create invite code right now")),
-      );
-      return;
-    }
-
-    final link = _buildLink(code: code, uid: uid);
-    await _copy(link, msg: "Referral link copied");
-  }
-
   @override
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? "";
@@ -128,152 +156,127 @@ class _ReferralScreenState extends State<ReferralScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
         children: [
+          ReferralMentorCard(uid: uid),
           const GrowthReferralEntry(),
-          StreamBuilder<List<refsvc.ReferralCodeDoc>>(
-            stream: refsvc.ReferralService.instance.streamMyCodes(uid),
-            builder: (context, snapshot) {
-              final codes = snapshot.data ?? const <refsvc.ReferralCodeDoc>[];
-              final active = codes
-                  .where((c) => c.active)
-                  .toList(growable: false);
-              final code = active.isNotEmpty ? active.first.code : null;
-
-              return Card(
-                elevation: 0,
-                color: cs.surfaceContainerHighest,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  side: BorderSide(color: cs.outline.withValues(alpha: 0.25)),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "Share your invite",
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
+          Card(
+            elevation: 0,
+            color: cs.surfaceContainerHighest,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(color: cs.outline.withValues(alpha: 0.25)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Invite someone face to face",
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "Payout unlock: +5 points when invitee completes their first 5 meetups.",
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    value: _allowInPersonQrPartyJoin,
+                    onChanged: _loadingPartyToggle || _partyToggleError != null
+                        ? null
+                        : (v) => _setReferralPartyToggle(uid, v),
+                    title: const Text(
+                      "Add my referrals to Party after profile setup",
+                    ),
+                    subtitle: Text(
+                      _allowInPersonQrPartyJoin
+                          ? "ON: after in-person verification, consent and profile setup, your referral gets a direct mentor contact."
+                          : "OFF: you are still their mentor, but referrals will not automatically add a Party contact.",
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.onSurfaceVariant,
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        "Payout unlock: +5 points when invitee completes their first 5 meetups.",
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: cs.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      SwitchListTile.adaptive(
-                        contentPadding: EdgeInsets.zero,
-                        value: _allowInPersonQrPartyJoin,
-                        onChanged: _loadingPartyToggle
-                            ? null
-                            : (v) => _setReferralPartyToggle(uid, v),
-                        title: const Text(
-                          "Allow in-person QR referrals into my Party",
-                        ),
-                        subtitle: Text(
-                          _allowInPersonQrPartyJoin
-                              ? "ON: invitees who join via in-person QR can request direct Party pairing."
-                              : "OFF: referrals will not trigger direct Party pairing.",
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: cs.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (_partyToggleError != null) ...[
+                    Text(_partyToggleError!),
+                    TextButton(
+                      onPressed: _loadReferralPartyToggle,
+                      child: const Text('Retry invite setting'),
+                    ),
+                  ],
+                  FilledButton.icon(
+                    onPressed:
+                        _creatingPartyQr ||
+                            _loadingPartyToggle ||
+                            _partyToggleError != null
+                        ? null
+                        : _createInPersonQr,
+                    icon: const Icon(Icons.qr_code),
+                    label: Text(
+                      _creatingPartyQr
+                          ? 'Creating...'
+                          : _partyQr == null
+                          ? 'Create in-person QR'
+                          : 'Refresh in-person QR',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Both locations must verify that you are together. '
+                    'After installing Prox, reopen this fresh QR link while you are still together. '
+                    'Forwarded links and ordinary invite codes cannot unlock a new account.',
+                  ),
+                  if (_partyQr != null) ...[
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => _copy(
+                              _partyQr!.link,
+                              msg: "Referral link copied",
+                            ),
+                            icon: const Icon(Icons.copy_all_outlined),
+                            label: const Text("Copy"),
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      if (code == null)
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed: _creating
-                                ? null
-                                : () => _createCode(uid),
-                            icon: _creating
-                                ? const SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(Icons.add),
-                            label: Text(
-                              _creating ? "Creating..." : "Create invite code",
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => _share(
+                              "Open my Prox QR link while we are together: ${_partyQr!.link}",
                             ),
-                          ),
-                        )
-                      else ...[
-                        Text(
-                          code,
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _buildLink(code: code, uid: uid),
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: cs.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          "QR (in-person): ${_allowInPersonQrPartyJoin ? "Party join request enabled" : "Party join request disabled"}",
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: cs.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: () => _copy(
-                                  _buildLink(code: code, uid: uid),
-                                  msg: "Referral link copied",
-                                ),
-                                icon: const Icon(Icons.copy_all_outlined),
-                                label: const Text("Copy"),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: () => _share(
-                                  "Join Prox with my invite: ${_buildLink(code: code, uid: uid)}",
-                                ),
-                                icon: const Icon(Icons.share),
-                                label: const Text("Share"),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Center(
-                          child: Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: QrImageView(
-                              data: _allowInPersonQrPartyJoin
-                                  ? _buildInPersonQrLink(code: code, uid: uid)
-                                  : _buildLink(code: code, uid: uid),
-                              size: 220,
-                              backgroundColor: Colors.white,
-                            ),
+                            icon: const Icon(Icons.share),
+                            label: const Text("Share"),
                           ),
                         ),
                       ],
-                    ],
-                  ),
-                ),
-              );
-            },
+                    ),
+                    const SizedBox(height: 12),
+                    Center(
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: QrImageView(
+                          data: _partyQr!.link,
+                          size: 220,
+                          backgroundColor: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
           const SizedBox(height: 14),
           StreamBuilder<PointsMeta>(
@@ -518,14 +521,15 @@ class _InviteTile extends StatelessWidget {
   }
 
   String _profileUpdatedLabel(DateTime? dt) {
-    if (dt == null) return "Profile updated: unknown";
+    if (dt == null) return "Mentor progress not available yet";
     final now = DateTime.now();
     final diff = now.difference(dt);
-    if (diff.inMinutes < 1) return "Profile updated: just now";
-    if (diff.inHours < 1) return "Profile updated: ${diff.inMinutes}m ago";
-    if (diff.inDays < 1) return "Profile updated: ${diff.inHours}h ago";
-    if (diff.inDays < 7) return "Profile updated: ${diff.inDays}d ago";
-    return "Profile updated: ${dt.month}/${dt.day}/${dt.year}";
+    if (diff.inMinutes < 1) return "Mentor progress updated: just now";
+    if (diff.inHours < 1)
+      return "Mentor progress updated: ${diff.inMinutes}m ago";
+    if (diff.inDays < 1) return "Mentor progress updated: ${diff.inHours}h ago";
+    if (diff.inDays < 7) return "Mentor progress updated: ${diff.inDays}d ago";
+    return "Mentor progress updated: ${dt.month}/${dt.day}/${dt.year}";
   }
 
   String _cooldownLabel(Duration left) {
@@ -536,34 +540,35 @@ class _InviteTile extends StatelessWidget {
     return "Try again in ${left.inMinutes}m";
   }
 
-  Future<void> _nudge(BuildContext context) async {
-    final left = await refsvc.ReferralService.instance.reminderCooldownLeft(
-      referrerUid: referrerUid,
-      inviteeUid: invite.uid,
-    );
-    if (left > Duration.zero) {
+  Future<void> _nudge(
+    BuildContext context, {
+    bool suggestSupport = false,
+  }) async {
+    try {
+      await refsvc.ReferralService.instance.sendMentorReminder(
+        referrerUid: referrerUid,
+        inviteeUid: invite.uid,
+        suggestSupport: suggestSupport,
+      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Mentor reminder queued and saved in their Referrals screen.',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("Reminder cooldown active. ${_cooldownLabel(left)}"),
-        ),
-      );
-      return;
-    }
-
-    final text =
-        "Quick Prox boost from your referrer: you're doing great. Keep your momentum by finishing your next meetup, and if you need help, open Support Mode in the app and we'll help you get unstuck fast.";
-    try {
-      await Share.share(text);
-      await refsvc.ReferralService.instance.markReminderSent(
-        referrerUid: referrerUid,
-        inviteeUid: invite.uid,
-      );
-    } catch (_) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Could not open share options for nudge."),
+          content: Text(
+            error is FirebaseFunctionsException
+                ? error.message ??
+                      'Could not send the reminder. Please try again.'
+                : 'Could not send the reminder. Check your connection and account, then try again.',
+          ),
         ),
       );
     }
@@ -581,7 +586,9 @@ class _InviteTile extends StatelessWidget {
 
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: FirebaseFirestore.instance
-          .collection("publicProfiles")
+          .collection("users")
+          .doc(referrerUid)
+          .collection("mentorReferrals")
           .doc(invite.uid)
           .snapshots(),
       builder: (context, userSnap) {
@@ -604,7 +611,7 @@ class _InviteTile extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      invite.uid,
+                      (userData['displayName'] as String?) ?? invite.uid,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         fontWeight: FontWeight.w800,
                       ),
@@ -613,6 +620,22 @@ class _InviteTile extends StatelessWidget {
                   Text(status, style: theme.textTheme.labelSmall),
                 ],
               ),
+              const SizedBox(height: 4),
+              Text(
+                'Your referral / mentee',
+                style: theme.textTheme.labelMedium,
+              ),
+              Text(
+                userSnap.hasError
+                    ? 'Mentor progress unavailable. Reopen this screen or contact support.'
+                    : 'Profile: ${userData["profileComplete"] == true ? "complete" : "not completed yet"}'
+                          ' · Conversation: ${userData["hasConversation"] == true ? "verified" : "not verified yet"}'
+                          ' · Verified meetups: ${userData["meetupsCompleted"] ?? invite.meetupsCompleted}',
+              ),
+              if ((userData['growthRewardStatus'] as String? ?? '').isNotEmpty)
+                Text(
+                  'Invite reward: ${userData["growthRewardStatus"]}. Requires a completed meetup; a conversation alone does not pay.',
+                ),
               const SizedBox(height: 4),
               Text(
                 "Meetup progress: $progress/5 (completed meetups: ${invite.meetupsCompleted})",
@@ -648,11 +671,19 @@ class _InviteTile extends StatelessWidget {
                   inviteeUid: invite.uid,
                 ),
                 builder: (context, cooldownSnap) {
+                  final reminderUnavailable =
+                      cooldownSnap.hasError ||
+                      cooldownSnap.connectionState != ConnectionState.done ||
+                      userSnap.hasError;
                   final left = cooldownSnap.data ?? Duration.zero;
                   final coolingDown = left > Duration.zero;
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      if (cooldownSnap.hasError)
+                        const Text(
+                          'Could not check reminder eligibility. Reopen referrals to retry.',
+                        ),
                       if (coolingDown)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 6),
@@ -668,7 +699,7 @@ class _InviteTile extends StatelessWidget {
                         children: [
                           Expanded(
                             child: OutlinedButton.icon(
-                              onPressed: coolingDown
+                              onPressed: coolingDown || reminderUnavailable
                                   ? null
                                   : () => _nudge(context),
                               icon: const Icon(Icons.campaign_outlined),
@@ -685,6 +716,13 @@ class _InviteTile extends StatelessWidget {
                             ),
                           ),
                         ],
+                      ),
+                      TextButton.icon(
+                        onPressed: coolingDown || reminderUnavailable
+                            ? null
+                            : () => _nudge(context, suggestSupport: true),
+                        icon: const Icon(Icons.support_agent_outlined),
+                        label: const Text('Suggest support to this user'),
                       ),
                     ],
                   );

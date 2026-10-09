@@ -54,6 +54,11 @@ class NotificationRouter {
     }
     if (type.contains('match')) return const NotificationDestination('/nearby');
     if (type == 'party_request') return const NotificationDestination('/party');
+    if (type == 'mentor_nudge') {
+      return NotificationDestination(
+        item.data['kind'] == 'support' ? '/support' : '/referrals',
+      );
+    }
     return const NotificationDestination('/home');
   }
 

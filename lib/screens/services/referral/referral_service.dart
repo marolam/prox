@@ -2,6 +2,8 @@ import "dart:math";
 
 import "package:cloud_firestore/cloud_firestore.dart";
 import "package:flutter/foundation.dart";
+import "package:prox/services/auth/authenticated_callable.dart";
+import "package:prox/services/growth_service.dart";
 
 class ReferralCodeDoc {
   final String code;
@@ -115,11 +117,9 @@ class ReferralInviteDoc {
 }
 
 class ReferralService {
-  ReferralService._({
-    FirebaseFirestore? firestore,
-    Random? rng,
-  })  : _fs = firestore ?? FirebaseFirestore.instance,
-        _rng = rng ?? Random.secure();
+  ReferralService._({FirebaseFirestore? firestore, Random? rng})
+    : _fs = firestore ?? FirebaseFirestore.instance,
+      _rng = rng ?? Random.secure();
 
   @visibleForTesting
   factory ReferralService.test({
@@ -148,18 +148,15 @@ class ReferralService {
   Future<bool> getAllowInPersonQrPartyJoin(String uid) async {
     final clean = uid.trim();
     if (clean.isEmpty) return false;
-    try {
-      final snap = await _fs
-          .collection("users")
-          .doc(clean)
-          .collection("settings")
-          .doc("referral")
-          .get();
-      final data = snap.data() ?? <String, dynamic>{};
-      return data["allowInPersonQrPartyJoin"] == true;
-    } catch (_) {
-      return false;
-    }
+    final snap = await _fs
+        .collection("users")
+        .doc(clean)
+        .collection("settings")
+        .doc("referral")
+        .get();
+    final data = snap.data() ?? <String, dynamic>{};
+    return (data["autoAddMentorToParty"] ?? data["allowInPersonQrPartyJoin"]) ==
+        true;
   }
 
   Future<void> setAllowInPersonQrPartyJoin(String uid, bool allowed) async {
@@ -171,13 +168,11 @@ class ReferralService {
         .doc(clean)
         .collection("settings")
         .doc("referral")
-        .set(
-      <String, Object?>{
-        "allowInPersonQrPartyJoin": allowed,
-        "updatedAt": FieldValue.serverTimestamp(),
-      },
-      SetOptions(merge: true),
-    );
+        .set(<String, Object?>{
+          "allowInPersonQrPartyJoin": allowed,
+          "autoAddMentorToParty": allowed,
+          "updatedAt": FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
 
     // Keep active codes in sync so attribution can trust code metadata.
     try {
@@ -187,16 +182,15 @@ class ReferralService {
           .where("active", isEqualTo: true)
           .get();
       for (final doc in activeCodes.docs) {
-        await doc.reference.set(
-          <String, Object?>{
-            "allowInPersonQrPartyJoin": allowed,
-            "updatedAt": FieldValue.serverTimestamp(),
-          },
-          SetOptions(merge: true),
-        );
+        await doc.reference.set(<String, Object?>{
+          "allowInPersonQrPartyJoin": allowed,
+          "updatedAt": FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
       }
-    } catch (_) {
-      // Best-effort sync only.
+    } catch (error, stack) {
+      debugPrint(
+        'Referral setting saved; legacy code synchronization failed: $error\n$stack',
+      );
     }
   }
 
@@ -208,17 +202,18 @@ class ReferralService {
         .where("referrerUid", isEqualTo: uid)
         .snapshots()
         .map((snap) {
-      final items =
-          snap.docs.map(ReferralCodeDoc.fromDoc).toList(growable: false);
-      final sorted = items.toList(growable: true)
-        ..sort((a, b) {
-          final au = a.updatedAt?.millisecondsSinceEpoch ?? 0;
-          final bu = b.updatedAt?.millisecondsSinceEpoch ?? 0;
-          if (au != bu) return bu.compareTo(au);
-          return a.code.compareTo(b.code);
+          final items = snap.docs
+              .map(ReferralCodeDoc.fromDoc)
+              .toList(growable: false);
+          final sorted = items.toList(growable: true)
+            ..sort((a, b) {
+              final au = a.updatedAt?.millisecondsSinceEpoch ?? 0;
+              final bu = b.updatedAt?.millisecondsSinceEpoch ?? 0;
+              if (au != bu) return bu.compareTo(au);
+              return a.code.compareTo(b.code);
+            });
+          return sorted;
         });
-      return sorted;
-    });
   }
 
   Stream<List<ReferralInviteDoc>> streamMyInvites(String uid) {
@@ -231,17 +226,18 @@ class ReferralService {
         .collection("referrals")
         .snapshots()
         .map((snap) {
-      final items =
-          snap.docs.map(ReferralInviteDoc.fromDoc).toList(growable: false);
-      final sorted = items.toList(growable: true)
-        ..sort((a, b) {
-          final aj = a.joinedAt?.millisecondsSinceEpoch ?? 0;
-          final bj = b.joinedAt?.millisecondsSinceEpoch ?? 0;
-          if (aj != bj) return bj.compareTo(aj);
-          return a.uid.compareTo(b.uid);
+          final items = snap.docs
+              .map(ReferralInviteDoc.fromDoc)
+              .toList(growable: false);
+          final sorted = items.toList(growable: true)
+            ..sort((a, b) {
+              final aj = a.joinedAt?.millisecondsSinceEpoch ?? 0;
+              final bj = b.joinedAt?.millisecondsSinceEpoch ?? 0;
+              if (aj != bj) return bj.compareTo(aj);
+              return a.uid.compareTo(b.uid);
+            });
+          return sorted;
         });
-      return sorted;
-    });
   }
 
   Future<String?> createNewCode({
@@ -262,7 +258,8 @@ class ReferralService {
     if ((activeCodes.count ?? 0) >= maxActiveCodesPerUser) {
       if (kDebugMode) {
         debugPrint(
-            "[ReferralService] active cap reached uid=$cleanUid count=${activeCodes.count}");
+          "[ReferralService] active cap reached uid=$cleanUid count=${activeCodes.count}",
+        );
       }
       return null;
     }
@@ -278,19 +275,15 @@ class ReferralService {
             throw StateError("collision");
           }
 
-          tx.set(
-            doc,
-            <String, Object?>{
-              "active": true,
-              "referrerUid": cleanUid,
-              "rootReferrerUid": cleanUid,
-              "remaining": remaining,
-              "allowInPersonQrPartyJoin": allowInPersonQrPartyJoin,
-              "createdAt": FieldValue.serverTimestamp(),
-              "updatedAt": FieldValue.serverTimestamp(),
-            },
-            SetOptions(merge: true),
-          );
+          tx.set(doc, <String, Object?>{
+            "active": true,
+            "referrerUid": cleanUid,
+            "rootReferrerUid": cleanUid,
+            "remaining": remaining,
+            "allowInPersonQrPartyJoin": allowInPersonQrPartyJoin,
+            "createdAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
         });
 
         if (kDebugMode)
@@ -322,21 +315,17 @@ class ReferralService {
     final iu = inviteeUid.trim();
     if (ru.isEmpty || iu.isEmpty) return null;
 
-    try {
-      final snap = await _fs
-          .collection("users")
-          .doc(ru)
-          .collection("referrals")
-          .doc(iu)
-          .get();
-      final data = snap.data() ?? const <String, dynamic>{};
-      final raw = data["lastReminderAt"];
-      if (raw is Timestamp) return raw.toDate();
-      if (raw is DateTime) return raw;
-      return null;
-    } catch (_) {
-      return null;
-    }
+    final snap = await _fs
+        .collection("users")
+        .doc(ru)
+        .collection("mentorReferrals")
+        .doc(iu)
+        .get();
+    final data = snap.data() ?? const <String, dynamic>{};
+    final raw = data["lastReminderAt"];
+    if (raw is Timestamp) return raw.toDate();
+    if (raw is DateTime) return raw;
+    return null;
   }
 
   Future<Duration> reminderCooldownLeft({
@@ -372,16 +361,22 @@ class ReferralService {
     final iu = inviteeUid.trim();
     if (ru.isEmpty || iu.isEmpty) return;
 
-    await _fs
-        .collection("users")
-        .doc(ru)
-        .collection("referrals")
-        .doc(iu)
-        .set(
-      <String, Object?>{
-        "lastReminderAt": FieldValue.serverTimestamp(),
+    await sendMentorReminder(referrerUid: ru, inviteeUid: iu);
+  }
+
+  Future<void> sendMentorReminder({
+    required String referrerUid,
+    required String inviteeUid,
+    bool suggestSupport = false,
+  }) async {
+    await callAuthenticatedFunction<Map<String, dynamic>>(
+      'sendReferralMentorNudge',
+      {
+        'expectedUid': referrerUid,
+        'inviteeUid': inviteeUid,
+        'kind': suggestSupport ? 'support' : 'use_app',
+        'requestId': GrowthService.newRequestId(),
       },
-      SetOptions(merge: true),
     );
   }
 }

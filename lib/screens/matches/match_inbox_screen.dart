@@ -9,7 +9,6 @@ import "dart:ui";
 import "package:cloud_firestore/cloud_firestore.dart";
 import "package:firebase_auth/firebase_auth.dart";
 import "package:flutter/material.dart";
-import "package:flutter/foundation.dart" show setEquals;
 
 import "package:prox/models/user_settings.dart";
 import "package:prox/screens/discovery/matching_mode_screen.dart";
@@ -27,7 +26,10 @@ import "package:prox/widgets/prox_circle_hold.dart";
 import "package:prox/screens/treasure_hunt/treasure_compass_panel.dart";
 import "package:prox/services/matching/match_pipeline.dart";
 import "package:prox/services/meetup_service.dart";
-import "package:prox/services/party_mode_service.dart";
+import "package:prox/services/matching/treasure_compass_service.dart";
+import "package:prox/services/matching_access_service.dart";
+import "package:prox/services/match_settings_service.dart";
+import "package:prox/widgets/matching_scope_picker.dart";
 import "package:prox/services/presence_writer.dart";
 import "package:prox/services/runtime_diagnostics_service.dart";
 import "package:prox/services/user_profile_service.dart";
@@ -115,7 +117,7 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
   Future<List<NearbyDoc>>? _filterFuture;
   List<NearbyDoc>? _rankInput;
   MatchDiscoverySettings? _rankDiscovery;
-  Set<String>? _rankMembers;
+  MatchingAccessSnapshot? _rankAccess;
   Future<List<MatchCandidate>>? _rankFuture;
   StreamSubscription<DateTime?>? _incomingDeadlineSub;
   DateTime? _incomingDeadline;
@@ -124,6 +126,8 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    MatchingAccessService.instance.start();
+    MatchingAccessService.instance.addListener(_onMatchingAccessChanged);
     GeoQueryService.instance.debug.addListener(_onNearbyStatusChanged);
     LocationPrivacyService.instance.addListener(_onNearbyStatusChanged);
     _orbitController = AnimationController(
@@ -438,6 +442,7 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
     WidgetsBinding.instance.removeObserver(this);
     GeoQueryService.instance.debug.removeListener(_onNearbyStatusChanged);
     LocationPrivacyService.instance.removeListener(_onNearbyStatusChanged);
+    MatchingAccessService.instance.removeListener(_onMatchingAccessChanged);
     _uiTick?.cancel();
     _orbitController.dispose();
     _incomingDeadlineSub?.cancel();
@@ -581,7 +586,7 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
               ),
               const SizedBox(height: 6),
               Text(
-                "Simple Mode keeps search at safe defaults. Only Active and Passive are available.",
+                "Simple Mode keeps search at safe defaults. Choose Active or Passive and who you match with.",
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 12),
@@ -608,7 +613,13 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
               const _LockedSearchRow(label: "Radius", value: "2 miles"),
               const _LockedSearchRow(label: "Keywords", value: "Similar"),
               const _LockedSearchRow(label: "Age", value: "Any age"),
-              const _LockedSearchRow(label: "Visibility", value: "Public"),
+              const SizedBox(height: 12),
+              MatchingScopePicker(
+                scope: discovery.partyScope,
+                publicUnlocked:
+                    MatchingAccessService.instance.current.publicUnlocked,
+                onChanged: MatchSettingsService.instance.setPartyScope,
+              ),
             ],
           ),
         ),
@@ -1106,9 +1117,21 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
     });
   }
 
+  void _onMatchingAccessChanged() {
+    if (!mounted) return;
+    TreasureCompassService.instance.clearSession();
+    setState(() {
+      _rankFuture = null;
+      _nearbyResultsReady = false;
+      _topUid = '';
+      _topKeywords = const [];
+    });
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed || !mounted) return;
+    unawaited(MatchingAccessService.instance.refresh(force: true));
     if (MatchingModeService.instance.modeKind == MatchingModeKind.travel ||
         _nearbyStreamCompleted ||
         GeoQueryService.instance.debug.status != GeoQueryStatus.ready) {
@@ -1183,21 +1206,21 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
   Future<List<MatchCandidate>> _rankedNearby(
     List<NearbyDoc> nearby,
     MatchDiscoverySettings discovery,
-    Set<String> members,
+    MatchingAccessSnapshot access,
   ) {
     if (_rankFuture != null &&
         identical(nearby, _rankInput) &&
         discovery == _rankDiscovery &&
-        setEquals(members, _rankMembers))
+        identical(access, _rankAccess))
       return _rankFuture!;
     _rankInput = nearby;
     _rankDiscovery = discovery;
-    _rankMembers = Set.of(members);
+    _rankAccess = access;
     return _rankFuture = MatchPipeline.instance
         .buildCandidates(
           nearby: nearby,
           discovery: discovery,
-          partyMemberUids: members,
+          matchingAccess: access,
         )
         .timeout(const Duration(seconds: 20));
   }
@@ -1261,12 +1284,16 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
           mode == MatchingModeKind.travel && localSample['geopoint'] is GeoPoint
           ? localSample['geopoint'] as GeoPoint
           : null;
-      yield* GeoQueryService.instance.streamNearby(
+      final nearby = GeoQueryService.instance.streamNearby(
         center: localCenter,
         radiusMiles: radiusMiles,
         userInitiated: userInitiated,
         listenOnly: mode == MatchingModeKind.listen,
       );
+      await for (final docs in nearby) {
+        unawaited(MatchingAccessService.instance.refresh(expectedUid: uid));
+        yield docs;
+      }
     }();
   }
 
@@ -1306,7 +1333,10 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
           children: [
             if (isTreasure && _compassActivated)
               TreasureCompassPanel(
-                key: ValueKey(discovery),
+                key: ValueKey((
+                  discovery,
+                  MatchingAccessService.instance.current,
+                )),
                 discovery: discovery,
               )
             else
@@ -1794,7 +1824,7 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
 
   Widget _buildNearbyCardsScrollableArea({
     required MatchDiscoverySettings discovery,
-    required Set<String> partyMemberUids,
+    required MatchingAccessSnapshot matchingAccess,
     required ColorScheme cs,
     required double bottomInset,
   }) {
@@ -1848,7 +1878,7 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                 future: _rankedNearby(
                   modeFilteredNearby,
                   discovery,
-                  partyMemberUids,
+                  matchingAccess,
                 ),
                 builder: (context, rankedSnap) {
                   final rankedLoading =
@@ -1971,7 +2001,8 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
 
                       final String? distLabel =
                           ProxDistanceFormat.bucketMilesOrNull(c.distanceMiles);
-                      final bool isPartyScope = partyMemberUids.contains(c.uid);
+                      final bool isPartyScope = matchingAccess.directUids
+                          .contains(c.uid);
 
                       return StreamBuilder<MeetupRequestState?>(
                         stream: meetupStream,
@@ -2121,6 +2152,17 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                                         crossAxisAlignment:
                                             CrossAxisAlignment.stretch,
                                         children: [
+                                          if (c.profile['treeConnectionLabel']
+                                              case final String label) ...[
+                                            Text(
+                                              label,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall
+                                                  ?.copyWith(color: cs.primary),
+                                            ),
+                                            const SizedBox(height: 8),
+                                          ],
                                           Row(
                                             children: [
                                               Semantics(
@@ -2371,10 +2413,11 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                   _rankFuture = null;
                 }
 
-                return StreamBuilder<Set<String>>(
-                  stream: PartyModeService.instance.watchApprovedPartyUids(),
-                  builder: (context, partySnap) {
-                    final partyMemberUids = partySnap.data ?? const <String>{};
+                return ListenableBuilder(
+                  listenable: MatchingAccessService.instance,
+                  builder: (context, _) {
+                    final matchingAccess =
+                        MatchingAccessService.instance.current;
 
                     return CustomScrollView(
                       physics: const ClampingScrollPhysics(),
@@ -2569,7 +2612,7 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                           hasScrollBody: true,
                           child: _buildNearbyCardsScrollableArea(
                             discovery: discovery,
-                            partyMemberUids: partyMemberUids,
+                            matchingAccess: matchingAccess,
                             cs: cs,
                             bottomInset: bottomInset,
                           ),

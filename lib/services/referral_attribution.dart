@@ -1,4 +1,5 @@
 import "package:prox/services/location_privacy_service.dart";
+import "package:prox/services/app_check_headers.dart";
 import "dart:async";
 import "dart:convert";
 
@@ -19,6 +20,7 @@ class ReferralAttribution {
       "https://us-central1-prox-42bef.cloudfunctions.net/finalizeReferralSingleUseToken";
   static const String _kReferralServerHost = "prox-us.com";
   static const String _kReferralHost = "prox.page.link";
+  bool _applying = false;
 
   Future<void> captureFromLaunchUri(Uri uri) async {
     final payload = _extractReferralPayload(uri);
@@ -29,6 +31,25 @@ class ReferralAttribution {
   Future<bool> applyIfPossible({
     String explicitUid = "",
     String uid = "",
+    Future<bool?> Function()? confirmPartyJoin,
+  }) async {
+    if (_applying) return false;
+    _applying = true;
+    try {
+      return await _applyPendingReferral(
+        explicitUid: explicitUid,
+        uid: uid,
+        confirmPartyJoin: confirmPartyJoin,
+      );
+    } finally {
+      _applying = false;
+    }
+  }
+
+  Future<bool> _applyPendingReferral({
+    required String explicitUid,
+    required String uid,
+    Future<bool?> Function()? confirmPartyJoin,
   }) async {
     final targetUid = explicitUid.trim().isNotEmpty
         ? explicitUid.trim()
@@ -51,7 +72,6 @@ class ReferralAttribution {
 
     final String? token = _normalizeString(raw["token"]?.toString());
     final String? code = _normalizeString(raw["code"]?.toString());
-    final String? referrerUid = _normalizeString(raw["ref"]);
     final bool isInPerson = raw["inperson"] == true || raw["party"] == true;
     final int receivedMs = raw["receivedAtMs"] is int
         ? (raw["receivedAtMs"] as int)
@@ -63,39 +83,46 @@ class ReferralAttribution {
               DateTime.fromMillisecondsSinceEpoch(receivedMs),
             ) >
             const Duration(hours: 72)) {
-      await _clearPendingReferral();
+      await _clearPendingReferral(expected: raw);
       return false;
     }
 
     if (token != null && token.isNotEmpty) {
+      var partyConsent = raw['partyConsentUid'] == targetUid
+          ? raw['partyConsent'] as bool?
+          : null;
+      if (isInPerson && partyConsent == null) {
+        if (confirmPartyJoin == null) return false;
+        partyConsent = await confirmPartyJoin();
+        if (partyConsent == null ||
+            FirebaseAuth.instance.currentUser?.uid != targetUid)
+          return false;
+        await DeviceStorageService.instance.set(_kStorageKey, {
+          ...raw,
+          'partyConsent': partyConsent,
+          'partyConsentUid': targetUid,
+        });
+      }
       final bool ok = await _finalizeSingleUseToken(
         uid: targetUid,
         token: token,
-        allowPersonVerified: isInPerson,
+        partyConsent: isInPerson && partyConsent == true,
       );
       if (ok) {
-        await _clearPendingReferral();
+        await _clearPendingReferral(expected: raw);
         return true;
       }
       return false;
     }
 
-    if (referrerUid == null ||
-        referrerUid.isEmpty ||
-        code == null ||
-        code.isEmpty) {
-      await _clearPendingReferral();
+    if (code == null || code.isEmpty) {
+      await _clearPendingReferral(expected: raw);
       return false;
     }
 
-    final bool ok = await _applyCodeReferral(
-      uid: targetUid,
-      code: code,
-      referrerUid: referrerUid,
-      inPersonRequested: isInPerson,
-    );
+    final bool ok = await _applyCodeReferral(uid: targetUid, code: code);
     if (ok) {
-      await _clearPendingReferral();
+      await _clearPendingReferral(expected: raw);
       return true;
     }
 
@@ -122,20 +149,18 @@ class ReferralAttribution {
   Future<bool> _applyCodeReferral({
     required String uid,
     required String code,
-    required String referrerUid,
-    required bool inPersonRequested,
   }) async {
     if (FirebaseAuth.instance.currentUser?.uid != uid) return false;
     final result = await FirebaseFunctions.instance
         .httpsCallable('linkReferralCode')
-        .call<Map<String, dynamic>>({'code': code});
+        .call<Map<String, dynamic>>({'code': code, 'expectedUid': uid});
     return result.data['linked'] == true;
   }
 
   Future<bool> _finalizeSingleUseToken({
     required String uid,
     required String token,
-    required bool allowPersonVerified,
+    required bool partyConsent,
   }) async {
     try {
       if (token.trim().isEmpty) return false;
@@ -147,17 +172,26 @@ class ReferralAttribution {
       if (idToken == null || idToken.isEmpty) return false;
 
       final Position? pos = await _readPosition();
-      final Map<String, dynamic> body = <String, dynamic>{"token": token};
+      // Keep this invitation available for retry after location onboarding.
+      // Consuming it without a location would silently drop an accepted Party join.
+      if (partyConsent &&
+          (pos == null || !pos.accuracy.isFinite || pos.accuracy > 100))
+        return false;
+      final Map<String, dynamic> body = <String, dynamic>{
+        "token": token,
+        "partyConsent": partyConsent,
+      };
       if (pos != null) {
         body["latitude"] = pos.latitude;
         body["longitude"] = pos.longitude;
-        body["accuracyM"] = pos.accuracy.isFinite ? pos.accuracy : 100;
+        body["accuracyM"] = pos.accuracy.isFinite ? pos.accuracy : 1000;
       }
 
       final http.Response res = await http
           .post(
             Uri.parse(_kFinalizeTokenUrl),
             headers: <String, String>{
+              ...await appCheckHeaders(),
               "Authorization": "Bearer $idToken",
               "Content-Type": "application/json",
             },
@@ -226,8 +260,16 @@ class ReferralAttribution {
     }
   }
 
-  Future<void> _clearPendingReferral() async {
+  Future<void> _clearPendingReferral({
+    required Map<String, dynamic> expected,
+  }) async {
     try {
+      final current = DeviceStorageService.instance.getMap(_kStorageKey);
+      if (current == null ||
+          current['token'] != expected['token'] ||
+          current['code'] != expected['code'] ||
+          current['receivedAtMs'] != expected['receivedAtMs'])
+        return;
       await DeviceStorageService.instance.set(
         _kStorageKey,
         <String, dynamic>{},
@@ -264,11 +306,6 @@ class ReferralAttribution {
 
     final String? chosenRef = ref;
     final String? chosenCode = rawCode;
-
-    if ((chosenRef == null || chosenRef.isEmpty) &&
-        (rawToken == null || rawToken.isEmpty)) {
-      return null;
-    }
 
     if (chosenCode == null || chosenCode.isEmpty) {
       if (rawToken == null || rawToken.isEmpty) return null;

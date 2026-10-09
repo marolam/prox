@@ -1,6 +1,11 @@
 {
   "indexes": [
     {
+      "collectionGroup": "matchingLocations",
+      "queryScope": "COLLECTION",
+      "fields": [{"fieldPath": "latitude", "order": "ASCENDING"}, {"fieldPath": "longitude", "order": "ASCENDING"}]
+    },
+    {
       "collectionGroup": "businessAutomationJobs",
       "queryScope": "COLLECTION",
       "fields": [{"fieldPath": "state", "order": "ASCENDING"}, {"fieldPath": "scheduledAt", "order": "ASCENDING"}]
@@ -164,6 +169,7 @@
     }
   ],
   "fieldOverrides": [
+    {"collectionGroup": "matchingLocations", "fieldPath": "expiresAt", "ttl": true, "indexes": []},
     {
       "collectionGroup": "rewardClaims",
       "fieldPath": "inviteeUid",

@@ -1,5 +1,5 @@
 import * as admin from 'firebase-admin';
-import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { HttpsError, onCall } from './lib/active_callable';
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();

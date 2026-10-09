@@ -5,6 +5,7 @@ import 'package:prox/services/growth_service.dart';
 import 'package:prox/widgets/support_attachment_preview.dart';
 import 'package:prox/screens/support/support_ticket_screen.dart';
 import 'package:prox/utils/dialog_lifecycle.dart';
+import 'package:prox/widgets/account_moderation_panel.dart';
 
 class GrowthOpsEntry extends StatelessWidget {
   const GrowthOpsEntry({super.key});
@@ -630,6 +631,21 @@ class _GrowthOpsScreenState extends State<GrowthOpsScreen> {
           TextButton(onPressed: _load, child: const Text('Retry')),
         ],
         if (_data != null) ...[
+          ListTile(
+            leading: const Icon(Icons.shield_outlined),
+            title: const Text('Account moderation'),
+            subtitle: const Text(
+              'Suspend, restore or permanently delete an abusive account.',
+            ),
+            onTap: _busy || _ownerUid == null
+                ? null
+                : () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          AccountModerationPanel(ownerUid: _ownerUid),
+                    ),
+                  ),
+          ),
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Rollout controls'),

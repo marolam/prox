@@ -5,6 +5,7 @@ import "package:cloud_firestore/cloud_firestore.dart";
 import "package:app_links/app_links.dart";
 import "package:firebase_app_check/firebase_app_check.dart";
 import "package:firebase_core/firebase_core.dart";
+import "package:firebase_auth/firebase_auth.dart";
 import "package:flutter/foundation.dart";
 import "package:flutter/material.dart";
 
@@ -64,6 +65,7 @@ import "package:prox/widgets/update_enforcement_gate.dart";
 import "package:prox/widgets/connectivity_status_banner.dart";
 import "package:prox/services/runtime_diagnostics_service.dart";
 import "package:prox/services/growth_service.dart";
+import "package:prox/widgets/party_referral_consent.dart";
 
 class ProxApp extends StatefulWidget {
   const ProxApp({super.key});
@@ -288,9 +290,33 @@ class _ProxAppState extends State<ProxApp> {
 
   void _captureReferralUri(Uri uri) {
     if (GrowthService.referralCodeFromUri(uri) != null) {
-      unawaited(GrowthService.instance.captureReferral(uri).catchError((Object _) {}));
+      unawaited(
+        GrowthService.instance.captureReferral(uri).catchError((Object _) {}),
+      );
     } else {
-      unawaited(ReferralAttribution.instance.captureFromLaunchUri(uri));
+      unawaited(_applyReferralUri(uri));
+    }
+  }
+
+  Future<void> _applyReferralUri(Uri uri) async {
+    try {
+      await ReferralAttribution.instance.captureFromLaunchUri(uri);
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null || !mounted) return;
+      await ReferralAttribution.instance.applyIfPossible(
+        explicitUid: uid,
+        confirmPartyJoin: () async {
+          final context = _navKey.currentState?.overlay?.context;
+          if (context == null || !context.mounted) return null;
+          return showPartyReferralConsent(context);
+        },
+      );
+    } catch (error, stack) {
+      RuntimeDiagnosticsService.instance.record(
+        error,
+        stack,
+        operation: 'Apply in-person referral',
+      );
     }
   }
 

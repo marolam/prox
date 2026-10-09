@@ -13,8 +13,82 @@ before(async () => {
   }, storage: {host: '127.0.0.1', port: 9198, rules: readFileSync(path.join(__dirname, '../../storage.rules'), 'utf8')}});
 });
 after(async () => { await env?.cleanup(); });
-beforeEach(async () => { await env.clearFirestore(); });
+beforeEach(async () => {
+  await env.clearFirestore();
+  // rules-unit-testing's clearStorage deletes root items but ignores prefixes.
+  // Clear nested chatMedia fixtures too: uploads deliberately cannot overwrite.
+  await env.withSecurityRulesDisabled(async context => {
+    async function clearPrefix(prefix) {
+      const {items, prefixes} = await prefix.listAll();
+      await Promise.all([...items.map(item => item.delete()), ...prefixes.map(clearPrefix)]);
+    }
+    await clearPrefix(context.storage().ref());
+  });
+});
 const db = uid => env.authenticatedContext(uid).firestore();
+
+test('suspension stops Firestore and Storage with cached tokens; enforcement and disable flags are server-owned', async () => {
+  await seed({'users/alice': {disabled: true}, 'accountEnforcements/alice': {status: 'suspended'}});
+  await assertFails(getDoc(doc(db('alice'), 'users/alice')));
+  await assertFails(setDoc(doc(db('alice'), 'users/alice/settings/matching'), {partyScope: 'public'}));
+  await assertFails(updateDoc(doc(db('alice'), 'accountEnforcements/alice'), {status: 'active'}));
+  await assertSucceeds(getDoc(doc(db('alice'), 'accountEnforcements/alice')));
+  await assertFails(uploadBytes(ref(env.authenticatedContext('alice').storage(), 'profiles/alice/selfie.jpg'),
+    new Uint8Array([1, 2, 3]), {contentType: 'image/jpeg'}));
+  await seed({'accountEnforcements/alice': {status: 'active'}});
+  await assertFails(updateDoc(doc(db('alice'), 'users/alice'), {disabled: false}));
+  await assertFails(setDoc(doc(db('alice'), 'functionRateLimits/alice'), {count: 0}));
+  await assertFails(setDoc(doc(db('alice'), 'accountModerationAudit/fake'), {action: 'restore'}));
+  await assertFails(getDoc(doc(db('alice'), 'accountModerationAudit/fake')));
+  await assertSucceeds(updateDoc(doc(db('alice'), 'users/alice'), {displayName: 'Allowed profile edit'}));
+});
+
+test('unverified new accounts cannot forge trust, recruit, chat or create a meetup, but can complete a profile and ask support', async () => {
+  await seed({'users/newbie': {referralTrustRequired: true, referralInPersonVerified: false}});
+  await assertFails(updateDoc(doc(db('newbie'), 'users/newbie'), {referralInPersonVerified: true}));
+  await assertFails(updateDoc(doc(db('newbie'), 'users/newbie'), {referralTrustRequired: false}));
+  await assertFails(updateDoc(doc(db('newbie'), 'users/newbie'), {referrer: 'forged'}));
+  await assertFails(setDoc(doc(db('newbie'), 'referralCodes/INV123'), {referrerUid: 'newbie', active: true}));
+  await assertFails(setDoc(doc(db('newbie'), 'chats/newbie__other'), {participants: ['newbie', 'other'], isGroup: false}));
+  await assertFails(setDoc(doc(db('newbie'), 'meetups/new'), {aUid: 'newbie', bUid: 'other', status: 'requested'}));
+  await assertSucceeds(updateDoc(doc(db('newbie'), 'users/newbie'), {displayName: 'New user'}));
+  await assertSucceeds(setDoc(doc(db('newbie'), 'supportTickets/new'), {uid: 'newbie', subject: 'QR help', status: 'open'}));
+});
+
+test('mentor progress is private to the direct referrer and all mentor projections are server-owned', async () => {
+  await seed({
+    'users/newbie': {referrer: 'mentor', root_referrer: 'ancestor'},
+    'users/mentor/mentorReferrals/newbie': {uid: 'newbie', mentorUid: 'mentor', profileComplete: true, meetupsCompleted: 1},
+    'users/newbie/referralMentor/current': {mentorUid: 'mentor', role: 'mentor', partyAdded: true},
+  });
+  await assertSucceeds(getDoc(doc(db('mentor'), 'users/mentor/mentorReferrals/newbie')));
+  await assertFails(getDocs(collection(db('mentor'), 'users/mentor/mentorReferrals')));
+  await assertSucceeds(getDoc(doc(db('newbie'), 'users/newbie/referralMentor/current')));
+  await assertSucceeds(getDoc(doc(db('other'), 'users/other/referralMentor/current')));
+  for (const outsider of ['other', 'ancestor', 'newbie']) {
+    await assertFails(getDoc(doc(db(outsider), 'users/mentor/mentorReferrals/newbie')));
+  }
+  await assertFails(getDoc(doc(db('mentor'), 'users/newbie/referralMentor/current')));
+  await assertFails(setDoc(doc(db('mentor'), 'users/mentor/mentorReferrals/forged'), {uid: 'forged'}));
+  await assertFails(updateDoc(doc(db('newbie'), 'users/newbie/referralMentor/current'), {mentorUid: 'other'}));
+  await assertFails(setDoc(doc(db('mentor'), 'referralMentorNudges/forged'), {fromUid: 'mentor', toUid: 'newbie'}));
+  await seed({'users/newbie/blocks/mentor': {uid: 'mentor'}});
+  await assertFails(getDoc(doc(db('mentor'), 'users/mentor/mentorReferrals/newbie')));
+  await assertFails(getDoc(doc(db('newbie'), 'users/newbie/referralMentor/current')));
+});
+
+test('mentor contact does not expose Party-private profiles or unlock trust before meeting', async () => {
+  await seed({
+    'users/mentor/party/newbie': {uid: 'newbie', mutual: true, metInPerson: false, source: 'referralMentor'},
+    'users/newbie/party/mentor': {uid: 'mentor', mutual: true, metInPerson: false, source: 'referralMentor'},
+    'users/newbie/partyProfile/current': {phone: 'private'},
+    'users/newbie': {referrer: 'mentor'},
+  });
+  await assertFails(getDoc(doc(db('mentor'), 'users/newbie/partyProfile/current')));
+  await assertFails(getDoc(doc(db('mentor'), 'users/newbie')));
+  await assertSucceeds(setDoc(doc(db('newbie'), 'chats/mentor__newbie'), {participants: ['mentor', 'newbie'], isGroup: false}));
+  await assertSucceeds(setDoc(doc(db('mentor'), 'chats/mentor__newbie/messages/help'), {from: 'mentor', to: 'newbie', text: 'How can I help?', kind: 'text'}));
+});
 
 test('closed chats reject new messages and cannot be reopened by participants', async () => {
   await seed({'chats/ended': {participants: ['alice', 'bob'], closedAt: new Date(), chatGate: {status: 'expired'}}});
@@ -176,7 +250,7 @@ test('referral code owners are immutable and meetup counts and mutual-party flag
   await assertSucceeds(setDoc(doc(db('alice'), 'referralCodes/PROX-ABC'), {referrerUid: 'alice', rootReferrerUid: 'alice', active: true, remaining: 5}));
   await assertFails(updateDoc(doc(db('alice'), 'referralCodes/PROX-ABC'), {referrerUid: 'bob'}));
   await assertFails(setDoc(doc(db('alice'), 'referralCodes/PROX-FORGED'), {referrerUid: 'bob', ownerUid: 'alice'}));
-  await assertSucceeds(setDoc(doc(db('alice'), 'users/alice/party/bob'), {uid: 'bob', mutual: false}));
+  await assertFails(setDoc(doc(db('alice'), 'users/alice/party/bob'), {uid: 'bob', mutual: false}));
   await assertFails(updateDoc(doc(db('alice'), 'users/alice/party/bob'), {mutual: true}));
   await seed({'users/alice/referrals/bob': {uid: 'bob', meetupsCompleted: 1, inPersonVerified: true}});
   await assertFails(updateDoc(doc(db('alice'), 'users/alice/referrals/bob'), {meetupsCompleted: 4}));
@@ -303,7 +377,7 @@ test('Party consent is server-only and pending users cannot read Party profiles 
   await assertSucceeds(getDoc(doc(db('alice'),'ratings/rating/entries/alice')));
   await seed({'users/alice/party/bob':{mutual:false},'users/bob/party/alice':{mutual:false}});
   await assertFails(getDoc(doc(db('bob'),'users/alice/partyProfile/sharing')));
-  await seed({'users/alice/party/bob':{mutual:true},'users/bob/party/alice':{mutual:true}});
+  await seed({'users/alice/party/bob':{mutual:true,metInPerson:true},'users/bob/party/alice':{mutual:true,metInPerson:true}});
   await assertSucceeds(getDoc(doc(db('bob'),'users/alice/partyProfile/sharing')));
   await seed({'users/bob/blocks/alice':{uid:'alice'}});
   await assertFails(getDoc(doc(db('bob'),'users/alice/partyProfile/sharing')));
@@ -331,6 +405,17 @@ test('background coordinates are private, bound to the opted-in device and rejec
   await assertSucceeds(deleteDoc(ref));
 });
 
+test('verified Party access closes immediately when a peer starts deleting their account', async () => {
+  await seed({
+    'users/alice/party/bob': {mutual: true, metInPerson: true},
+    'users/bob/party/alice': {mutual: true, metInPerson: true},
+    'users/alice/partyProfile/sharing': {phone: '555-0100'},
+  });
+  await assertSucceeds(getDoc(doc(db('bob'), 'users/alice/partyProfile/sharing')));
+  await seed({'accountDeletions/alice': {status: 'processing'}});
+  await assertFails(getDoc(doc(db('bob'), 'users/alice/partyProfile/sharing')));
+});
+
 test('alert budgets, outbox and opportunities cannot be reset or forged by a client', async () => {
   for (const collection of ['backgroundAlertState', 'backgroundAlertPairs', 'backgroundScanState', 'backgroundAlertOutbox', 'backgroundOpportunities']) {
     const ref = doc(db('alice'), `users/alice/${collection}/current`);
@@ -339,6 +424,39 @@ test('alert budgets, outbox and opportunities cannot be reset or forged by a cli
     await assertFails(setDoc(ref, {sentAt: [], otherUid: 'carol'}));
     await assertFails(deleteDoc(ref));
   }
+});
+
+test('public matching access and in-person proofs are server-owned and public choice needs a verified unlock', async () => {
+  for (const name of ['matchingLocations/alice', 'matchingConfig/publicDiscovery', 'partyInPersonSessions/session',
+    'partyInPersonCodes/code', 'partyInPersonRateLimits/alice']) {
+    await assertFails(setDoc(doc(db('alice'), name), {publicUnlocked: true}));
+    await assertFails(getDoc(doc(db('alice'), name)));
+  }
+  const access = doc(db('alice'), 'users/alice/matchingAccess/current');
+  await assertFails(setDoc(access, {publicUnlocked: true}));
+  await seed({'users/alice/matchingAccess/current': {publicUnlocked: false}});
+  await assertSucceeds(getDoc(access));
+  await assertFails(getDoc(doc(db('bob'), 'users/alice/matchingAccess/current')));
+  const settings = doc(db('alice'), 'users/alice/settings/matching');
+  await assertSucceeds(setDoc(settings, {partyScope: 'none'}));
+  await assertSucceeds(updateDoc(settings, {modeKind: 'listen'}));
+  await assertSucceeds(setDoc(settings, {partyScope: 'tree'}));
+  await assertFails(updateDoc(settings, {partyScope: 'public'}));
+  await seed({'users/alice/matchingAccess/current': {publicUnlocked: true}});
+  await assertSucceeds(updateDoc(settings, {partyScope: 'public'}));
+  await assertSucceeds(updateDoc(settings, {partyScope: 'tree'}));
+  await assertFails(setDoc(doc(db('alice'), 'users/alice/party/bob'), {uid: 'bob', mutual: true, metInPerson: true}));
+  for (const kind of ['partyPresence', 'partyHandshake', 'partyAddRequest']) {
+    await assertFails(setDoc(doc(db('alice'), `meetupRequests/${kind}`), {aUid: 'alice', bUid: 'bob', kind}));
+  }
+});
+
+test('enrollment presence stamps cannot be manufactured by clients', async () => {
+  const presence = doc(db('alice'), 'users/alice/presence/current');
+  const {GeoPoint} = require('firebase/firestore');
+  await assertSucceeds(setDoc(presence, {geopoint: new GeoPoint(40, -74), ts: serverTimestamp()}));
+  await assertFails(updateDoc(presence, {ts: new Date(0)}));
+  await assertSucceeds(deleteDoc(presence));
 });
 
 

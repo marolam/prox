@@ -7,7 +7,9 @@
  * No schema changes.
  */
 
+import "dart:async";
 import "package:cloud_firestore/cloud_firestore.dart";
+import "package:cloud_functions/cloud_functions.dart";
 import "package:firebase_auth/firebase_auth.dart";
 import "package:flutter/material.dart";
 
@@ -22,6 +24,7 @@ import "package:prox/services/user_profile_service.dart";
 import "package:prox/utils/bounded_async_map.dart";
 import "package:prox/screens/party/party_member_profile_screen.dart";
 import "package:prox/widgets/pending_party_requests.dart";
+import "package:prox/widgets/referral_mentor_card.dart";
 
 class PartyListScreen extends StatelessWidget {
   const PartyListScreen({super.key});
@@ -706,7 +709,41 @@ class PartyListScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
-      children: [const PendingPartyRequests(), _buildMembers(context)],
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Meet first. Then Party.',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Add someone you have met in person by exchanging codes while you are together. You both choose to join.',
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (_) => const _InPersonPartyDialog(),
+                    ),
+                    icon: const Icon(Icons.handshake_outlined),
+                    label: const Text('Meet in person'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const PendingPartyRequests(),
+        ReferralMentorCard(uid: FirebaseAuth.instance.currentUser?.uid ?? ""),
+        _buildMembers(context),
+      ],
     );
   }
 
@@ -716,7 +753,9 @@ class PartyListScreen extends StatelessWidget {
     final myUid = FirebaseAuth.instance.currentUser?.uid ?? "";
 
     return StreamBuilder<List<PartyMemberEntry>>(
-      stream: PartyService.instance.watchMyPartyEntries(),
+      stream: PartyService.instance.watchMyPartyEntries(
+        includeMentorContacts: true,
+      ),
       builder: (context, snap) {
         final entries = snap.data ?? const <PartyMemberEntry>[];
         final Map<String, PartyMemberEntry> partyByUid =
@@ -797,7 +836,9 @@ class PartyListScreen extends StatelessWidget {
                           : PartyReferralBadgeService.instance
                                 .watchIncomingReferrerUids(
                                   expectedUid: myUid,
-                                  confirmedPartyUids: partyByUid.keys,
+                                  confirmedPartyUids: entries
+                                      .where((entry) => entry.mutual)
+                                      .map((entry) => entry.otherUid),
                                 ),
                       builder: (context, referredBySnap) {
                         final Set<String> referredByMeUids = <String>{};
@@ -865,7 +906,9 @@ class PartyListScreen extends StatelessWidget {
                                 context,
                                 theme: theme,
                                 cs: cs,
-                                entries: entries,
+                                entries: entries
+                                    .where((entry) => entry.mutual)
+                                    .toList(growable: false),
                               ),
                               _incomingRequestsNoticeCard(
                                 context,
@@ -1248,9 +1291,6 @@ class PartyListScreen extends StatelessWidget {
                                             ),
                                             onTap: () async {
                                               if (!inParty) return;
-                                              // ignore: discarded_futures
-                                              PartyService.instance
-                                                  .reconcileMutual(uid);
                                               _openMember(context, uid);
                                             },
                                             child: Padding(
@@ -1415,7 +1455,9 @@ class PartyListScreen extends StatelessWidget {
                                                                       ),
                                                                 ),
                                                                 child: Text(
-                                                                  "In Party",
+                                                                  e.isMentorContact
+                                                                      ? "Mentor contact"
+                                                                      : "In Party",
                                                                   style: theme
                                                                       .textTheme
                                                                       .labelSmall
@@ -1482,6 +1524,233 @@ class PartyListScreen extends StatelessWidget {
     final day = d.day.toString().padLeft(2, "0");
     return "$m/$day/$y";
   }
+}
+
+class _InPersonPartyDialog extends StatefulWidget {
+  const _InPersonPartyDialog();
+  @override
+  State<_InPersonPartyDialog> createState() => _InPersonPartyDialogState();
+}
+
+class _InPersonPartyDialogState extends State<_InPersonPartyDialog> {
+  final _theirCode = TextEditingController();
+  final _ownerUid = FirebaseAuth.instance.currentUser?.uid;
+  StreamSubscription<User?>? _accounts;
+  StreamSubscription<bool>? _membership;
+  bool _invalidated = false;
+  bool _busy = true;
+  bool _consent = false;
+  bool _paired = false;
+  String? _myCode;
+  String? _message;
+
+  @override
+  void initState() {
+    super.initState();
+    _accounts = FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (user?.uid != _ownerUid) _invalidateAccount();
+    });
+    unawaited(_start());
+  }
+
+  void _invalidateAccount() {
+    if (!mounted || _invalidated) return;
+    unawaited(_membership?.cancel());
+    _membership = null;
+    _theirCode.clear();
+    setState(() {
+      _invalidated = true;
+      _busy = false;
+      _consent = false;
+      _paired = false;
+      _myCode = null;
+      _message =
+          'Your signed-in account changed. Close this session and reopen Party.';
+    });
+  }
+
+  bool _guardOwner() {
+    if (!mounted) return false;
+    if (_invalidated ||
+        _ownerUid == null ||
+        FirebaseAuth.instance.currentUser?.uid != _ownerUid) {
+      _invalidateAccount();
+      return false;
+    }
+    return true;
+  }
+
+  String _error(Object error) => error is FirebaseFunctionsException
+      ? error.message ?? 'Please reopen Meet in person and try again.'
+      : 'Could not connect. Check your connection and try again.';
+
+  Future<void> _start() async {
+    if (!_guardOwner()) return;
+    setState(() {
+      _busy = true;
+      _myCode = null;
+      _message = null;
+    });
+    try {
+      final code = await PartyService.instance.startInPersonDirectInviteSession(
+        expectedUid: _ownerUid,
+      );
+      if (!_guardOwner()) return;
+      setState(() => _myCode = code);
+    } catch (error) {
+      if (_guardOwner()) setState(() => _message = _error(error));
+    } finally {
+      if (_guardOwner()) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _confirm() async {
+    if (!_guardOwner() || !_consent) return;
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final result = await PartyService.instance
+          .confirmInPersonDirectInviteCode(
+            _theirCode.text,
+            expectedUid: _ownerUid,
+          );
+      if (!_guardOwner()) return;
+      setState(() {
+        _paired = result.paired;
+        _message = result.message;
+      });
+      final peer = result.peerUid;
+      if (!result.paired && peer != null) {
+        await _membership?.cancel();
+        if (!_guardOwner()) return;
+        _membership = PartyService.instance
+            .watchMutual(peer)
+            .listen(
+              (connected) {
+                if (!_guardOwner()) return;
+                if (connected) {
+                  setState(() {
+                    _paired = true;
+                    _message =
+                        "You both agreed. You are now in each other's Party.";
+                  });
+                }
+              },
+              onError: (Object error) {
+                if (_guardOwner()) setState(() => _message = _error(error));
+              },
+            );
+      }
+    } catch (error) {
+      if (_guardOwner()) setState(() => _message = _error(error));
+    } finally {
+      if (_guardOwner()) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _theirCode.dispose();
+    unawaited(_accounts?.cancel());
+    unawaited(_membership?.cancel());
+    if (!_invalidated && FirebaseAuth.instance.currentUser?.uid == _ownerUid) {
+      unawaited(
+        PartyService.instance
+            .stopInPersonDirectInviteSession(expectedUid: _ownerUid)
+            .catchError((Object _) {}),
+      );
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(
+      _invalidated
+          ? 'Party session ended'
+          : _paired
+          ? 'You joined Party'
+          : 'Meet in person',
+    ),
+    content: SizedBox(
+      width: 360,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (!_paired && !_invalidated) ...[
+              const Text(
+                'Stand together and enter each other’s code. Both people need location enabled. Codes expire after 3 minutes.',
+              ),
+              if (_myCode != null) ...[
+                const SizedBox(height: 16),
+                const Text('Show them your code:'),
+                SelectableText(
+                  _myCode!,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.headlineMedium?.copyWith(letterSpacing: 2),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _theirCode,
+                  enabled: !_busy,
+                  textCapitalization: TextCapitalization.characters,
+                  maxLength: 10,
+                  decoration: const InputDecoration(
+                    labelText: 'Their code',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: _consent,
+                  onChanged: _busy
+                      ? null
+                      : (value) => setState(() => _consent = value == true),
+                  title: const Text(
+                    'We have met in person, and I agree to join their Party.',
+                  ),
+                ),
+                const Text(
+                  'You will share the profile information you marked Party Visible when you both agree.',
+                ),
+              ],
+            ],
+            if (_busy)
+              const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: LinearProgressIndicator(),
+              ),
+            if (_message != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(_message!),
+              ),
+          ],
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: Text(_paired ? 'Done' : 'Close'),
+      ),
+      if (!_paired && !_invalidated) ...[
+        TextButton(
+          onPressed: _busy ? null : _start,
+          child: const Text('New code'),
+        ),
+        FilledButton(
+          onPressed: !_busy && _consent && _myCode != null ? _confirm : null,
+          child: const Text('Confirm in person'),
+        ),
+      ],
+    ],
+  );
 }
 
 class _MutualPill extends StatelessWidget {

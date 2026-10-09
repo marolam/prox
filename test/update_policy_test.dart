@@ -145,6 +145,8 @@ void main() {
       'https://example.com/update.ipa',
       'https://github.com/marolam/prox/releases/latest/download/app-release.apk',
       'https://example.com/update',
+      'https://testflight.apple.com/join/<your-code>',
+      'https://testflight.apple.com/join/%3Cyour-code%3E',
       'javascript:alert(1)',
       'http://example.com/update',
       'https://user:password@example.com',

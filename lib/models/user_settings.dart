@@ -141,7 +141,7 @@ class MatchDiscoverySettings {
     this.reciprocalMatchUnlocked = false,
     this.keywordChainUnlocked = false,
     this.ageBracket = MatchAgeBracket.any,
-    MatchPartyScope partyScope = MatchPartyScope.public,
+    MatchPartyScope partyScope = MatchPartyScope.tree,
     this.partyDepth,
     this.precisionIndex,
   }) : partyScope = partyScope;
@@ -188,7 +188,7 @@ class MatchDiscoverySettings {
         reciprocalMatchUnlocked = false,
         keywordChainUnlocked = false,
         ageBracket = MatchAgeBracket.any,
-        partyScope = MatchPartyScope.public,
+        partyScope = MatchPartyScope.tree,
         partyDepth = 1,
         precisionIndex = 1;
 
@@ -317,7 +317,7 @@ class MatchDiscoverySettings {
     final MatchAgeBracket ageBracket =
         _ageBracketFromName((raw["ageBracket"] as String?) ?? "any");
 
-    final String scopeName = (raw["partyScope"] as String?) ?? "public";
+    final String scopeName = (raw["partyScope"] as String?) ?? "tree";
     final MatchPartyScope scope = _scopeFromName(scopeName);
 
     final int? depth = (raw["partyDepth"] as num?)?.toInt();
@@ -398,7 +398,7 @@ class MatchDiscoverySettings {
         return MatchPartyScope.tree;
 
       default:
-        return MatchPartyScope.public;
+        return MatchPartyScope.tree;
     }
   }
 

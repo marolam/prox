@@ -10,12 +10,25 @@ on a bounded polling schedule, and when Firebase Remote Config announces an
 update. Login, settings and the gate share an in-flight request and a short cache.
 Mandatory updates cover every app route and preserve the current screen's state.
 Previously activated mandatory policies still apply when a refresh is offline.
+An unexpected initial package/policy loader exception keeps the initial gate
+closed with an explicit retry action rather than exposing the app without a
+completed check. A failed refresh retains a known required update and displays
+the verification error.
+
+Checks and gating are automatic, but this is not a silent native installer:
+Android sideload installation requires OS/user approval, and iOS installation
+and automatic store updates are controlled by App Store/TestFlight availability
+and device settings. A QR or browser APK download alone cannot transfer deferred
+attribution across installation; the invitation landing page retains a code/link
+for reopening the installed app or manual acceptance.
 
 Remote Config is authoritative. GitHub tags are release labels, not reliable
 installed versions: the protected `v1.0` rollback does not mean its package is
 newer than `0.18.8+18`. Checking an update no longer downloads APKs or sends each
 device to GitHub's unauthenticated API. iOS never uses an Android APK link or a raw
 IPA as its install destination.
+Placeholder TestFlight paths such as `<your-code>` (including encoded forms)
+are rejected by the app and policy preparation.
 
 ## Policy keys
 
@@ -127,6 +140,16 @@ cannot replace production latest. Rollback integrity is checked before and after
 publication. Prepared policy JSON is attached as a build artifact; the workflow
 does **not** activate a mandatory policy simply because an IPA uploaded to
 TestFlight (processing and review may still be pending).
+
+Local release/install and production verification scripts now default to
+`marolam/prox`, matching the updater and website. `marolam/prox-us` remains the
+protected rollback repository; it is not the default destination for new builds.
+Canonical Android output remains `build/app/outputs/flutter-apk/app-release.apk`;
+iOS output remains `build/ios/ipa/`. There is no separate `dist/` update feed.
+Build output is not a published update until the canonical release asset is
+available and the corresponding Remote Config policy has been activated.
+See [Referral QR release ops](referral_qr_release_ops.md) for target-sync checks,
+credit boundaries and the current live-policy discrepancies.
 
 Run the policy script regression checks locally or in CI:
 

@@ -13,6 +13,7 @@ class SimpleModePolicy {
   static const List<String> allowedHomeTabs = <String>[
     "Nearby",
     "Meetups",
+    "Party",
     "Profile",
   ];
 
@@ -23,6 +24,7 @@ class SimpleModePolicy {
       normalMode: current.normalMode,
       activeLockUntilEpochMs: current.activeLockUntilEpochMs,
       activePenaltyCount: current.activePenaltyCount,
+      partyScope: current.partyScope,
     );
   }
 

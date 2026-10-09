@@ -1,8 +1,10 @@
 import * as admin from "firebase-admin";
-import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
+import { HttpsError, onCall, onRequest, assertAccountAccess, claimCallableRequest } from "./lib/active_callable";
+import {activeEnrolledAccount} from './lib/matching_scope_policy';
 import * as logger from "firebase-functions/logger";
 import { randomBytes } from "crypto";
 import {acceptGrowthReferralForUid, ensureGrowthIdentity} from './growth_ops';
+import {connectionId, writeVerifiedPartyPair} from './party_connections';
 
 if (admin.apps.length === 0) {
   admin.initializeApp();
@@ -139,6 +141,13 @@ async function requireAuthedUid(req: { get: (name: string) => string | undefined
   if (!uid) {
     throw new Error("invalid_auth");
   }
+  await assertAccountAccess(uid);
+  if (process.env.PROX_ENFORCE_APP_CHECK === 'true') {
+    const attestation = req.get('X-Firebase-AppCheck');
+    if (!attestation) throw new HttpsError('unauthenticated', 'App verification is required.');
+    await admin.appCheck().verifyToken(attestation);
+  }
+  await claimCallableRequest(uid, true);
   return uid;
 }
 
@@ -171,10 +180,14 @@ function createSingleUseTokenId(): string {
   return `T-${randomBytes(9).toString("hex").toUpperCase()}`;
 }
 
-function buildReferralDownloadLinkWithToken(token: string): string {
+function buildReferralDownloadLinkWithToken(token: string, partyConsent = false): string {
   const root = String(process.env.PROX_REFERRAL_DOWNLOAD_URL ?? "").trim() || DEFAULT_REFERRAL_DOWNLOAD_URL;
   const url = new URL(root);
   url.searchParams.set("t", token);
+  if (partyConsent) {
+    url.searchParams.set('party', '1');
+    url.searchParams.set('inperson', '1');
+  }
   return url.toString();
 }
 
@@ -185,6 +198,27 @@ type ResLike = {
   redirect: (status: number, url: string) => void;
 };
 
+function rejectReferralAuth(res: ResLike, error: unknown): void {
+  if (error instanceof HttpsError) {
+    logger.warn('referral.auth_rejected', {code: error.code});
+    const status = error.code === 'resource-exhausted' ? 429 :
+      error.code === 'permission-denied' ? 403 : 401;
+    res.status(status).json({ok: false, error: error.code.replace(/-/g, '_'), message: error.message});
+    return;
+  }
+  const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
+  const invalidToken = ['auth/id-token-revoked', 'auth/id-token-expired', 'auth/invalid-id-token',
+    'auth/argument-error', 'auth/user-disabled', 'auth/user-not-found'].includes(code) ||
+    (error instanceof Error && ['missing_auth', 'invalid_auth'].includes(error.message));
+  if (invalidToken) {
+    logger.warn('referral.invalid_auth', {code});
+    res.status(401).json({ok: false, error: 'unauthenticated'});
+  } else {
+    logger.error('referral.auth_service_unavailable', {code});
+    res.status(503).json({ok: false, error: 'auth_service_unavailable'});
+  }
+}
+
 export const createReferralSingleUseToken = onRequest(async (req, res: ResLike) => {
   if (req.method !== "POST") {
     res.status(405).json({ ok: false, error: "method_not_allowed" });
@@ -194,12 +228,13 @@ export const createReferralSingleUseToken = onRequest(async (req, res: ResLike) 
   let uid = "";
   try {
     uid = await requireAuthedUid(req);
-  } catch (_) {
-    res.status(401).json({ ok: false, error: "unauthenticated" });
+  } catch (error) {
+    rejectReferralAuth(res, error);
     return;
   }
 
-  if ((await db.doc(`accountDeletions/${uid}`).get()).exists) {
+  const [account, deletion] = await db.getAll(db.doc(`users/${uid}`), db.doc(`accountDeletions/${uid}`));
+  if (!account.exists || deletion.exists || !activeEnrolledAccount(account.data())) {
     res.status(409).json({ok: false, error: 'account_unavailable'});
     return;
   }
@@ -208,8 +243,14 @@ export const createReferralSingleUseToken = onRequest(async (req, res: ResLike) 
   const lat = parseFinite(body.latitude);
   const lng = parseFinite(body.longitude);
   const accuracyM = clampAccuracyMeters(parseFinite(body.accuracyM));
+  const partyConsent = body.inPersonQrRequested === true && body.partyConsent === true;
+  if (lat == null || lng == null || Math.abs(lat) > 90 || Math.abs(lng) > 180 || accuracyM > 100) {
+    res.status(400).json({ok: false, error: 'fresh_location_required', message: 'A precise location is required for an in-person Party invitation.'});
+    return;
+  }
 
   const token = createSingleUseTokenId();
+  const rootReferrerUid = String(account.data()?.root_referrer || "").trim() || uid;
   const now = admin.firestore.Timestamp.now();
   const expiresAt = admin.firestore.Timestamp.fromMillis(
     Date.now() + SINGLE_USE_TTL_MINUTES * 60 * 1000,
@@ -219,8 +260,11 @@ export const createReferralSingleUseToken = onRequest(async (req, res: ResLike) 
   await tokenRef.set({
     token,
     referrerUid: uid,
+    rootReferrerUid,
     status: "new",
     singleUse: true,
+    inPersonQrRequested: partyConsent,
+    referrerPartyConsent: partyConsent,
     createdAt: now,
     updatedAt: now,
     expiresAt,
@@ -232,7 +276,7 @@ export const createReferralSingleUseToken = onRequest(async (req, res: ResLike) 
     } : null,
   }, { merge: true });
 
-  const qrLink = buildReferralDownloadLinkWithToken(token);
+  const qrLink = buildReferralDownloadLinkWithToken(token, partyConsent);
   res.status(200).json({
     ok: true,
     token,
@@ -250,8 +294,8 @@ export const restrictedApkDownload = onRequest(async (req, res: ResLike) => {
   let uid = "";
   try {
     uid = await requireAuthedUid(req);
-  } catch (_) {
-    res.status(401).json({ ok: false, error: "unauthenticated" });
+  } catch (error) {
+    rejectReferralAuth(res, error);
     return;
   }
 
@@ -296,7 +340,7 @@ export const referralApkDownload = onRequest(async (req, res: ResLike) => {
   }
   const code = normalizeCode(String(req.query.code ?? req.query.referral ?? req.query.invite ?? ""));
   const referrerHint = String(req.query.ref ?? req.query.referrer ?? "").trim();
-  const inPersonQrRequested =
+  let inPersonQrRequested =
     parseTruthy(req.query.party) || parseTruthy(req.query.inperson) || parseTruthy(req.query.partyJoin);
   const ua = String(req.get("user-agent") ?? "").slice(0, 400);
   const explicitPlatform = String(req.query.platform ?? '').trim().toLowerCase();
@@ -321,6 +365,8 @@ export const referralApkDownload = onRequest(async (req, res: ResLike) => {
     }
 
     const tokenData = tokenSnap.data() ?? {};
+    // A query parameter cannot grant Party consent on a plain referral token.
+    inPersonQrRequested = tokenData.inPersonQrRequested === true && tokenData.referrerPartyConsent === true;
     owner = String(tokenData.referrerUid ?? "").trim();
     root = String(tokenData.rootReferrerUid ?? owner).trim() || owner;
     const status = String(tokenData.status ?? "new").trim();
@@ -523,8 +569,8 @@ export const finalizeReferralSingleUseToken = onRequest(async (req, res: ResLike
   let inviteeUid = "";
   try {
     inviteeUid = await requireAuthedUid(req);
-  } catch (_) {
-    res.status(401).json({ ok: false, error: "unauthenticated" });
+  } catch (error) {
+    rejectReferralAuth(res, error);
     return;
   }
 
@@ -566,6 +612,7 @@ export const finalizeReferralSingleUseToken = onRequest(async (req, res: ResLike
           distanceM: Number(tokenData.distanceM ?? 0),
           verificationStatus: String(tokenData.verificationStatus ?? "already_completed"),
           referrerUid,
+          partyJoined: tokenData.partyJoined === true,
         };
       }
       if (status !== "claimed" && status !== "new") {
@@ -578,6 +625,9 @@ export const finalizeReferralSingleUseToken = onRequest(async (req, res: ResLike
       const refLat = parseFinite(refLoc?.latitude);
       const refLng = parseFinite(refLoc?.longitude);
       const refAcc = clampAccuracyMeters(parseFinite(refLoc?.accuracyM));
+      const refCapture = refLoc?.capturedAt;
+      const freshReferrer = refCapture instanceof admin.firestore.Timestamp && refCapture.toMillis() <= Date.now() + 10000 &&
+        Date.now() - refCapture.toMillis() <= SINGLE_USE_TTL_MINUTES * 60000;
       const partyInPersonQrRequested = tokenData.inPersonQrRequested === true;
       let distanceM = Number.NaN;
       let inPersonVerified = false;
@@ -587,25 +637,42 @@ export const finalizeReferralSingleUseToken = onRequest(async (req, res: ResLike
           Math.abs(refLat) <= 90 && Math.abs(inviteeLat) <= 90 &&
           Math.abs(refLng) <= 180 && Math.abs(inviteeLng) <= 180) {
         distanceM = haversineDistanceMeters(refLat, refLng, inviteeLat, inviteeLng);
-        const thresholdM = Math.max(60, refAcc + inviteeAccuracyM + 30);
-        inPersonVerified = distanceM <= thresholdM;
+        const thresholdM = Math.min(120, Math.max(60, refAcc + inviteeAccuracyM + 30));
+        inPersonVerified = freshReferrer && refAcc <= 100 && inviteeAccuracyM <= 100 && distanceM <= thresholdM;
         verificationStatus = inPersonVerified ? "verified_in_person" : "distance_mismatch";
       }
+      if (!inPersonVerified) throw new Error('in_person_verification_required');
 
       const referrerUserRef = db.collection("users").doc(referrerUid);
       const inviteeUserRef = db.collection("users").doc(inviteeUid);
       const referralDocRef = referrerUserRef.collection("referrals").doc(inviteeUid);
       const attributionRef = db.doc(`referralAttributions/${inviteeUid}`);
-      const [existingUser, existingReferral, attribution, inviteeDeletion, referrerDeletion] = await tx.getAll(inviteeUserRef, referralDocRef, attributionRef,
-        db.doc(`accountDeletions/${inviteeUid}`), db.doc(`accountDeletions/${referrerUid}`));
-      if (inviteeDeletion.exists || referrerDeletion.exists || !existingUser.exists) throw new Error('account_unavailable');
+      const connection = db.doc(`partyConnections/${connectionId(inviteeUid, referrerUid)}`);
+      const [existingUser, existingReferral, attribution, inviteeDeletion, referrerDeletion, referrerUser, inviteeBlock, referrerBlock, priorConnection] = await tx.getAll(inviteeUserRef, referralDocRef, attributionRef,
+        db.doc(`accountDeletions/${inviteeUid}`), db.doc(`accountDeletions/${referrerUid}`), referrerUserRef,
+        db.doc(`users/${inviteeUid}/blocks/${referrerUid}`), db.doc(`users/${referrerUid}/blocks/${inviteeUid}`), connection);
+      if (inviteeDeletion.exists || referrerDeletion.exists || !existingUser.exists || !referrerUser.exists ||
+          !activeEnrolledAccount(referrerUser.data())) throw new Error('account_unavailable');
+      if (inviteeBlock.exists || referrerBlock.exists) throw new Error('connection_unavailable');
       const priorReferrer = attribution.data()?.referrerUid || existingUser.data()?.referrer;
       if (priorReferrer && priorReferrer !== referrerUid) throw new Error('referrer_already_assigned');
       if (existingReferral.data()?.rewardCredited === true) throw new Error('referral_already_rewarded');
       const legacy = existingReferral.data() || {};
       const verified = legacy.inPersonVerified === true || inPersonVerified;
+      // Only this short-lived QR's proximity proof and both explicit consents
+      // may establish membership. Earlier referral attribution is not consent.
+      const previousConnection = priorConnection.data();
+      const removedSinceInvitation = previousConnection?.status === 'removed' &&
+        previousConnection.updatedAt instanceof admin.firestore.Timestamp && tokenData.createdAt instanceof admin.firestore.Timestamp &&
+        previousConnection.updatedAt.toMillis() >= tokenData.createdAt.toMillis();
+      const partyJoined = inPersonVerified && partyInPersonQrRequested && tokenData.referrerPartyConsent === true &&
+        body.partyConsent === true && !removedSinceInvitation;
 
-      if (!attribution.exists) tx.create(attributionRef, {referrerUid, createdAt: now, token});
+      tx.set(attributionRef, {
+        referrerUid, rootReferrerUid: String(tokenData.rootReferrerUid || referrerUid).trim(),
+        createdAt: attribution.data()?.createdAt || now, token, inPersonVerified: true,
+        verifiedAt: now, verificationSource: 'referralQr',
+      }, {merge: true});
       tx.set(tokenRef, {
         status: "completed",
         completedByUid: inviteeUid,
@@ -616,6 +683,7 @@ export const finalizeReferralSingleUseToken = onRequest(async (req, res: ResLike
           accuracyM: inviteeAccuracyM,
         } : null,
         inPersonVerified,
+        partyJoined,
         verificationStatus,
         distanceM: Number.isFinite(distanceM) ? distanceM : null,
         updatedAt: now,
@@ -626,6 +694,7 @@ export const finalizeReferralSingleUseToken = onRequest(async (req, res: ResLike
         root_referrer: String(tokenData.rootReferrerUid ?? referrerUid).trim() || referrerUid,
         referralStatus: verified ? "verified" : "pending_in_person_verification",
         referralToken: token,
+        referralInPersonVerified: true,
         updatedAt: now,
       }, { merge: true });
 
@@ -636,6 +705,7 @@ export const finalizeReferralSingleUseToken = onRequest(async (req, res: ResLike
         inPersonVerified: verified,
         verificationStatus: verified ? 'verified_in_person' : verificationStatus,
         partyInPersonQrRequested,
+        ...(partyJoined ? {partyInPersonQrGrantedAt: now} : {}),
         rewardEligible: legacy.rewardEligible === true || verified,
         rewardGranted: legacy.rewardGranted === true || (verified && Number(legacy.meetupsCompleted || 0) >= 5),
         rewardCredited: legacy.rewardCredited === true,
@@ -645,11 +715,16 @@ export const finalizeReferralSingleUseToken = onRequest(async (req, res: ResLike
         updatedAt: now,
       }, { merge: true });
 
+      if (partyJoined && priorConnection.data()?.status !== 'connected') {
+        writeVerifiedPartyPair(tx, inviteeUid, referrerUid, 'referralInPersonQr', {kind: 'referralQr', token}, admin.firestore.Timestamp.now());
+      }
+
       return {
         inPersonVerified: verified,
         distanceM: Number.isFinite(distanceM) ? distanceM : null,
         verificationStatus: verified ? 'verified_in_person' : verificationStatus,
         referrerUid,
+        partyJoined,
       };
     });
 
@@ -659,6 +734,7 @@ export const finalizeReferralSingleUseToken = onRequest(async (req, res: ResLike
       verificationStatus: result.verificationStatus,
       distanceM: result.distanceM,
       referrerUid: result.referrerUid,
+      partyJoined: 'partyJoined' in result ? result.partyJoined === true : false,
       message: result.inPersonVerified
         ? "Referral verified in person and linked to your referrer."
         : "Referral linked. In-person verification is still pending.",
@@ -673,7 +749,8 @@ export const finalizeReferralSingleUseToken = onRequest(async (req, res: ResLike
     ) ? 404 : (
       err === "self_referral_blocked" || err === "token_not_claimable" || err === 'token_expired' ||
       err === 'referrer_already_assigned' || err === 'referral_already_rewarded'
-      || err === 'account_unavailable'
+      || err === 'account_unavailable' || err === 'connection_unavailable'
+      || err === 'in_person_verification_required'
     ) ? 409 : 500;
 
     logger.error("finalizeReferralSingleUseToken failed", {
@@ -700,6 +777,9 @@ export const linkReferralCode = onCall({region: 'us-central1'}, async request =>
     const attribution = db.doc(`referralAttributions/${uid}`);
     const [codeSnap, userSnap, prior, deletion] = await tx.getAll(db.doc(`referralCodes/${code}`), userRef, attribution, db.doc(`accountDeletions/${uid}`));
     const definition = codeSnap.data() || {};
+    if (userSnap.data()?.referralTrustRequired === true && userSnap.data()?.referralInPersonVerified !== true) {
+      throw new HttpsError('failed-precondition', 'New users must verify their referrer’s QR in person; invite codes do not establish trust.');
+    }
     const owner = String(definition.referrerUid || definition.ownerUid || definition.uid || definition.userId || '');
     if (deletion.exists || !codeSnap.exists || definition.active === false || definition.blocked === true || definition.flagged === true || !owner || owner.includes('/')) {
       throw new HttpsError('failed-precondition', 'This referral code is unavailable.');
@@ -707,13 +787,14 @@ export const linkReferralCode = onCall({region: 'us-central1'}, async request =>
     if (owner === uid) throw new HttpsError('invalid-argument', 'You cannot refer yourself.');
     const existing = String(prior.data()?.referrerUid || userSnap.data()?.referrer || '');
     if (existing && existing !== owner) throw new HttpsError('already-exists', 'A referrer is already assigned.');
-    if (prior.exists) return {linked: true, referrerUid: owner, replayed: true};
     const referral = db.doc(`users/${owner}/referrals/${uid}`);
-    const [referralSnap, ownerDeletion] = await tx.getAll(referral, db.doc(`accountDeletions/${owner}`));
-    if (ownerDeletion.exists) throw new HttpsError('failed-precondition', 'This referral code is unavailable.');
+    const [referralSnap, ownerDeletion, ownerUser] = await tx.getAll(referral, db.doc(`accountDeletions/${owner}`), db.doc(`users/${owner}`));
+    if (!userSnap.exists || !ownerUser.exists || ownerDeletion.exists || !activeEnrolledAccount(ownerUser.data())) throw new HttpsError('failed-precondition', 'This referral code is unavailable.');
+    if (prior.exists) return {linked: true, referrerUid: owner, replayed: true};
+    const rootReferrerUid = String(ownerUser.data()?.root_referrer || "").trim() || owner;
     const now = admin.firestore.FieldValue.serverTimestamp();
-    tx.create(attribution, {referrerUid: owner, code, createdAt: now});
-    tx.set(userRef, {referrer: owner, root_referrer: owner, referralStatus: 'joined', updatedAt: now}, {merge: true});
+    tx.create(attribution, {referrerUid: owner, rootReferrerUid, code, createdAt: now});
+    tx.set(userRef, {referrer: owner, root_referrer: rootReferrerUid, referralStatus: 'joined', updatedAt: now}, {merge: true});
     if (!referralSnap.exists) tx.create(referral, {
       uid, code, status: 'joined', inPersonVerified: false, rewardEligible: false,
       rewardGranted: false, rewardCredited: false, meetupsCompleted: 0,

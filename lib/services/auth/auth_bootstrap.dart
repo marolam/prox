@@ -16,6 +16,7 @@ import "package:prox/services/geoquery_service.dart";
 import "package:prox/services/user_settings_service.dart";
 import "package:prox/services/billing_entitlement_sync_service.dart";
 import "package:prox/services/growth_service.dart";
+import "package:prox/services/matching_access_service.dart";
 
 class AuthBootstrap {
   AuthBootstrap._();
@@ -67,6 +68,7 @@ class AuthBootstrap {
       },
     );
     await initialSync;
+    MatchingAccessService.instance.start();
     await BackgroundMatchingService.instance.start();
   }
 

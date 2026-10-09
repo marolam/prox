@@ -9,6 +9,7 @@ Param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+Add-Type -AssemblyName System.Web
 
 function Fail {
   Param([string]$Message)
@@ -33,12 +34,18 @@ if (-not [string]::IsNullOrWhiteSpace($Code)) {
     Fail "Referral download URL is required when -Code is provided."
   }
 
-  $queryUrl = "${ReferralDownloadUrl}?code=$Code&ref=$ReferrerUid"
+  $builder = New-Object System.UriBuilder($ReferralDownloadUrl)
+  $params = [System.Web.HttpUtility]::ParseQueryString($builder.Query)
+  $params["code"] = $Code
+  $params["ref"] = $ReferrerUid
+  $params["platform"] = "android"
+  $builder.Query = $params.ToString()
+  $queryUrl = $builder.Uri.AbsoluteUri
   Write-Host "Checking referral QR URL: $queryUrl" -ForegroundColor Cyan
 
   $response = $null
   try {
-    $response = Invoke-WebRequest -Uri $queryUrl -Method Get -MaximumRedirection 0 -TimeoutSec $TimeoutSeconds -ErrorAction Stop
+    $response = Invoke-WebRequest -UseBasicParsing -Uri $queryUrl -Method Head -MaximumRedirection 0 -TimeoutSec $TimeoutSeconds -ErrorAction Stop
   } catch {
     $webResp = $_.Exception.Response
     if (-not $webResp) {
@@ -48,10 +55,8 @@ if (-not [string]::IsNullOrWhiteSpace($Code)) {
   }
 
   $statusCode = [int]$response.StatusCode
-  if ($statusCode -lt 300 -or $statusCode -gt 399) {
-    if ($statusCode -ge 400) {
-      Fail "Referral function returned error HTTP $statusCode"
-    }
+  if ($statusCode -ne 302) {
+    Fail "Referral function must return HTTP 302, received HTTP $statusCode"
   }
 
   $location = [string]$response.Headers["Location"]
@@ -65,19 +70,8 @@ if (-not [string]::IsNullOrWhiteSpace($Code)) {
     Fail "Redirect target is not a valid HTTPS APK URL."
   }
 
-  $redirectUri = [Uri]$location
-  $query = [System.Web.HttpUtility]::ParseQueryString($redirectUri.Query)
-  $redirectCode = [string]$query["code"]
-  $redirectRef = [string]$query["ref"]
-
-  if ($redirectCode -ne $Code) {
-    Fail "Redirect query is missing or mismatched 'code' parameter."
-  }
-  if ([string]::IsNullOrWhiteSpace($redirectRef)) {
-    Fail "Redirect query is missing 'ref' parameter."
-  }
-
   $targetUrl = $location
+  # HEAD probes deliberately create no lead and carry no attribution query.
 } else {
   $targetUrl = $PublicApkUrl
   if ([string]::IsNullOrWhiteSpace($targetUrl)) {
@@ -90,6 +84,12 @@ if (-not [string]::IsNullOrWhiteSpace($Code)) {
 }
 
 $targetUri = [Uri]$targetUrl
+if (-not [string]::IsNullOrWhiteSpace($PublicApkUrl)) {
+  $expectedUri = [Uri]$PublicApkUrl
+  if ($targetUri.GetLeftPart([UriPartial]::Path) -cne $expectedUri.GetLeftPart([UriPartial]::Path)) {
+    Fail "Referral destination differs from the updater APK: expected $PublicApkUrl, received $targetUrl"
+  }
+}
 $path = $targetUri.AbsolutePath.ToLowerInvariant()
 $isGithubLatest = $targetUri.Host.ToLowerInvariant() -eq "github.com" -and $path -match "/releases/latest/download/app-release\.apk$"
 
@@ -134,5 +134,9 @@ finally {
   if ($null -ne $httpClient) { $httpClient.Dispose() }
 }
 
-Write-Host "PASS: updater APK URL is live and returns an APK payload." -ForegroundColor Green
+if ($Code) {
+  Write-Host "PASS: referral routing matches the updater and returns an APK payload." -ForegroundColor Green
+} else {
+  Write-Host "PASS: updater APK URL is live. Referral routing was not checked without -Code." -ForegroundColor Yellow
+}
 exit 0

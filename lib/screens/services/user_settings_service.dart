@@ -42,8 +42,10 @@ class UserSettingsService {
   String? _settingsOwnerUid;
   bool _entitlementsManaged = false;
   Map<String, dynamic> _paidEntitlements = const {};
+  bool _publicMatchingUnlocked = false;
 
   UserSettings get current => _settings;
+  bool get publicMatchingUnlocked => _publicMatchingUnlocked;
 
   Future<void> _persist(UserSettings settings) {
     final snapshot = {...settings.toJson(), '_accountUid': _settingsOwnerUid};
@@ -64,6 +66,7 @@ class UserSettingsService {
     _settingsOwnerUid = uid;
     _entitlementsManaged = true;
     _paidEntitlements = const {};
+    _publicMatchingUnlocked = false;
     _loadedFromStorage = true;
     var next = _settings;
     if (clearPrivate) {
@@ -73,10 +76,37 @@ class UserSettingsService {
         'businessAvatarEnabled': false,
         'seenBusinessPrompts': <String, bool>{},
         'uxMode': AppUxMode.party.name,
+        'matchDiscovery': {
+          ...next.matchDiscovery.toJson(),
+          'partyScope': MatchPartyScope.tree.name,
+        },
       });
     }
     _emit(_sessionDefaults(next), persist: false);
     return _persist(_settings);
+  }
+
+  /// Only the account-bound server access service supplies this decision.
+  void applyMatchingAccess({
+    required bool publicUnlocked,
+    int? publicUnlockedAt,
+    String? partyScope,
+  }) {
+    _publicMatchingUnlocked = publicUnlocked;
+    var scope = _settings.matchDiscovery.partyScope;
+    if (partyScope != null) {
+      scope = switch (partyScope) {
+        'partyOnly' => MatchPartyScope.partyOnly,
+        'tree' || 'extendedOnly' || 'none' => MatchPartyScope.tree,
+        'public' || 'all' => MatchPartyScope.public,
+        _ => scope,
+      };
+    }
+    _emit(
+      _settings.copyWith(
+        matchDiscovery: _settings.matchDiscovery.copyWith(partyScope: scope),
+      ),
+    );
   }
 
   /// A single snapshot updates every paid matching flag and clamps currently
@@ -133,6 +163,7 @@ class UserSettingsService {
     _settings = const UserSettings.defaults();
     _settingsOwnerUid = null;
     _paidEntitlements = const {};
+    _publicMatchingUnlocked = false;
     if (!_controller.isClosed) _controller.add(_settings);
     return _persist(_settings);
   }

@@ -22,6 +22,8 @@ import "package:prox/services/simple_mode/simple_mode_service.dart";
 import "package:prox/services/user_settings_service.dart";
 import "package:prox/shell/home_root_shell.dart";
 import "package:prox/widgets/motion/motion.dart";
+import "package:prox/widgets/party_referral_consent.dart";
+import "package:prox/widgets/referral_trust_gate.dart";
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
@@ -142,13 +144,15 @@ class _ProfileGateState extends State<_ProfileGate> {
 
       final bool seen = (data["presenceRehearsalSeen"] as bool?) ?? false;
       return _ProfileGateDecision(
-        route:
-            seen ? _ProfileGateRoute.home : _ProfileGateRoute.presenceRehearsal,
+        route: seen
+            ? _ProfileGateRoute.home
+            : _ProfileGateRoute.presenceRehearsal,
       );
     } catch (e) {
       if (kDebugMode) {
         debugPrint(
-            "[AuthGate] profile gate fallback for uid=${widget.uid}: $e");
+          "[AuthGate] profile gate fallback for uid=${widget.uid}: $e",
+        );
       }
       return const _ProfileGateDecision.home();
     }
@@ -160,7 +164,8 @@ class _ProfileGateState extends State<_ProfileGate> {
     final lastSignIn = user?.metadata.lastSignInTime;
     final now = DateTime.now();
 
-    final bool newlyCreated = creation != null &&
+    final bool newlyCreated =
+        creation != null &&
         now.difference(creation) < const Duration(hours: 6) &&
         lastSignIn != null &&
         lastSignIn.difference(creation).inMinutes.abs() <= 5;
@@ -205,11 +210,7 @@ class _ProfileGateState extends State<_ProfileGate> {
   }
 }
 
-enum _ProfileGateRoute {
-  onboarding,
-  presenceRehearsal,
-  home,
-}
+enum _ProfileGateRoute { onboarding, presenceRehearsal, home }
 
 class _ProfileGateDecision {
   final _ProfileGateRoute route;
@@ -217,7 +218,7 @@ class _ProfileGateDecision {
   const _ProfileGateDecision({required this.route});
 
   const _ProfileGateDecision.onboarding()
-      : route = _ProfileGateRoute.onboarding;
+    : route = _ProfileGateRoute.onboarding;
   const _ProfileGateDecision.home() : route = _ProfileGateRoute.home;
 }
 
@@ -281,9 +282,10 @@ class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
 
   Future<void> _initLocationGate() async {
     try {
-      bool granted = await LocationPermissions.instance
-          .isGranted()
-          .timeout(const Duration(seconds: 8), onTimeout: () => false);
+      bool granted = await LocationPermissions.instance.isGranted().timeout(
+        const Duration(seconds: 8),
+        onTimeout: () => false,
+      );
 
       // On Samsung (and some other OEM) devices, Geolocator.isLocationServiceEnabled()
       // can return false during startup due to an AppOps race (MONITOR_LOCATION op
@@ -292,9 +294,10 @@ class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
       if (!granted) {
         await Future<void>.delayed(const Duration(milliseconds: 450));
         if (!mounted) return;
-        granted = await LocationPermissions.instance
-            .isGranted()
-            .timeout(const Duration(seconds: 8), onTimeout: () => false);
+        granted = await LocationPermissions.instance.isGranted().timeout(
+          const Duration(seconds: 8),
+          onTimeout: () => false,
+        );
       }
 
       if (!mounted) return;
@@ -306,15 +309,18 @@ class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
         return;
       }
 
-      final bool seenExplainer = await LocalFlags.instance
+      final bool seenExplainer =
+          await LocalFlags.instance
               .getBool(LocalFlags.kSeenLocationExplainer)
               .timeout(const Duration(seconds: 5), onTimeout: () => false) ??
           false;
       if (!mounted) return;
 
-      setState(() => _loc = seenExplainer
-          ? _LocGateState.needsPermission
-          : _LocGateState.needsExplainer);
+      setState(
+        () => _loc = seenExplainer
+            ? _LocGateState.needsPermission
+            : _LocGateState.needsExplainer,
+      );
     } catch (_) {
       if (!mounted) return;
       setState(() => _loc = _LocGateState.blocked);
@@ -372,7 +378,8 @@ class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
   }
 
   Future<void> _runPostAuthBootstrap() async {
-    if (!mounted || FirebaseAuth.instance.currentUser?.uid != widget.uid) return;
+    if (!mounted || FirebaseAuth.instance.currentUser?.uid != widget.uid)
+      return;
     // Force-refresh token so early Firestore requests are authed immediately (Android race fix).
     try {
       await FirebaseAuth.instance.currentUser
@@ -384,19 +391,24 @@ class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
 
     // Apply referral attribution ASAP post-auth (warming signal).
     try {
-      await ReferralAttribution.instance
-          .applyIfPossible(uid: widget.uid)
-          .timeout(const Duration(seconds: 6));
+      await ReferralAttribution.instance.applyIfPossible(
+        uid: widget.uid,
+        confirmPartyJoin: () async {
+          if (!mounted) return null;
+          return showPartyReferralConsent(context);
+        },
+      );
     } catch (e) {
       if (kDebugMode) debugPrint("[AuthGate] referral apply failed: $e");
     }
 
     Future<void>.delayed(const Duration(seconds: 6), () async {
-      if (!mounted || FirebaseAuth.instance.currentUser?.uid != widget.uid) return;
+      if (!mounted || FirebaseAuth.instance.currentUser?.uid != widget.uid)
+        return;
       try {
-        await PartyService.instance
-            .syncReferralInPersonAutoJoins()
-            .timeout(const Duration(seconds: 8));
+        await PartyService.instance.syncReferralInPersonAutoJoins().timeout(
+          const Duration(seconds: 8),
+        );
       } catch (e) {
         if (kDebugMode)
           debugPrint("[AuthGate] referral party auto-join sync failed: $e");
@@ -404,15 +416,18 @@ class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
     });
 
     try {
-      await UserSettingsService.instance
-          .ensureLoaded()
-          .timeout(const Duration(seconds: 5));
+      await UserSettingsService.instance.ensureLoaded().timeout(
+        const Duration(seconds: 5),
+      );
       final settingsSvc = UserSettingsService.instance;
       final entitlements = await MonetizationService.instance
           .getEntitlementsMap(uid: widget.uid)
-          .timeout(const Duration(seconds: 6),
-              onTimeout: () => const <String, dynamic>{});
-      if (!mounted || FirebaseAuth.instance.currentUser?.uid != widget.uid) return;
+          .timeout(
+            const Duration(seconds: 6),
+            onTimeout: () => const <String, dynamic>{},
+          );
+      if (!mounted || FirebaseAuth.instance.currentUser?.uid != widget.uid)
+        return;
       final highRadiusUnlocked = entitlements["highRadiusUnlocked"] == true;
       final singleKeywordUnlocked =
           entitlements["singleKeywordMatchModeUnlocked"] == true;
@@ -430,14 +445,18 @@ class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
       if (kDebugMode) debugPrint("[AuthGate] entitlement preload failed: $e");
     }
 
-    if (!mounted || FirebaseAuth.instance.currentUser?.uid != widget.uid) return;
+    if (!mounted || FirebaseAuth.instance.currentUser?.uid != widget.uid)
+      return;
     try {
-      await PushNotifications.instance.initForUser(widget.uid).timeout(const Duration(seconds: 12));
+      await PushNotifications.instance
+          .initForUser(widget.uid)
+          .timeout(const Duration(seconds: 12));
     } catch (e) {
       if (kDebugMode) debugPrint("[AuthGate] notification preload failed: $e");
     }
 
-    if (!mounted || FirebaseAuth.instance.currentUser?.uid != widget.uid) return;
+    if (!mounted || FirebaseAuth.instance.currentUser?.uid != widget.uid)
+      return;
     try {
       // Presence: start live writing after location is granted.
       final bool ok = await PresenceWriter.instance
@@ -470,13 +489,16 @@ class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
     switch (_loc) {
       case _LocGateState.loading:
         return const _GateLoadingScreen(
-            message: "Checking location permissions...");
+          message: "Checking location permissions...",
+        );
 
       case _LocGateState.needsExplainer:
         return LocationPermissionExplainerScreen(
           onContinue: () async {
-            await LocalFlags.instance
-                .setBool(LocalFlags.kSeenLocationExplainer, true);
+            await LocalFlags.instance.setBool(
+              LocalFlags.kSeenLocationExplainer,
+              true,
+            );
             if (!mounted) return;
             setState(() => _loc = _LocGateState.needsPermission);
           },
@@ -508,18 +530,16 @@ class _PostAuthBootstrapShellState extends State<_PostAuthBootstrapShell> {
         }
         return _GrantedLocationShell(
           showPulse: _showGrantedPulse,
-          child: const _ExperienceModeGate(
-            child: HomeRootShell(),
+          child: ReferralTrustGate(
+            uid: widget.uid,
+            child: const _ExperienceModeGate(child: HomeRootShell()),
           ),
         );
     }
   }
 }
 
-enum _ExperienceGateView {
-  loading,
-  home,
-}
+enum _ExperienceGateView { loading, home }
 
 class _ExperienceModeGate extends StatefulWidget {
   const _ExperienceModeGate({required this.child});
@@ -580,7 +600,8 @@ class _ExperienceModeGateState extends State<_ExperienceModeGate> {
     switch (_view) {
       case _ExperienceGateView.loading:
         return const _GateLoadingScreen(
-            message: "Preparing your mode setup...");
+          message: "Preparing your mode setup...",
+        );
       case _ExperienceGateView.home:
         return widget.child;
     }
@@ -588,10 +609,7 @@ class _ExperienceModeGateState extends State<_ExperienceModeGate> {
 }
 
 class _GrantedLocationShell extends StatelessWidget {
-  const _GrantedLocationShell({
-    required this.showPulse,
-    required this.child,
-  });
+  const _GrantedLocationShell({required this.showPulse, required this.child});
 
   final bool showPulse;
   final Widget child;
@@ -684,7 +702,9 @@ List<String> _readStringList(dynamic raw) {
 }
 
 List<String> _keywordsFromAllShapes(
-    Map<String, dynamic> data, List<String> keys) {
+  Map<String, dynamic> data,
+  List<String> keys,
+) {
   for (final k in keys) {
     final v = data[k];
     final list = _readStringList(v);
@@ -694,7 +714,9 @@ List<String> _keywordsFromAllShapes(
 }
 
 List<String> _keywordsFromKeywordsMap(
-    Map<String, dynamic> data, List<String> keys) {
+  Map<String, dynamic> data,
+  List<String> keys,
+) {
   final dynamic raw = data["keywords"];
   if (raw is! Map) return const <String>[];
   final Map<String, dynamic> m = Map<String, dynamic>.from(raw);
@@ -715,62 +737,46 @@ bool _isProfileComplete(Map<String, dynamic> data) {
           .trim();
 
   // Searching For
-  final List<String> searching = _keywordsFromAllShapes(
-    data,
-    const <String>[
-      "searchingForKeywords",
-      "searchingFor",
-      "SearchingFor",
-      "Searching For",
-    ],
-  ).isNotEmpty
-      ? _keywordsFromAllShapes(
-          data,
-          const <String>[
-            "searchingForKeywords",
-            "searchingFor",
-            "SearchingFor",
-            "Searching For",
-          ],
-        )
-      : _keywordsFromKeywordsMap(
-          data,
-          const <String>[
-            "Searching For",
-            "SearchingFor",
-            "searchingFor",
-            "searching_for",
-          ],
-        );
+  final List<String> searching =
+      _keywordsFromAllShapes(data, const <String>[
+        "searchingForKeywords",
+        "searchingFor",
+        "SearchingFor",
+        "Searching For",
+      ]).isNotEmpty
+      ? _keywordsFromAllShapes(data, const <String>[
+          "searchingForKeywords",
+          "searchingFor",
+          "SearchingFor",
+          "Searching For",
+        ])
+      : _keywordsFromKeywordsMap(data, const <String>[
+          "Searching For",
+          "SearchingFor",
+          "searchingFor",
+          "searching_for",
+        ]);
 
   // Can Provide
-  final List<String> providing = _keywordsFromAllShapes(
-    data,
-    const <String>[
-      "canProvideKeywords",
-      "canProvide",
-      "CanProvide",
-      "Can Provide",
-    ],
-  ).isNotEmpty
-      ? _keywordsFromAllShapes(
-          data,
-          const <String>[
-            "canProvideKeywords",
-            "canProvide",
-            "CanProvide",
-            "Can Provide",
-          ],
-        )
-      : _keywordsFromKeywordsMap(
-          data,
-          const <String>[
-            "Can Provide",
-            "CanProvide",
-            "canProvide",
-            "can_provide",
-          ],
-        );
+  final List<String> providing =
+      _keywordsFromAllShapes(data, const <String>[
+        "canProvideKeywords",
+        "canProvide",
+        "CanProvide",
+        "Can Provide",
+      ]).isNotEmpty
+      ? _keywordsFromAllShapes(data, const <String>[
+          "canProvideKeywords",
+          "canProvide",
+          "CanProvide",
+          "Can Provide",
+        ])
+      : _keywordsFromKeywordsMap(data, const <String>[
+          "Can Provide",
+          "CanProvide",
+          "canProvide",
+          "can_provide",
+        ]);
 
   final bool hasName = name.isNotEmpty;
   final bool hasSelfie = selfie.isNotEmpty;
@@ -809,10 +815,7 @@ class _GateLoadingScreen extends StatelessWidget {
                 child: CircularProgressIndicator(strokeWidth: 2.8),
               ),
               const SizedBox(height: 14),
-              Text(
-                message,
-                textAlign: TextAlign.center,
-              ),
+              Text(message, textAlign: TextAlign.center),
             ],
           ),
         ),

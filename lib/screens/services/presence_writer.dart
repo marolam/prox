@@ -16,6 +16,7 @@ import "package:prox/services/location_privacy_service.dart";
 import "package:prox/services/geoquery_service.dart";
 import "package:prox/services/runtime_diagnostics_service.dart";
 import "package:prox/services/device_location_resolver.dart";
+import "package:prox/services/matching_access_service.dart";
 import "package:prox/utils/async_pulse_scheduler.dart";
 
 class MotionSnapshot {
@@ -974,6 +975,7 @@ class PresenceWriter {
         }
         return false;
       }
+      unawaited(MatchingAccessService.instance.refresh(expectedUid: uid));
       _log("[PresenceWriter] write success uid=$uid cached=$cached");
       return true;
     } on FirebaseException catch (e) {

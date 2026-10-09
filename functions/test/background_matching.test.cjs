@@ -24,9 +24,11 @@ const profile = (wants = ['gardening', 'carpentry'], offers = ['cooking', 'photo
 async function person(uid, reverse = false, overrides = {}, now = Date.now()) {
   const batch = db.batch();
   const values = {
+    [`users/${uid}`]: {displayName: 'Example'},
     [`publicProfiles/${uid}`]: reverse ? profile(['cooking', 'photography'], ['gardening', 'carpentry']) : profile(),
     [`users/${uid}/settings/backgroundMatching`]: {enabled: true, notificationsEnabled: true, quietHoursEnabled: false, dailyAlertLimit: 3, deviceId: uid},
-    [`users/${uid}/settings/matching`]: {modeKind: 'normal', normalMode: 'passive', radiusMiles: 2},
+    [`users/${uid}/settings/matching`]: {modeKind: 'normal', normalMode: 'passive', radiusMiles: 2, partyScope: 'public'},
+    [`users/${uid}/matchingAccess/current`]: {publicUnlocked: true, checkedAt: at(now), latitude: 40, longitude: -74, publicConfigFingerprint: '1000:10:30'},
     [`users/${uid}/backgroundPresence/current`]: {enabled: true, deviceId: uid, latitude: 40, longitude: -74, accuracyMeters: 100,
       speedMps: 0, locationAt: at(now), receivedAt: at(now), utcOffsetMinutes: -240},
     ...overrides,
@@ -82,11 +84,13 @@ test('ordinary reciprocal and Listen matches are quiet; Listen ignores keywords 
   await db.doc('publicProfiles/bob').set(profile(['cooking'], ['gardening']));
   assert.equal(await recordBackgroundOpportunity('alice', 'bob'), true);
   assert.equal((await outbox('alice')).size, 0);
-  await db.doc('users/alice/settings/matching').set({modeKind: 'listen', businessOnly: true, partyScope: 'partyOnly', ageBracket: 'age55Plus'});
-  await db.doc('users/bob/settings/matching').set({modeKind: 'listen'});
+  await db.doc('users/alice/settings/matching').set({modeKind: 'listen', businessOnly: true, partyScope: 'public', ageBracket: 'age55Plus'});
+  await db.doc('users/bob/settings/matching').set({modeKind: 'listen', partyScope: 'public'});
   await db.doc('publicProfiles/bob').set(profile([], []));
   assert.equal(await recordBackgroundOpportunity('alice', 'bob'), true);
   assert.equal((await outbox('alice')).size, 0);
+  await db.doc('users/alice/settings/matching').update({partyScope: 'partyOnly'});
+  assert.equal(await recordBackgroundOpportunity('alice', 'bob'), false, 'Listen still enforces in-person party scope');
 });
 
 test('Off, Treasure, mismatched modes and stale or wrong-device samples are excluded', async () => {
@@ -205,6 +209,8 @@ test('geographic scans wrap at the date line', async () => {
   await pair();
   await db.doc('users/alice/backgroundPresence/current').update({latitude: 0, longitude: 179.999});
   await db.doc('users/bob/backgroundPresence/current').update({latitude: 0, longitude: -179.999});
+  await db.doc('users/alice/matchingAccess/current').update({latitude: 0, longitude: 179.999});
+  await db.doc('users/bob/matchingAccess/current').update({latitude: 0, longitude: -179.999});
   await scanBackgroundMatches('alice');
   assert.equal((await db.collection('users/alice/backgroundOpportunities').get()).size, 1);
 });

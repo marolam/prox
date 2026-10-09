@@ -20,7 +20,7 @@
       <h1>You're invited to Prox</h1>
       <p>Meet people nearby through what you seek and what you can offer.</p>
       <div id="invitation" hidden>
-        <p>Save this code before installing. After signing in, open Referrals → Founding tester rewards and accept the invitation.</p>
+        <p id="instructions">Save this code before installing. After signing in, open Referrals → Founding tester rewards and accept the invitation.</p>
         <p class="invite-code" id="code"></p>
         <button type="button" id="copy">Copy invitation code</button>
         <p id="copy-status" role="status"></p>
@@ -29,31 +29,53 @@
           <a id="android">Download for Android</a>
           <a id="ios">Open iOS testing</a>
         </div>
-        <p>Eligible invitations include a welcome reward. Your inviter earns a reward after your profile and a real conversation or meetup are verified. Availability and amounts appear in the app; some rewards require review.</p>
-        <p>If Prox was not installed when you opened this page, enter the saved code after installation. iOS testing may require a tester invitation.</p>
+        <p id="reward-note">Your inviter becomes your informal mentor, not an official support agent. Only they can see your referral progress and send mentor nudges; they cannot see your messages or meetup details. If they enable automatic Party contact, they will be added after you complete your profile. Eligible invitations include a welcome reward. Your inviter earns an invitation reward only after your profile and a real completed meetup are verified. Some rewards require review.</p>
+        <p id="install-note">If Prox was not installed when you opened this page, enter the saved code after installation. iOS testing may require a tester invitation.</p>
+        <p>Your direct referrer is your informal mentor and can see whether you have completed your profile, had a verified conversation, or completed meetups. They can send limited usage or support reminders, but cannot see message content, meetup partners or locations. A mentor contact is not proof that you have met in person. You can remove a Party contact or block the referrer.</p>
       </div>
       <p id="invalid" hidden>This invitation is incomplete. Ask your inviter for their full referral link or code.</p>
       <p><a href="support.html">Contact support</a> · <a href="tester-portal.html">Tester portal</a></p>
     </main>
     <script>
       (() => {
-        const code = (new URLSearchParams(location.search).get('code') || '').trim().toUpperCase();
-        if (!/^PROX-P-[A-F0-9]{12}$/.test(code)) {
+        const query = new URLSearchParams(location.search);
+        const token = (query.get('t') || query.get('token') || '').trim().toUpperCase();
+        const code = (query.get('code') || query.get('growth') || '').trim().toUpperCase();
+        const ref = (query.get('ref') || '').trim();
+        if (token ? !/^T-[A-F0-9]{18}$/.test(token) : !/^[A-Z0-9_-]{1,128}$/.test(code)) {
           document.getElementById('invalid').hidden = false;
           return;
         }
+        const signal = new URLSearchParams();
+        signal.set(token ? 't' : 'code', token || code);
+        if (ref && /^[^/]{1,128}$/.test(ref)) signal.set('ref', ref);
+        const party = !!token && (query.get('party') === '1' || query.get('inperson') === '1');
+        if (party) {
+          signal.set('party', '1');
+          signal.set('inperson', '1');
+        }
         document.getElementById('invitation').hidden = false;
-        document.getElementById('code').textContent = code;
-        document.getElementById('open').href = 'prox://referral?code=' + encodeURIComponent(code);
+        document.getElementById('code').textContent = token || code;
+        document.getElementById('open').href = 'prox://referral?' + signal.toString();
+        if (token) {
+          document.getElementById('instructions').textContent = party
+            ? 'Meet in person, then join Party. Install Prox if needed, then return here and open Prox while you are still together. Both people must agree and locations must confirm you are nearby.'
+            : 'Install Prox if needed, then return to this page and open Prox to link your invitation.';
+          document.getElementById('copy').textContent = 'Copy invite link';
+          document.getElementById('reward-note').textContent = party
+            ? 'Party is for people you have met. Sharing a link with a stranger does not establish a Party connection.'
+            : 'This invitation links you to your inviter. A download alone does not add anyone to Party.';
+          document.getElementById('install-note').textContent = 'This single-use invitation expires after 20 minutes. If it expires during installation, ask your inviter for a fresh QR. iOS testing may require a tester invitation.';
+        }
         const download = new URL('https://us-central1-prox-42bef.cloudfunctions.net/referralApkDownload');
-        download.searchParams.set('code', code);
+        download.search = signal.toString();
         document.getElementById('android').href = download.href;
         download.searchParams.set('platform', 'ios');
         document.getElementById('ios').href = download.href;
         document.getElementById('copy').addEventListener('click', async () => {
           try {
-            await navigator.clipboard.writeText(code);
-            document.getElementById('copy-status').textContent = 'Invitation code copied.';
+            await navigator.clipboard.writeText(token ? 'https://prox-us.com/?' + signal.toString() : code);
+            document.getElementById('copy-status').textContent = token ? 'Invitation link copied.' : 'Invitation code copied.';
           } catch (_) {
             document.getElementById('copy-status').textContent = 'Select and copy the code above.';
           }

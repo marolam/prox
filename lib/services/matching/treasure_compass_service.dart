@@ -6,7 +6,7 @@ import 'package:prox/services/device_location_resolver.dart';
 import 'package:prox/services/geoquery_service.dart';
 import 'package:prox/services/location_privacy_service.dart';
 import 'package:prox/services/matching/matching_runtime_service.dart';
-import 'package:prox/services/party_mode_service.dart';
+import 'package:prox/services/matching_access_service.dart';
 import 'package:prox/services/privacy/block_service.dart';
 
 export 'package:prox/services/matching/treasure_area_snapshot.dart';
@@ -17,6 +17,7 @@ class TreasureCompassService {
 
   String? _uid;
   MatchDiscoverySettings? _settings;
+  MatchingAccessSnapshot? _accessPolicy;
   TreasureAreaSnapshot? _cached;
   Future<TreasureAreaSnapshot>? _pending;
   int _revision = 0;
@@ -25,6 +26,7 @@ class TreasureCompassService {
     _revision++;
     _uid = null;
     _settings = null;
+    _accessPolicy = null;
     _cached = null;
     _pending = null;
   }
@@ -35,10 +37,12 @@ class TreasureCompassService {
       clearSession();
       throw StateError('Location and sign-in are required for the compass.');
     }
-    if (_uid != uid || _settings != settings) {
+    final access = MatchingAccessService.instance.current;
+    if (_uid != uid || _settings != settings || _accessPolicy != access) {
       clearSession();
       _uid = uid;
       _settings = settings;
+      _accessPolicy = access;
     }
     final cached = _cached;
     if (cached != null && !cached.isExpired(DateTime.now())) return cached;
@@ -77,14 +81,9 @@ class TreasureCompassService {
       if (GeoQueryService.instance.debug.status != GeoQueryStatus.ready) {
         throw StateError('The area snapshot could not be loaded.');
       }
-      Set<String>? members;
-      if (settings.partyScope == MatchPartyScope.partyOnly ||
-          settings.partyScope == MatchPartyScope.tree ||
-          settings.partyScope == MatchPartyScope.extendedOnly) {
-        members = await PartyModeService.instance
-            .loadApprovedPartyUids(uid)
-            .timeout(const Duration(seconds: 5));
-      }
+      final access = await MatchingAccessService.instance
+          .refresh(expectedUid: uid)
+          .timeout(const Duration(seconds: 20));
       await BlockService.instance.ready.timeout(const Duration(seconds: 5));
       if (!current()) throw StateError('Compass session changed.');
       raw = raw
@@ -97,7 +96,11 @@ class TreasureCompassService {
                     (doc.availabilityMinutes != null &&
                         doc.availabilityMinutes! <= 0)) &&
                 (!settings.businessOnly || doc.isBusiness) &&
-                (members == null || members.contains(doc.uid)) &&
+                access.allowsPeer(
+                  uid: doc.uid,
+                  requested: settings.partyScope,
+                  peerProfile: doc.data,
+                ) &&
                 (settings.ageBracket == MatchAgeBracket.any ||
                     (age != null &&
                         age >= settings.ageBracket.minAge! &&

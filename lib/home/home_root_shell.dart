@@ -1,4 +1,5 @@
 import "package:flutter/material.dart";
+import "dart:async";
 import "package:firebase_auth/firebase_auth.dart";
 
 import "package:prox/home/home_shell.dart";
@@ -10,6 +11,8 @@ import "package:prox/services/meetup_service.dart";
 import "package:prox/services/policy_ack_service.dart";
 import "package:prox/services/pro_mode_preview_access.dart";
 import "package:prox/services/user_settings_service.dart";
+import "package:prox/services/matching_access_service.dart";
+import "package:prox/widgets/public_matching_unlock_banner.dart";
 
 import "business_shell.dart";
 
@@ -30,6 +33,7 @@ class _HomeRootShellState extends State<HomeRootShell>
   @override
   void initState() {
     super.initState();
+    MatchingAccessService.instance.start();
     WidgetsBinding.instance.addObserver(this);
     MeetupFocusLockService.instance.addListener(_onMeetupFocusChanged);
     MeetupFocusLockService.instance.ensureStarted();
@@ -45,7 +49,10 @@ class _HomeRootShellState extends State<HomeRootShell>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _restoreMeetup();
+    if (state == AppLifecycleState.resumed) {
+      _restoreMeetup();
+      unawaited(MatchingAccessService.instance.refresh(force: true));
+    }
   }
 
   void _onMeetupFocusChanged() => _restoreMeetup();
@@ -96,7 +103,8 @@ class _HomeRootShellState extends State<HomeRootShell>
       await PointsService.instance.refreshMeta(uid);
       final meta = PointsService.instance.peekMeta(uid);
 
-      final bool needsConduct = meta.completedMeetups >= 5 &&
+      final bool needsConduct =
+          meta.completedMeetups >= 5 &&
           !PolicyAckService.instance.isAcked(PolicyAckService.conductVersion);
 
       if (!mounted) return;
@@ -123,7 +131,8 @@ class _HomeRootShellState extends State<HomeRootShell>
                     Navigator.of(ctx).pop();
                     await Navigator.of(context).push(
                       MaterialPageRoute<void>(
-                          builder: (_) => const CodeOfConductScreen()),
+                        builder: (_) => const CodeOfConductScreen(),
+                      ),
                     );
                   },
                   child: const Text("Review now"),
@@ -151,18 +160,54 @@ class _HomeRootShellState extends State<HomeRootShell>
           _maybePromptForAgreements(context);
         });
 
-        final bool canUseProMode =
-            ProModePreviewAccess.instance.isAllowedForCurrentUser();
+        final bool canUseProMode = ProModePreviewAccess.instance
+            .isAllowedForCurrentUser();
         if (settings.uxMode == AppUxMode.business && canUseProMode) {
-          return const BusinessShell();
+          return _withPublicNotice(const BusinessShell());
         }
         if (settings.uxMode == AppUxMode.business && !canUseProMode) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             UserSettingsService.instance.setUxMode(AppUxMode.party);
           });
         }
-        return const HomeShell();
+        return _withPublicNotice(const HomeShell());
       },
     );
   }
+
+  Widget _withPublicNotice(Widget shell) => ListenableBuilder(
+    listenable: MatchingAccessService.instance,
+    builder: (context, _) {
+      if (!MatchingAccessService
+          .instance
+          .current
+          .publicUnlockNotificationPending) {
+        return shell;
+      }
+      return Material(
+        child: Column(
+          children: [
+            SafeArea(
+              bottom: false,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(context).height * .4,
+                ),
+                child: const SingleChildScrollView(
+                  child: PublicMatchingUnlockBanner(),
+                ),
+              ),
+            ),
+            Expanded(
+              child: MediaQuery.removePadding(
+                context: context,
+                removeTop: true,
+                child: shell,
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
 }

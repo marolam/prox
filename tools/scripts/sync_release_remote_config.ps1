@@ -173,7 +173,8 @@ foreach ($urlValue in @($DownloadUrl, $IosDownloadUrl)) {
 }
 if ($Platform -in @('ios', 'both')) {
   $iosUri = [Uri]$IosDownloadUrl
-  if ($iosUri.Host -notin @('apps.apple.com', 'testflight.apple.com')) {
+  if ($iosUri.Host -notin @('apps.apple.com', 'testflight.apple.com') -or
+      [Uri]::UnescapeDataString($iosUri.AbsolutePath) -match '[<>]') {
     throw 'An iOS version gate requires the released App Store or TestFlight URL. A portal or raw IPA is insufficient.'
   }
 }

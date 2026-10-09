@@ -54,15 +54,16 @@ export async function eraseUserData(uid: string): Promise<void> {
   }
   for (const collection of ['bugReports', 'incidents', 'feedback', 'supportTickets', 'support_tickets', 'referralCodes', 'referralSingleUseTokens', 'keywordReports', 'metricsEvents', 'referralDownloadClicks', 'checkoutSessions',
     'growthInvites', 'growthReferrals', 'growthSessions', 'growthSessionEvents', 'growthActivity', 'growthRateLimits', 'growthRewardLimits', 'growthRequests', 'growthOpsAudit',
-    'businessAutomationJobs', 'businessAutomationReceipts', 'businessAutomationConsents']) {
-    for (const field of ['uid', 'ownerUid', 'userId', 'reporterUid', 'actor', 'referrerUid', 'completedByUid', 'targetUid', 'inviteeUid', 'operatorUid']) {
+    'businessAutomationJobs', 'businessAutomationReceipts', 'businessAutomationConsents', 'partyInPersonCodes', 'referralMentorNudges']) {
+    for (const field of ['uid', 'ownerUid', 'userId', 'reporterUid', 'actor', 'referrerUid', 'completedByUid', 'targetUid', 'inviteeUid', 'operatorUid', 'fromUid', 'toUid']) {
       await deleteQuery(db.collection(collection).where(field, '==', uid));
     }
   }
   // Remove reciprocal membership and notes without scanning every account.
-  for (const group of ['party', 'blocks', 'referrals']) {
+  for (const group of ['party', 'blocks', 'referrals', 'mentorReferrals']) {
     await deleteQuery(db.collectionGroup(group).where('uid', '==', uid));
   }
+  await deleteQuery(db.collectionGroup('referralMentor').where('mentorUid', '==', uid));
   for (const group of ['backgroundOpportunities', 'backgroundAlertPairs', 'backgroundAlertOutbox']) {
     await deleteQuery(db.collectionGroup(group).where('otherUid', '==', uid));
   }
@@ -70,7 +71,7 @@ export async function eraseUserData(uid: string): Promise<void> {
   await deleteQuery(db.collection('partyConnections').where('members', 'array-contains', uid));
   await deleteQuery(db.collection('paymentReconciliation').where('uid', '==', uid));
   for (const collection of ['profiles', 'publicProfiles', 'partyNetworkRequests', 'partyNetworkRateLimits', 'keywordEnforcement', 'technician_profiles', 'referralAttributions',
-    'growthProgress', 'growthMembers', 'growthTesterApplications']) {
+    'growthProgress', 'growthMembers', 'growthTesterApplications', 'matchingLocations', 'partyInPersonSessions', 'partyInPersonRateLimits', 'functionRateLimits']) {
     await db.recursiveDelete(db.collection(collection).doc(uid));
   }
   await db.recursiveDelete(db.doc(`users/${uid}`));

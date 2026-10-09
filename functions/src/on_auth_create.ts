@@ -7,7 +7,7 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
-export const onAuthCreate = functions.auth.user().onCreate(async (user) => {
+export const onAuthCreate = functions.runWith({failurePolicy: true}).auth.user().onCreate(async (user) => {
   const uid = user.uid;
   if (!uid) return;
 
@@ -17,12 +17,14 @@ export const onAuthCreate = functions.auth.user().onCreate(async (user) => {
     const [snap, deletion] = await tx.getAll(ref, db.doc(`accountDeletions/${uid}`));
     if (deletion.exists) return;
     const data = snap.data() || {};
-    if (data.createdAt instanceof admin.firestore.Timestamp) return;
+    if (data.createdAt instanceof admin.firestore.Timestamp && data.referralTrustRequired === true) return;
 
     tx.set(
       ref,
       {
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: data.createdAt || admin.firestore.FieldValue.serverTimestamp(),
+        referralTrustRequired: true,
+        referralInPersonVerified: data.referralInPersonVerified === true,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
       { merge: true },

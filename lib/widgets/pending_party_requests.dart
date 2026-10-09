@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:prox/services/party_connection_service.dart';
 import 'package:prox/services/user_profile_service.dart';
 import 'package:prox/widgets/meetup_rating_form.dart';
-import 'package:prox/services/simple_mode/simple_mode_policy.dart';
 import 'package:prox/services/user_settings_service.dart';
 
 class PendingPartyRequests extends StatefulWidget {
@@ -77,15 +76,14 @@ class _PendingPartyRequestsState extends State<PendingPartyRequests> {
                         p.otherUid,
                       ),
                       builder: (context, profile) => PendingPartyRequestCard(
-                        partyRequiresNormalMode: SimpleModePolicy.isActive,
                         connection: p,
                         name: profile.data?.displayName ?? 'Meetup partner',
                         onAction: (action) async {
                           final result = await PartyConnectionService.instance
                               .act(p.otherUid, action);
-                          if (action == 'add' && SimpleModePolicy.isActive) {
+                          if (action == 'add') {
                             UserSettingsService.instance
-                                .unlockPartyFromSimpleMode();
+                                .setPartyUnlockHighlightPending(true);
                           }
                           return result;
                         },

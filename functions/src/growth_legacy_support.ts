@@ -1,6 +1,6 @@
 import * as admin from 'firebase-admin';
 import {createHash} from 'node:crypto';
-import {HttpsError, onCall} from 'firebase-functions/v2/https';
+import {HttpsError, onCall} from './lib/active_callable';
 import {onDocumentWritten} from 'firebase-functions/v2/firestore';
 
 if (!admin.apps.length) admin.initializeApp();

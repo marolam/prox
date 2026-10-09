@@ -21,10 +21,13 @@ class AppUpdateVersion implements Comparable<AppUpdateVersion> {
     ];
     if (core.any((part) => part == null)) return null;
     final prerelease = match[4]?.split('.') ?? const <String>[];
-    if (prerelease.any((part) =>
-        RegExp(r'^\d+$').hasMatch(part) &&
-        part.length > 1 &&
-        part.startsWith('0'))) return null;
+    if (prerelease.any(
+      (part) =>
+          RegExp(r'^\d+$').hasMatch(part) &&
+          part.length > 1 &&
+          part.startsWith('0'),
+    ))
+      return null;
     return AppUpdateVersion._(
       core.cast<int>(),
       prerelease,
@@ -51,15 +54,16 @@ class AppUpdateVersion implements Comparable<AppUpdateVersion> {
       final rightNumeric = RegExp(r'^\d+$').hasMatch(right);
       final comparison = leftNumeric && rightNumeric
           ? (left.length == right.length
-              ? left.compareTo(right)
-              : left.length.compareTo(right.length))
+                ? left.compareTo(right)
+                : left.length.compareTo(right.length))
           : (leftNumeric != rightNumeric
-              ? (leftNumeric ? -1 : 1)
-              : left.compareTo(right));
+                ? (leftNumeric ? -1 : 1)
+                : left.compareTo(right));
       if (comparison != 0) return comparison;
     }
-    final prereleaseLength =
-        prerelease.length.compareTo(other.prerelease.length);
+    final prereleaseLength = prerelease.length.compareTo(
+      other.prerelease.length,
+    );
     if (prereleaseLength != 0) return prereleaseLength;
     return build != null && other.build != null
         ? build!.compareTo(other.build!)
@@ -105,15 +109,22 @@ class UpdatePolicy {
     if (uri == null ||
         !uri.isScheme('https') ||
         uri.host.isEmpty ||
-        uri.userInfo.isNotEmpty) return false;
+        uri.userInfo.isNotEmpty)
+      return false;
     final path = uri.path.toLowerCase();
     if (!isIos) return true;
+    if (uri.pathSegments.any(
+      (segment) => segment.contains('<') || segment.contains('>'),
+    )) {
+      return false;
+    }
     if (path.endsWith('.apk') || path.endsWith('.ipa')) return false;
     final host = uri.host.toLowerCase();
     if (host == 'apps.apple.com' || host == 'testflight.apple.com') {
       return true;
     }
-    final isTesterPortalHost = host == 'prox-us.com' || host == 'www.prox-us.com';
+    final isTesterPortalHost =
+        host == 'prox-us.com' || host == 'www.prox-us.com';
     final isTesterPortalPath = path.endsWith('/tester-portal.html');
     return isTesterPortalHost && isTesterPortalPath;
   }
@@ -156,45 +167,54 @@ class UpdatePolicy {
     final buildMinimumValid =
         AppUpdateVersion.tryParse(buildMinimumVersion) != null;
     final buildRequired = buildMinimumValid && below(buildMinimumVersion);
-    final remoteRequired = enabled &&
+    final remoteRequired =
+        enabled &&
         readBool('update_minimum_required_enabled', true) &&
         below(remoteMinimum);
     final minimumRequired = buildRequired || remoteRequired;
-    final minimumVersion = buildRequired &&
+    final minimumVersion =
+        buildRequired &&
             (!remoteRequired ||
-                AppUpdateVersion.tryParse(buildMinimumVersion)!
-                        .compareTo(AppUpdateVersion.tryParse(remoteMinimum)!) >=
+                AppUpdateVersion.tryParse(
+                      buildMinimumVersion,
+                    )!.compareTo(AppUpdateVersion.tryParse(remoteMinimum)!) >=
                     0)
         ? buildMinimumVersion
         : (AppUpdateVersion.tryParse(remoteMinimum) != null
-            ? remoteMinimum
-            : '');
+              ? remoteMinimum
+              : '');
     final importantMinimum = platformVersion('update_important_min_version');
     final updateAvailable = enabled && below(latest);
-    final rawUrl =
-        readString(isIos ? 'update_download_url_ios' : 'update_download_url');
-    final downloadUrl =
-        isSafeUpdateUrl(rawUrl, isIos: isIos) ? rawUrl : fallbackDownloadUrl;
+    final rawUrl = readString(
+      isIos ? 'update_download_url_ios' : 'update_download_url',
+    );
+    final downloadUrl = isSafeUpdateUrl(rawUrl, isIos: isIos)
+        ? rawUrl
+        : fallbackDownloadUrl;
     final poll = int.tryParse(readString('update_poll_minutes')) ?? 20;
 
     return LoginUpdateCheckResult(
       updateAvailable: updateAvailable || minimumRequired,
-      mustUpdateNow: minimumRequired ||
+      mustUpdateNow:
+          minimumRequired ||
           (isProduction &&
               enabled &&
               readBool('update_force_latest_enabled', true) &&
               below(latest)),
       currentVersion: currentVersion,
-      latestVersion: minimumRequired &&
+      latestVersion:
+          minimumRequired &&
               below(minimumVersion) &&
               (AppUpdateVersion.tryParse(latest) == null ||
-                  AppUpdateVersion.tryParse(minimumVersion)!
-                          .compareTo(AppUpdateVersion.tryParse(latest)!) >
+                  AppUpdateVersion.tryParse(
+                        minimumVersion,
+                      )!.compareTo(AppUpdateVersion.tryParse(latest)!) >
                       0)
           ? minimumVersion
           : latest,
       downloadUrl: downloadUrl,
-      importantRequired: enabled &&
+      importantRequired:
+          enabled &&
           readBool('update_important_enabled', false) &&
           below(importantMinimum),
       importantMinVersion: importantMinimum,
@@ -204,7 +224,8 @@ class UpdatePolicy {
           ? buildMinimumNotes
           : readString('update_minimum_required_notes'),
       pollMinutes: poll.clamp(5, 240),
-      checkFailed: checkFailed ||
+      checkFailed:
+          checkFailed ||
           current == null ||
           (enabled && latestRaw.isEmpty) ||
           (latestRaw.isNotEmpty &&

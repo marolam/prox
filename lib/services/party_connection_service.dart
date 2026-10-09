@@ -27,7 +27,9 @@ class PendingPartyConnection {
   ) {
     final members = List<String>.from(data['members'] as List? ?? []);
     final expires = data['expiresAt'];
-    if (data['status'] != 'pending' ||
+    if ((data['proof'] is Map &&
+            (data['proof'] as Map)['kind'] == 'inPersonCode') ||
+        data['status'] != 'pending' ||
         !members.contains(uid) ||
         members.length != 2 ||
         expires is! Timestamp)
@@ -54,6 +56,39 @@ class PendingPartyConnection {
 class PartyConnectionService {
   PartyConnectionService._();
   static final instance = PartyConnectionService._();
+  Future<Map<String, dynamic>> inPersonCall(
+    String callable, {
+    Map<String, Object?> data = const {},
+    String? expectedUid,
+  }) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      throw FirebaseFunctionsException(
+        code: 'unauthenticated',
+        message: 'Sign in to continue.',
+      );
+    }
+    if (expectedUid != null && expectedUid != uid) {
+      throw FirebaseFunctionsException(
+        code: 'unauthenticated',
+        message: 'Your signed-in account changed. Reopen Party.',
+      );
+    }
+    final result = await FirebaseFunctions.instance
+        .httpsCallable(
+          callable,
+          options: HttpsCallableOptions(timeout: const Duration(seconds: 30)),
+        )
+        .call<Map<String, dynamic>>({...data, 'expectedUid': uid});
+    if (FirebaseAuth.instance.currentUser?.uid != uid) {
+      throw FirebaseFunctionsException(
+        code: 'unauthenticated',
+        message: 'Your signed-in account changed. Reopen Party.',
+      );
+    }
+    return result.data;
+  }
+
   Future<String> act(
     String otherUid,
     String action, {
@@ -76,6 +111,7 @@ class PartyConnectionService {
         )
         .call(<String, Object?>{
           'otherUid': otherUid,
+          'expectedUid': uid,
           'action': action,
           if (chatId != null) 'chatId': chatId,
           if (thumb != null) 'thumb': thumb,

@@ -1,6 +1,6 @@
 Param(
   [string[]]$DeviceIds = @("R5CT51EDX0H", "ZY22L74Z8N"),
-  [string]$Repo = "marolam/prox-us",
+  [string]$Repo = "marolam/prox",
   [string]$PublicApkUrl = "",
   [string]$PackageName = "com.prox.app",
   [string]$LaunchActivity = "com.prox.app/.MainActivity",

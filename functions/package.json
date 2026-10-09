@@ -9,7 +9,7 @@
     "build": "tsc --noEmitOnError",
     "test:rules": "node --test test/firestore.rules.test.cjs",
     "test:backend": "npm run build && node --test test/backend.test.cjs",
-    "test:emulators": "npm run build && firebase emulators:exec --config ../firebase.json --project demo-prox-audit --only firestore,storage \"node --test --test-concurrency=1 test/firestore.rules.test.cjs test/backend.test.cjs test/background_matching.test.cjs test/growth_ops.test.cjs test/growth_legacy_support.test.cjs test/business_automation.test.cjs test/dashboard_metrics.test.cjs test/business_offers.test.cjs test/business_offers.rules.test.cjs\""
+    "test:emulators": "npm run build && firebase emulators:exec --config ../firebase.json --project demo-prox-audit --only firestore,storage \"node --test --test-concurrency=1 test/firestore.rules.test.cjs test/backend.test.cjs test/account_moderation.test.cjs test/background_matching.test.cjs test/matching_scope_policy.test.cjs test/matching_scope.test.cjs test/party_in_person.test.cjs test/referral_landing.test.cjs test/growth_ops.test.cjs test/growth_legacy_support.test.cjs test/business_automation.test.cjs test/dashboard_metrics.test.cjs test/business_offers.test.cjs test/business_offers.rules.test.cjs\""
   },
   "dependencies": {
     "firebase-admin": "^13.7.0",
@@ -22,9 +22,10 @@
   },
   "overrides": {
     "@grpc/grpc-js": "1.14.5",
-    "@fastify/busboy": "3.2.1",
+    "@fastify/busboy": "3.2.2",
     "brace-expansion": "2.1.7",
     "qs": "^6.16.0",
-    "uuid": "^11.1.1"
+    "uuid": "^11.1.1",
+    "proxy-addr": "2.0.8"
   }
 }

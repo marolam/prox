@@ -5,7 +5,21 @@ service cloud.firestore {
 
     function authed() {
       return request.auth != null &&
+        (!exists(/databases/$(database)/documents/accountEnforcements/$(request.auth.uid)) ||
+          get(/databases/$(database)/documents/accountEnforcements/$(request.auth.uid)).data.get('status', 'suspended') == 'active') &&
         !exists(/databases/$(database)/documents/accountDeletions/$(request.auth.uid));
+    }
+
+    match /accountEnforcements/{uid} {
+      allow read: if request.auth != null && (request.auth.uid == uid || isAdmin());
+      allow write: if false;
+    }
+    match /accountModerationAudit/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    match /functionRateLimits/{uid} {
+      allow read, write: if false;
     }
 
     function isAdmin() {
@@ -18,10 +32,13 @@ service cloud.firestore {
 
     function isMutualPartyMember(uid) {
       return authed() && request.auth.uid != uid &&
+        !exists(/databases/$(database)/documents/accountDeletions/$(uid)) &&
         !exists(/databases/$(database)/documents/users/$(uid)/blocks/$(request.auth.uid)) &&
         !exists(/databases/$(database)/documents/users/$(request.auth.uid)/blocks/$(uid)) &&
         get(/databases/$(database)/documents/users/$(uid)/party/$(request.auth.uid)).data.get('mutual', false) == true &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)/party/$(uid)).data.get('mutual', false) == true;
+        get(/databases/$(database)/documents/users/$(request.auth.uid)/party/$(uid)).data.get('mutual', false) == true &&
+        get(/databases/$(database)/documents/users/$(uid)/party/$(request.auth.uid)).data.get('metInPerson', false) == true &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)/party/$(uid)).data.get('metInPerson', false) == true;
     }
 
     function hasParticipants(data) {
@@ -29,11 +46,11 @@ service cloud.firestore {
     }
 
     function inParticipants(data) {
-      return authed() && request.auth.uid in data.get('participants', []);
+      return authed() && referralTrustReady(request.auth.uid) && request.auth.uid in data.get('participants', []);
     }
 
     function inPair(data) {
-      return authed() && (
+      return authed() && referralTrustReady(request.auth.uid) && (
         request.auth.uid == data.get('aUid', '') ||
         request.auth.uid == data.get('bUid', '') ||
         request.auth.uid == data.get('requesterUid', '') ||
@@ -86,8 +103,14 @@ service cloud.firestore {
         !exists(/databases/$(database)/documents/users/$(b)/blocks/$(a));
     }
 
+    function referralTrustReady(uid) {
+      return !exists(/databases/$(database)/documents/users/$(uid)) ||
+        get(/databases/$(database)/documents/users/$(uid)).data.get('referralTrustRequired', false) != true ||
+        get(/databases/$(database)/documents/users/$(uid)).data.get('referralInPersonVerified', false) == true;
+    }
+
     function validChat(data) {
-      return data.participants is list && data.participants.size() >= 2 &&
+      return referralTrustReady(request.auth.uid) && data.participants is list && data.participants.size() >= 2 &&
         data.participants.size() <= 50 &&
         data.participants.toSet().size() == data.participants.size() &&
         (data.participants.size() != 2 || noBlock(data.participants[0], data.participants[1]));
@@ -304,13 +327,17 @@ service cloud.firestore {
     match /users/{uid} {
       allow get: if isOwner(uid) || isAdmin();
       allow list: if isAdmin();
-      allow create: if isOwner(uid) && request.resource.data.get('referrer', '') in ['', null] && request.resource.data.get('root_referrer', '') in ['', null];
-      allow update: if isOwner(uid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['referrer', 'root_referrer']);
+      allow create: if isOwner(uid) && request.resource.data.get('referrer', '') in ['', null] && request.resource.data.get('root_referrer', '') in ['', null] &&
+        !request.resource.data.keys().hasAny(['referralInPersonVerified', 'disabled', 'banned']) &&
+        request.resource.data.get('referralTrustRequired', true) == true;
+      allow update: if isOwner(uid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['referrer', 'root_referrer', 'referralTrustRequired', 'referralInPersonVerified', 'disabled', 'banned']);
       allow delete: if false;
 
       match /presence/{docId} {
         allow read: if authed();
-        allow write: if isOwner(uid);
+        allow delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && (docId != 'current' ||
+          (request.resource.data.get('geopoint', null) is latlng && request.resource.data.get('ts', null) == request.time));
       }
 
       // Background location is private to its owner and the trusted matcher.
@@ -341,13 +368,23 @@ service cloud.firestore {
       match /backgroundScanState/{id} { allow read, write: if false; }
       match /backgroundAlertOutbox/{id} { allow read, write: if false; }
       match /backgroundOpportunities/{id} { allow read, write: if false; }
+      // Public availability and trusted graph receipts can only be issued by the server.
+      match /matchingAccess/{id} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
 
       match /deviceTokens/{tokenId} {
         allow read, write: if isOwner(uid);
       }
 
       match /settings/{docId} {
-        allow read, write: if isOwner(uid);
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && (docId != 'matching' ||
+          (request.resource.data.get('partyScope', 'tree') in ['partyOnly', 'tree', 'public', 'all', 'extendedOnly', 'none'] &&
+            (!(request.resource.data.get('partyScope', 'tree') in ['public', 'all']) ||
+              (resource != null && request.resource.data.get('partyScope', 'tree') == resource.data.get('partyScope', 'tree')) ||
+              get(/databases/$(database)/documents/users/$(uid)/matchingAccess/current).data.get('publicUnlocked', false) == true)));
       }
 
       match /meta/{docId} {
@@ -362,10 +399,7 @@ service cloud.firestore {
 
       match /party/{partyUid} {
         allow read: if isOwner(uid);
-        allow create: if isOwner(uid) && request.resource.data.get('mutual', false) == false &&
-          request.resource.data.get('uid', partyUid) == partyUid;
-        allow update: if isOwner(uid) && request.resource.data.get('uid', partyUid) == partyUid &&
-          request.resource.data.get('mutual', false) == resource.data.get('mutual', false);
+        allow create, update: if false;
         allow delete: if isOwner(uid);
       }
 
@@ -441,6 +475,22 @@ service cloud.firestore {
             'rewardGranted', 'rewardCredited', 'inPersonVerified', 'rewardEligible', 'meetupsCompleted', 'referralsCompleted'
           ]);
         allow delete: if false;
+      }
+
+      match /mentorReferrals/{inviteeUid} {
+        allow get: if isOwner(uid) &&
+          !exists(/databases/$(database)/documents/accountDeletions/$(inviteeUid)) &&
+          noBlock(uid, inviteeUid) &&
+          get(/databases/$(database)/documents/users/$(inviteeUid)).data.get('referrer', '') == uid;
+        allow write: if false;
+      }
+
+      match /referralMentor/{docId} {
+        allow read: if isOwner(uid) && docId == 'current' &&
+          (!exists(/databases/$(database)/documents/users/$(uid)/referralMentor/current) ||
+            (noBlock(uid, resource.data.mentorUid) &&
+              !exists(/databases/$(database)/documents/accountDeletions/$(resource.data.mentorUid))));
+        allow write: if false;
       }
 
       match /stats/{docId} {
@@ -614,9 +664,12 @@ service cloud.firestore {
     }
 
     match /meetupRequests/{requestId} {
-      allow create: if authed() && meetupParticipant(request.resource.data) && pairNotBlocked(request.resource.data);
+      allow create: if authed() && meetupParticipant(request.resource.data) && pairNotBlocked(request.resource.data) &&
+        !(request.resource.data.get('kind', '') in ['partyPresence', 'partyHandshake', 'partyAddRequest']);
       allow read, delete: if authed() && meetupParticipant(resource.data);
-      allow update: if authed() && meetupParticipant(resource.data) && immutablePair();
+      allow update: if authed() && meetupParticipant(resource.data) && immutablePair() &&
+        !(request.resource.data.get('kind', '') in ['partyPresence', 'partyHandshake', 'partyAddRequest']) &&
+        !(resource.data.get('kind', '') in ['partyPresence', 'partyHandshake', 'partyAddRequest']);
     }
 
     // Owner-visible aggregate request/result. The backend computes results and
@@ -651,7 +704,7 @@ service cloud.firestore {
 
     match /referralCodes/{code} {
       allow read: if authed();
-      allow create: if authed() && request.resource.data.get('source', '') != 'growth' &&
+      allow create: if authed() && referralTrustReady(request.auth.uid) && request.resource.data.get('source', '') != 'growth' &&
         request.resource.data.get('referrerUid', ownerUid(request.resource.data)) == request.auth.uid &&
         request.resource.data.get('ownerUid', request.auth.uid) == request.auth.uid &&
         request.resource.data.get('uid', request.auth.uid) == request.auth.uid &&
@@ -663,6 +716,13 @@ service cloud.firestore {
 
     match /partyConnections/{connectionId} {
       allow read: if authed() && request.auth.uid in resource.data.members;
+      allow write: if false;
+    }
+    match /partyInPersonSessions/{id} { allow read, write: if false; }
+    match /partyInPersonCodes/{id} { allow read, write: if false; }
+    match /matchingLocations/{uid} { allow read, write: if false; }
+    match /matchingConfig/{id} {
+      allow read: if isAdmin();
       allow write: if false;
     }
 

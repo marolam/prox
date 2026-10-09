@@ -6,6 +6,8 @@ Param(
   [string]$ReferralDownloadUrl = "https://us-central1-prox-42bef.cloudfunctions.net/referralApkDownload",
   [string]$ReferralCode = "",
   [string]$EnvFilePath = "",
+  [ValidateSet("android", "ios", "both")]
+  [string]$Platform = "both",
   [switch]$SkipDeploy,
   [switch]$SkipGate
 )
@@ -81,27 +83,15 @@ function Test-FunctionsSourceComplete {
 
 function Test-WebsiteApkLinks {
   Param(
-    [string]$RepoRoot,
-    [string]$ExpectedLatestUrl
+    [string]$RepoRoot
   )
 
-  $searchRoots = @(
-    (Join-Path $RepoRoot "web"),
-    $RepoRoot
-  ) | Where-Object { Test-Path $_ }
-
-  $files = New-Object System.Collections.Generic.List[System.IO.FileInfo]
-  foreach ($root in $searchRoots) {
-    $items = Get-ChildItem -Path $root -Recurse -File -Include *.html,*.json -ErrorAction SilentlyContinue |
-      Where-Object {
-        $_.FullName -notmatch "\\\\.backups\\\\" -and
-        $_.FullName -notmatch "\\\\build\\\\" -and
-        $_.FullName -notmatch "\\\\artifacts\\\\" -and
-        $_.FullName -notmatch "\\\\functions\\\\lib\\\\"
-      }
-    foreach ($item in $items) {
-      $files.Add($item)
-    }
+  $files = @(Get-ChildItem -LiteralPath $RepoRoot -File |
+    Where-Object { $_.Extension -in @(".html", ".json") })
+  $webRoot = Join-Path $RepoRoot "web"
+  if (Test-Path $webRoot) {
+    $files += @(Get-ChildItem -LiteralPath $webRoot -Recurse -File |
+      Where-Object { $_.Extension -in @(".html", ".json") })
   }
 
   $failures = New-Object System.Collections.Generic.List[string]
@@ -130,8 +120,10 @@ function Test-WebsiteApkLinks {
     if ($metadataRaw -match '"publicApkUrl"\s*:\s*""') {
       throw "Website APK link guard failed: web/tester-guide-release.json has an empty publicApkUrl."
     }
-    if ($metadataRaw -notmatch [regex]::Escape($ExpectedLatestUrl)) {
-      throw "Website APK link guard failed: web/tester-guide-release.json must use $ExpectedLatestUrl"
+    $metadata = $metadataRaw | ConvertFrom-Json
+    $stableUrl = "https://github.com/$Repo/releases/latest/download/app-release.apk"
+    if ($metadata.publicApkUrl -cne $stableUrl) {
+      throw "Website APK link guard failed: web/tester-guide-release.json must use $stableUrl"
     }
   }
 }
@@ -164,7 +156,25 @@ Write-Host "iOS update URL:     $IosUpdateUrl"
 Write-Host "Referral endpoint:  $ReferralDownloadUrl"
 Write-Host "Functions env file: $EnvFilePath"
 
-Test-WebsiteApkLinks -RepoRoot $repoRoot -ExpectedLatestUrl $PublicApkUrl
+if ($Platform -in @("android", "both")) {
+  $apkUri = $null
+  if (-not [Uri]::TryCreate($PublicApkUrl, [UriKind]::Absolute, [ref]$apkUri) -or
+      $apkUri.Scheme -ne "https" -or $apkUri.Host -ne "github.com" -or
+      $apkUri.UserInfo -or $apkUri.Query -or $apkUri.Fragment -or
+      $apkUri.AbsolutePath -notlike "/$Repo/releases/*/app-release.apk") {
+    throw "PublicApkUrl must be the canonical HTTPS GitHub release APK in $Repo."
+  }
+}
+if ($Platform -in @("ios", "both")) {
+  $iosUri = $null
+  if (-not [Uri]::TryCreate($IosUpdateUrl, [UriKind]::Absolute, [ref]$iosUri) -or
+      $iosUri.Scheme -ne "https" -or $iosUri.UserInfo -or
+      [Uri]::UnescapeDataString($iosUri.AbsolutePath) -match '[<>]' -or
+      $iosUri.Host -notin @("apps.apple.com", "testflight.apple.com", "prox-us.com", "www.prox-us.com")) {
+    throw "IosUpdateUrl must be an allowlisted HTTPS iOS install destination."
+  }
+}
+Test-WebsiteApkLinks -RepoRoot $repoRoot
 Write-Host "Website APK link guard PASS" -ForegroundColor Green
 
 $envDir = Split-Path -Parent $EnvFilePath
@@ -172,18 +182,24 @@ if (-not (Test-Path $envDir)) {
   New-Item -ItemType Directory -Path $envDir -Force | Out-Null
 }
 
-Set-DotEnvValue -Path $EnvFilePath -Key "PROX_PUBLIC_APK_URL" -Value $PublicApkUrl
-Set-DotEnvValue -Path $EnvFilePath -Key "PROX_PUBLIC_APK_FALLBACK_URL" -Value $PublicApkUrl
-Set-DotEnvValue -Path $EnvFilePath -Key "PROX_IOS_UPDATE_URL" -Value $IosUpdateUrl
+if ($Platform -in @("android", "both")) {
+  Set-DotEnvValue -Path $EnvFilePath -Key "PROX_REFERRAL_ANDROID_URL" -Value $PublicApkUrl
+  Set-DotEnvValue -Path $EnvFilePath -Key "PROX_PUBLIC_APK_URL" -Value $PublicApkUrl
+  Set-DotEnvValue -Path $EnvFilePath -Key "PROX_PUBLIC_APK_FALLBACK_URL" -Value $PublicApkUrl
+}
+if ($Platform -in @("ios", "both")) {
+  Set-DotEnvValue -Path $EnvFilePath -Key "PROX_REFERRAL_IOS_URL" -Value $IosUpdateUrl
+  Set-DotEnvValue -Path $EnvFilePath -Key "PROX_IOS_UPDATE_URL" -Value $IosUpdateUrl
+  Set-DotEnvValue -Path $EnvFilePath -Key "PROX_IOS_UPDATE_FALLBACK_URL" -Value $IosUpdateUrl
+  Set-DotEnvValue -Path $EnvFilePath -Key "PROX_IOS_FALLBACK_URL" -Value $IosUpdateUrl
+}
 Set-DotEnvValue -Path $EnvFilePath -Key "PROX_REFERRAL_DOWNLOAD_URL" -Value $ReferralDownloadUrl
 Write-Host "Updated referral download env keys." -ForegroundColor Green
 
 if (-not $SkipDeploy) {
   $sourceCheck = Test-FunctionsSourceComplete -FunctionsDir $functionsDir
   if (-not $sourceCheck.Complete) {
-    Write-Warning "Functions source is incomplete in this workspace. Skipping deploy to avoid blocking release sync."
-    Write-Warning "Missing modules: $($sourceCheck.Missing -join ', ')"
-    $SkipDeploy = $true
+    throw "Functions source is incomplete. Download target deployment stopped. Missing modules: $($sourceCheck.Missing -join ', ')"
   }
 }
 
@@ -206,7 +222,7 @@ if (-not $SkipDeploy) {
   Write-Host "Skipped Firebase deploy by request." -ForegroundColor Yellow
 }
 
-if (-not $SkipGate) {
+if (-not $SkipGate -and $Platform -in @("android", "both")) {
   $gateScript = Join-Path $repoRoot "tools/scripts/check_referral_qr_release_link.ps1"
   if (-not (Test-Path $gateScript)) {
     throw "Missing referral QR gate script: $gateScript"
@@ -218,6 +234,9 @@ if (-not $SkipGate) {
     "-ReferralDownloadUrl", $ReferralDownloadUrl,
     "-PublicApkUrl", $PublicApkUrl
   )
+  if ($PublicApkUrl -ne "https://github.com/$Repo/releases/latest/download/app-release.apk") {
+    $gateArgs += "-AllowNonLatestGithubPath"
+  }
   if (-not [string]::IsNullOrWhiteSpace($ReferralCode)) {
     $gateArgs += "-Code"
     $gateArgs += $ReferralCode
@@ -229,8 +248,12 @@ if (-not $SkipGate) {
     throw "Referral QR release gate failed with exit code $LASTEXITCODE"
   }
 } else {
-  Write-Host "Skipped referral QR gate by request." -ForegroundColor Yellow
+  Write-Host "Android QR gate skipped (SkipGate or iOS-only target sync)." -ForegroundColor Yellow
 }
 
-Write-Host "Release download targets are synced." -ForegroundColor Green
+if ($SkipDeploy) {
+  Write-Host "Local download targets prepared only; deployed referral routing is unchanged." -ForegroundColor Yellow
+} else {
+  Write-Host "Release download targets deployed for $Platform." -ForegroundColor Green
+}
 exit 0

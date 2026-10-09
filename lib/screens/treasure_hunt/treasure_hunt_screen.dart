@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:prox/models/user_settings.dart';
 import 'package:prox/services/user_settings_service.dart';
+import 'package:prox/services/matching_access_service.dart';
 import 'package:prox/widgets/prox_circle_hold.dart';
 import 'treasure_compass_panel.dart';
 
@@ -15,60 +16,72 @@ class _TreasureHuntScreenState extends State<TreasureHuntScreen> {
   double _progress = 0;
 
   @override
+  void initState() {
+    super.initState();
+    MatchingAccessService.instance.start();
+  }
+
+  @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Treasure Hunt')),
-    body: StreamBuilder<UserSettings>(
-      stream: UserSettingsService.instance.watch(),
-      builder: (context, snapshot) {
-        final discovery =
-            (snapshot.data ?? UserSettingsService.instance.current)
-                .matchDiscovery;
-        if (discovery.modeKind != MatchingModeKind.treasureHunt) {
-          return const Center(
-            child: Text('Choose Treasure Hunt in matching modes to explore.'),
-          );
-        }
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Center(
-            child: _activated
-                ? TreasureCompassPanel(
-                    key: ValueKey(discovery),
-                    discovery: discovery,
-                  )
-                : Column(
-                    children: [
-                      const Text(
-                        'Hold the Prox Circle for 3 Seconds to Activate Matching Compass',
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 24),
-                      ProxCircleHold(
-                        onHold: () => setState(() => _activated = true),
-                        onProgress: (value) =>
-                            setState(() => _progress = value),
-                        child: SizedBox(
-                          width: 196,
-                          height: 196,
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              Positioned.fill(
-                                child: CircularProgressIndicator(
-                                  value: _progress,
-                                  strokeWidth: 6,
+    body: ListenableBuilder(
+      listenable: MatchingAccessService.instance,
+      builder: (context, _) => StreamBuilder<UserSettings>(
+        stream: UserSettingsService.instance.watch(),
+        builder: (context, snapshot) {
+          final discovery =
+              (snapshot.data ?? UserSettingsService.instance.current)
+                  .matchDiscovery;
+          if (discovery.modeKind != MatchingModeKind.treasureHunt) {
+            return const Center(
+              child: Text('Choose Treasure Hunt in matching modes to explore.'),
+            );
+          }
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Center(
+              child: _activated
+                  ? TreasureCompassPanel(
+                      key: ValueKey((
+                        discovery,
+                        MatchingAccessService.instance.current,
+                      )),
+                      discovery: discovery,
+                    )
+                  : Column(
+                      children: [
+                        const Text(
+                          'Hold the Prox Circle for 3 Seconds to Activate Matching Compass',
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 24),
+                        ProxCircleHold(
+                          onHold: () => setState(() => _activated = true),
+                          onProgress: (value) =>
+                              setState(() => _progress = value),
+                          child: SizedBox(
+                            width: 196,
+                            height: 196,
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                Positioned.fill(
+                                  child: CircularProgressIndicator(
+                                    value: _progress,
+                                    strokeWidth: 6,
+                                  ),
                                 ),
-                              ),
-                              const Icon(Icons.explore, size: 90),
-                            ],
+                                const Icon(Icons.explore, size: 90),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-          ),
-        );
-      },
+                      ],
+                    ),
+            ),
+          );
+        },
+      ),
     ),
   );
 }

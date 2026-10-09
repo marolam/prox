@@ -1,5 +1,6 @@
 import * as admin from "firebase-admin";
 import { onRequest } from "firebase-functions/v2/https";
+import {claimCallableRequest} from './lib/active_callable';
 import * as logger from "firebase-functions/logger";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {reconcileSquareLifecycle} from './payment_reconciliation';
@@ -397,6 +398,7 @@ async function verifyUserFromRequest(req: any): Promise<string> {
 
   try {
     const decoded = await admin.auth().verifyIdToken(token, true);
+    await claimCallableRequest(decoded.uid);
     return decoded.uid ?? "";
   } catch (e) {
     logger.warn("external checkout auth failed", { error: String(e) });

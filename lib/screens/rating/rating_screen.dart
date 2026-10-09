@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:prox/services/party_connection_service.dart';
 import 'package:prox/widgets/meetup_rating_form.dart';
-import 'package:prox/services/simple_mode/simple_mode_policy.dart';
 import 'package:prox/services/user_settings_service.dart';
 
 class RatingScreen extends StatelessWidget {
@@ -25,7 +24,6 @@ class RatingScreen extends StatelessWidget {
         child: Column(
           children: [
             MeetupRatingForm(
-              partyRequiresNormalMode: SimpleModePolicy.isActive,
               save: (thumb, choice, comment) async {
                 final result = await PartyConnectionService.instance.act(
                   otherUid,
@@ -35,8 +33,10 @@ class RatingScreen extends StatelessWidget {
                   partyDecision: choice,
                   comment: comment,
                 );
-                if (choice == 'add' && SimpleModePolicy.isActive) {
-                  UserSettingsService.instance.unlockPartyFromSimpleMode();
+                if (choice == 'add') {
+                  UserSettingsService.instance.setPartyUnlockHighlightPending(
+                    true,
+                  );
                 }
                 return result;
               },

@@ -1,5 +1,5 @@
 import * as admin from 'firebase-admin';
-import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { onCall, HttpsError, onRecoveryCall } from './lib/active_callable';
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
@@ -23,8 +23,12 @@ export async function claimReward(uid: string, category: string, contextId: stri
   const reward = db.doc(`users/${uid}/rewardClaims/${category}_${policy?.version || verifiedContextId}`);
   const daily = db.doc(`users/${uid}/rewardLimits/${new Date().toISOString().slice(0, 10)}`);
   return db.runTransaction(async tx => {
-    const [prior, verified, limit, deletion, canonical] = await tx.getAll(reward, source, daily, db.doc(`accountDeletions/${uid}`), canonicalFeedback);
+    const [prior, verified, limit, deletion, canonical, enforcement] = await tx.getAll(reward, source, daily, db.doc(`accountDeletions/${uid}`), canonicalFeedback,
+      db.doc(`accountEnforcements/${uid}`));
     if (deletion.exists) throw new HttpsError('failed-precondition', 'Account is being deleted.');
+    if (enforcement.exists && enforcement.data()?.status !== 'active') {
+      throw new HttpsError('failed-precondition', 'Rewards are unavailable while this account is restricted.');
+    }
     if (prior.exists) return {awarded: false, points: 0, alreadyClaimed: true};
     const canonicalData = canonical.data() || {};
     if (category === 'feedback' && canonicalData.sourceCollection === 'feedback' && canonicalData.sourceId !== verifiedContextId) throw new HttpsError('failed-precondition', 'The verified feedback source changed.');
@@ -62,7 +66,7 @@ export const claimVerifiedReward = onCall({region: 'us-central1'}, async request
   return claimReward(request.auth.uid, String(request.data?.category || ''), String(request.data?.contextId || ''));
 });
 
-export const cancelMySubscription = onCall({region: 'us-central1'}, async request => {
+export const cancelMySubscription = onRecoveryCall({region: 'us-central1'}, async request => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to manage your subscription.');
   const ref = db.doc(`users/${request.auth.uid}/billing/entitlements`);
   const [snap, deletion] = await db.getAll(ref, db.doc(`accountDeletions/${request.auth.uid}`));

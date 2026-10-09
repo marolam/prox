@@ -207,7 +207,8 @@ class _GrowthHubScreenState extends State<GrowthHubScreen> {
                 Text(
                   'Your friend gets ${status.configInt('welcomePoints', 5)} Prox points '
                   'when their invitation is accepted. You get ${status.configInt('referrerPoints', 10)} '
-                  'after their profile and a real conversation or meetup are verified.',
+                  'after their profile and first real completed meetup are verified. '
+                  'You are their informal mentor; a conversation alone does not unlock your reward.',
                 ),
                 Text(
                   'Up to ${status.configInt('maxInvitesPerDay', 10)} invites per day; '

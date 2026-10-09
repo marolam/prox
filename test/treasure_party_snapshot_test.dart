@@ -10,7 +10,16 @@ void main() {
     () async {
       final db = FakeFirebaseFirestore();
       final party = db.collection('users').doc('alice').collection('party');
-      await party.doc('approved').set({'mutual': true});
+      await party.doc('approved').set({
+        'mutual': true,
+        'metInPerson': true,
+        'connectionId': 'verified-meeting',
+      });
+      await party.doc('legacy-mutual').set({'mutual': true});
+      await party.doc('missing-proof').set({
+        'mutual': true,
+        'metInPerson': true,
+      });
       await party.doc('pending').set({'mutual': false});
       await party.doc('legacy').set({'partyId': 'old-group'});
       await party.doc('current').set({'mutual': true});

@@ -1,8 +1,9 @@
 import * as admin from 'firebase-admin';
 import {createHash, randomUUID} from 'node:crypto';
 import {onDocumentWritten, onDocumentCreated} from 'firebase-functions/v2/firestore';
-import {onCall, HttpsError} from 'firebase-functions/v2/https';
+import {onCall, HttpsError} from './lib/active_callable';
 import {alertAllowed, DAY, liveLocation, matchesCriteria, miles, millis, MINUTE, quietNow, reciprocalKeywords} from './lib/background_match_policy';
+import {matchingPairScope, refreshMatchingAccess} from './matching_scope';
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
@@ -12,7 +13,6 @@ const prefs = (uid: string) => db.doc(`users/${uid}/settings/backgroundMatching`
 const presence = (uid: string) => db.doc(`users/${uid}/backgroundPresence/current`);
 const profile = (uid: string) => db.doc(`publicProfiles/${uid}`);
 const mode = (uid: string) => db.doc(`users/${uid}/settings/matching`);
-const requiresParty = (s: Record<string, any>) => ['partyOnly', 'tree', 'extendedOnly'].includes(s.partyScope);
 const radius = (s: Record<string, any>) => Math.max(.1, Math.min(10, Number(s.radiusMiles) || 2));
 
 // Canonical ordering is shared by creation, delivery, and opening an opportunity.
@@ -21,7 +21,7 @@ const pairRefs = (a: string, b: string) => [prefs(a), prefs(b), presence(a), pre
   db.doc(`users/${a}/blocks/${b}`), db.doc(`users/${b}/blocks/${a}`),
   db.doc(`users/${a}/party/${b}`), db.doc(`users/${b}/party/${a}`)];
 
-function eligiblePair(rows: admin.firestore.DocumentSnapshot[], nowMs: number) {
+async function eligiblePair(a: string, b: string, rows: admin.firestore.DocumentSnapshot[], nowMs: number, tx?: admin.firestore.Transaction) {
   if (rows.slice(8, 12).some(row => row.exists) || !rows[4].exists || !rows[5].exists) return null;
   const data = rows.map(row => row.data() || {});
   const [pa, pb, la, lb, ua, ub, sa, sb] = data;
@@ -43,9 +43,10 @@ function eligiblePair(rows: admin.firestore.DocumentSnapshot[], nowMs: number) {
   }
   const fit = reciprocalKeywords(ua, ub);
   if (kind !== 'listen' && (!matchesCriteria(sa, ub, fit) ||
-      !matchesCriteria(sb, ua, {forA: fit.forB, forB: fit.forA, significant: fit.significant, compatible: fit.compatible}) ||
-      (requiresParty(sa) && data[12].mutual !== true) || (requiresParty(sb) && data[13].mutual !== true))) return null;
-  return {data, kind, fit, significant: kind === 'normal' && fit.significant};
+      !matchesCriteria(sb, ua, {forA: fit.forB, forB: fit.forA, significant: fit.significant, compatible: fit.compatible}))) return null;
+  const scope = await matchingPairScope(a, b, sa, sb, la, lb, nowMs, tx);
+  if (!scope) return null;
+  return {data, kind, fit, scope, significant: kind === 'normal' && fit.significant};
 }
 
 /** Revalidate both people inside the same transaction that reserves notification budgets. */
@@ -58,9 +59,9 @@ export async function recordBackgroundOpportunity(a: string, b: string, nowMs = 
       db.doc(`users/${a}/backgroundAlertState/current`), db.doc(`users/${b}/backgroundAlertState/current`),
       db.doc(`users/${a}/backgroundAlertPairs/${id}`), db.doc(`users/${b}/backgroundAlertPairs/${id}`)];
     const rows = await tx.getAll(...refs);
-    const eligible = eligiblePair(rows, nowMs);
+    const eligible = await eligiblePair(a, b, rows, nowMs, tx);
     if (!eligible) return false;
-    const {data, kind, fit, significant} = eligible;
+    const {data, kind, fit, significant, scope} = eligible;
     const [, , la, lb] = data;
     // The minimum keyword strength is not purchasable and cannot be reduced by a client setting.
     const expiresAt = admin.firestore.Timestamp.fromMillis(nowMs + 30 * MINUTE);
@@ -70,6 +71,7 @@ export async function recordBackgroundOpportunity(a: string, b: string, nowMs = 
       tx.set(db.doc(`users/${uid}/backgroundOpportunities/${id}`), {
         otherUid: other, modeKind: kind, significant, updatedAt: now, expiresAt,
         forYou: i === 0 ? fit.forA : fit.forB, forThem: i === 0 ? fit.forB : fit.forA,
+        relationship: scope.relationship, mutualUids: scope.mutualUids,
       });
       // Do not encourage an interruption while either device reports driving speed.
       if (!significant || la.speedMps >= 7 || lb.speedMps >= 7 ||
@@ -136,7 +138,11 @@ export async function scanBackgroundMatches(uid: string, nowMs = Date.now()) {
 }
 
 export const onBackgroundPresence = onDocumentWritten({document: 'users/{uid}/backgroundPresence/current', retry: true}, async event => {
-  if (event.data?.after.exists) await scanBackgroundMatches(event.params.uid);
+  if (event.data?.after.exists) {
+    try {await refreshMatchingAccess(event.params.uid, false);}
+    catch (error) {if (error instanceof HttpsError && error.code === 'failed-precondition') return; throw error;}
+    await scanBackgroundMatches(event.params.uid);
+  }
 });
 
 /** A claim is durable BEFORE FCM. Ambiguous delivery is not retried: fewer alerts beats duplicate interruptions. */
@@ -151,7 +157,7 @@ export async function dispatchBackgroundAlert(uid: string, alertId: string,
     const other = d.otherUid;
     if (!validUid(other)) return null;
     const rows = await tx.getAll(...pairRefs(uid, other));
-    const eligible = eligiblePair(rows, now);
+    const eligible = await eligiblePair(uid, other, rows, now, tx);
     const r = rows.map(row => row.data() || {});
     const allowed = millis(d.expiresAt) > now && eligible?.significant === true &&
       r[0].notificationsEnabled === true && r[2].speedMps < 7 && r[3].speedMps < 7 &&
@@ -188,11 +194,15 @@ export async function readBackgroundOpportunity(uid: string, id: string) {
   const now = Date.now();
   if (!d || millis(d.expiresAt) <= now || !validUid(d.otherUid)) return {available: false};
   const rows = await db.getAll(...pairRefs(uid, d.otherUid));
-  const eligible = eligiblePair(rows, now);
+  const eligible = await eligiblePair(uid, d.otherUid, rows, now);
   if (!eligible || eligible.kind !== d.modeKind) return {available: false};
-  const {data, fit, significant, kind} = eligible;
+  const {data, fit, significant, kind, scope} = eligible;
+  const bridges = scope.mutualUids.length ? await db.getAll(...scope.mutualUids.map(bridge => profile(bridge))) : [];
   return {available: true, opportunityId: id, otherUid: d.otherUid, modeKind: kind,
     significant, forYou: fit.forA, forThem: fit.forB,
+    relationship: scope.relationship, mutualUids: scope.mutualUids,
+    mutualNames: bridges.map(row => typeof row.data()?.displayName === 'string' && row.data()!.displayName.trim()
+      ? row.data()!.displayName.trim().slice(0, 120) : 'Your Party connection'),
     displayName: typeof data[5].displayName === 'string' ? data[5].displayName : 'Nearby Prox user'};
 }
 

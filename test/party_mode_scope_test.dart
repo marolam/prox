@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prox/models/user_settings.dart';
+import 'package:prox/models/matching_access.dart';
 import 'package:prox/services/geoquery_service.dart';
 import 'package:prox/services/party_mode_service.dart';
 import 'package:prox/utils/auth_bound_stream.dart';
@@ -99,19 +100,30 @@ void main() {
           uid: 'approved',
           distanceMiles: 1,
           loc: GeoPoint(0, 0),
-          data: {},
+          data: {'partyScope': 'public', 'publicMatchingUnlocked': true},
         ),
         NearbyDoc(
           uid: 'spoofed',
           distanceMiles: 1,
           loc: GeoPoint(0, 0),
-          data: {'partyId': 'legacy-id'},
+          data: {
+            'partyId': 'legacy-id',
+            'partyScope': 'public',
+            'publicMatchingUnlocked': true,
+          },
         ),
       ];
       final public = await pipeline.buildCandidates(
         nearby: nearby,
         myPartyId: 'legacy-id',
         partyMemberUids: {'approved'},
+        discovery: const MatchDiscoverySettings.defaults().copyWith(
+          partyScope: MatchPartyScope.public,
+        ),
+        matchingAccess: const MatchingAccessSnapshot(
+          publicUnlocked: true,
+          directUids: {'approved'},
+        ),
       );
       expect(
         public

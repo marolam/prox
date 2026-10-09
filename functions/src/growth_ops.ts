@@ -1,10 +1,11 @@
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 import {createHash, createHmac, randomBytes} from 'node:crypto';
-import {HttpsError, onCall} from 'firebase-functions/v2/https';
+import {HttpsError, onCall, onRecoveryCall} from './lib/active_callable';
 import {onDocumentCreated, onDocumentWritten} from 'firebase-functions/v2/firestore';
 import {onSchedule} from 'firebase-functions/v2/scheduler';
 import {claimReward} from './verified_rewards';
+import {referralProfileComplete as profileComplete} from './lib/profile_completion';
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
@@ -91,17 +92,6 @@ export const onGrowthAuthCreate = functions.auth.user().onCreate(async user => {
   if (!(await config()).enabled) return;
   await ensureGrowthIdentity(user.uid, Date.parse(user.metadata.creationTime));
 });
-
-function profileComplete(data: Data): boolean {
-  const keyword = (keys: string[]) => keys.some(key => {
-    const values = data[key] || data.keywords?.[key] || data.keywordGroups?.[key];
-    return Array.isArray(values) && values.some((v: unknown) => str(v, 51).length > 0);
-  });
-  return !!str(data.displayName || data.name || data.alias, 120) &&
-    !!str(data.selfieUrl || data.photoUrl || data.photoURL, 2000) &&
-    keyword(['searchingForKeywords', 'searchingFor', 'SearchingFor', 'Searching For', 'searching_for']) &&
-    keyword(['canProvideKeywords', 'canProvide', 'CanProvide', 'Can Provide', 'can_provide']);
-}
 
 /** A chat requires actual text in both directions, not an owner-editable counter. */
 async function meaningfulChat(uid: string, afterMs = 0): Promise<{id: string, atMs: number} | null> {
@@ -267,13 +257,16 @@ export async function createGrowthInviteForUid(uid: string, requestId: string, d
     const [prior, budget, deletion, user, progress] = await tx.getAll(receipt, db.doc(`growthRateLimits/${hash([uid, 'invites', day()])}`),
       dataRef('accountDeletions', uid), db.doc(`users/${uid}`), dataRef('growthProgress', uid));
     if (deletion.exists || !user.exists) throw new HttpsError('failed-precondition', 'An active account is required.');
+    if (user.data()?.referralTrustRequired === true && user.data()?.referralInPersonVerified !== true) {
+      throw new HttpsError('failed-precondition', 'Meet your referrer in person and verify their QR before recruiting.');
+    }
     if (prior.exists) return {...prior.data()?.result, replayed: true};
     if (Number(budget.data()?.count || 0) >= cfg.maxInvitesPerDay) throw new HttpsError('resource-exhausted', 'Your daily invite limit has been reached.');
     const now = Date.now();
     const expiresAtMs = now + cfg.inviteExpiryDays * DAY;
     const link = `https://www.prox-us.com/referral.html?code=${encodeURIComponent(code)}`;
     const result = {code, link, qrLink: link, expiresAtMs, requestId: request};
-    const definition = {referrerUid: uid, rootReferrerUid: uid, active: true, remaining: 1, source: 'growth',
+    const definition = {referrerUid: uid, rootReferrerUid: str(user.data()?.root_referrer, 128) || uid, active: true, remaining: 1, source: 'growth',
       createdAt: stamp(now), expiresAt: stamp(expiresAtMs), requestId: request, welcomePoints: cfg.welcomePoints, referrerPoints: cfg.referrerPoints};
     tx.create(db.doc(`referralCodes/${code}`), definition);
     tx.create(db.doc(`growthInvites/${code}`), {...definition, code, status: 'issued'});
@@ -319,6 +312,9 @@ export async function acceptGrowthReferralForUid(uid: string, input: Data, ip = 
       dataRef('referralAttributions', uid), db.doc(`users/${uid}`), dataRef('accountDeletions', uid),
       dataRef('growthProgress', uid), db.doc(`users/${uid}/rewardClaims/growth_welcome`));
     if (deletion.exists || !user.exists || !progress.exists) throw new HttpsError('failed-precondition', 'An active account is required.');
+    if (user.data()?.referralTrustRequired === true && user.data()?.referralInPersonVerified !== true) {
+      throw new HttpsError('failed-precondition', 'Verify your direct referrer’s QR in person before accepting a reward invitation.');
+    }
     const definition = invite.data() || {};
     const owner = str(definition.referrerUid, 128);
     if (!owner || owner.includes('/') || !invite.exists) throw new HttpsError('not-found', 'This invite is unavailable.');
@@ -350,8 +346,9 @@ export async function acceptGrowthReferralForUid(uid: string, input: Data, ip = 
     tx.create(referral, row);
     tx.update(invite.ref, {status: 'accepted', inviteeUid: uid, acceptedAt: stamp(now)});
     tx.update(db.doc(`referralCodes/${code}`), {remaining: 0, active: false, updatedAt: stamp(now)});
-    if (!attribution.exists) tx.create(attribution.ref, {referrerUid: owner, code, createdAt: stamp(now), source: 'growth'});
-    tx.update(user.ref, {referrer: owner, root_referrer: owner, updatedAt: stamp(now)});
+    const rootReferrerUid = str(ownerUser.data()?.root_referrer, 128) || owner;
+    if (!attribution.exists) tx.create(attribution.ref, {referrerUid: owner, rootReferrerUid, code, createdAt: stamp(now), source: 'growth'});
+    tx.update(user.ref, {referrer: owner, root_referrer: rootReferrerUid, updatedAt: stamp(now)});
     if (!legacy.exists) tx.create(legacy.ref, {uid, code, status: 'joined', inPersonVerified: false, rewardEligible: false,
       rewardGranted: false, rewardCredited: false, meetupsCompleted: 0, joinedAt: stamp(now), source: 'growth'});
     tx.update(progress.ref, {deviceHash, ipHash, updatedAt: stamp(now)});
@@ -368,9 +365,14 @@ export async function evaluateGrowthReferral(uid: string) {
   return db.runTransaction(async tx => {
     const cfg = await config(tx);
     if (!cfg.enabled || cfg.stage === 'testers') return;
-    const [referral, progress, deletion] = await tx.getAll(dataRef('growthReferrals', uid), dataRef('growthProgress', uid), dataRef('accountDeletions', uid));
+    const [referral, progress, deletion, enforcement] = await tx.getAll(dataRef('growthReferrals', uid), dataRef('growthProgress', uid), dataRef('accountDeletions', uid),
+      db.doc(`accountEnforcements/${uid}`));
     const row = referral.data() || {};
-    if (!referral.exists || deletion.exists || progress.data()?.qualifiedActivation !== true) return;
+    if (!referral.exists || deletion.exists || (enforcement.exists && enforcement.data()?.status !== 'active') ||
+        progress.data()?.qualifiedActivation !== true) return;
+    const meetupReceipts = await tx.get(db.collection(`users/${uid}/completedMeetups`)
+      .where('verifiedCompletedAt', '>=', row.createdAt).limit(1));
+    if (meetupReceipts.empty) return;
     if (['held', 'rewarded', 'rejected'].includes(row.status)) {
       if (!row.qualifiedAt) tx.update(referral.ref, {qualifiedAt: progress.data()?.activatedAt || stamp()});
       return;
@@ -378,9 +380,10 @@ export async function evaluateGrowthReferral(uid: string) {
     const owner = row.referrerUid;
     const receiptId = `growth_referral_${hash(uid).slice(0, 32)}`;
     const limit = db.doc(`growthRewardLimits/${hash([owner, month()])}`);
-    const [receipt, budget, ownerDeletion, ownerUser] = await tx.getAll(db.doc(`users/${owner}/rewardClaims/${receiptId}`), limit,
-      dataRef('accountDeletions', owner), db.doc(`users/${owner}`));
-    if (ownerDeletion.exists || !ownerUser.exists) return;
+    const [receipt, budget, ownerDeletion, ownerUser, ownerEnforcement] = await tx.getAll(db.doc(`users/${owner}/rewardClaims/${receiptId}`), limit,
+      dataRef('accountDeletions', owner), db.doc(`users/${owner}`), db.doc(`accountEnforcements/${owner}`));
+    if (ownerDeletion.exists || !ownerUser.exists || ownerUser.data()?.disabled === true || ownerUser.data()?.banned === true ||
+        (ownerEnforcement.exists && ownerEnforcement.data()?.status !== 'active')) return;
     const now = stamp();
     if (receipt.exists) {
       tx.update(referral.ref, {status: 'rewarded', updatedAt: now});
@@ -520,7 +523,10 @@ export async function submitGrowthSupportForUid(uid: string, input: Data) {
   const stored = (await db.doc(`supportTickets/${ticketId}`).get()).data() || {};
   if (stored.source === 'settings_support_feedback' && str(stored.message, 10000).length >= 20) {
     try {return {...result, reward: await claimReward(uid, 'feedback', ticketId)};}
-    catch {return {...result, reward: {awarded: false, points: 0, unavailable: true}};}
+    catch (error) {
+      console.warn('Growth feedback reward unavailable', {uid, ticketId, error});
+      return {...result, reward: {awarded: false, points: 0, unavailable: true}};
+    }
   }
   return result;
 }
@@ -672,7 +678,7 @@ export async function growthOpsSnapshot(days = 14) {
   };
 }
 
-export const getGrowthStatus = onCall({region: 'us-central1'}, async request => {
+export const getGrowthStatus = onRecoveryCall({region: 'us-central1'}, async request => {
   const uid = authed(request);
   if ((await config()).enabled) {await ensureGrowthIdentity(uid); await syncGrowthProgressForUid(uid);}
   return growthStatusForUid(uid);
@@ -696,8 +702,8 @@ export const recordGrowthSession = onCall({region: 'us-central1'}, async request
   const uid = authed(request); if ((await config()).enabled) await ensureGrowthIdentity(uid);
   return recordGrowthSessionForUid(uid, request.data || {});
 });
-export const submitGrowthSupport = onCall({region: 'us-central1'}, async request => submitGrowthSupportForUid(authed(request), request.data || {}));
-export const replyToSupportTicket = onCall({region: 'us-central1'}, async request => replyToSupportForUid(authed(request), request.data || {}));
+export const submitGrowthSupport = onRecoveryCall({region: 'us-central1'}, async request => submitGrowthSupportForUid(authed(request), request.data || {}));
+export const replyToSupportTicket = onRecoveryCall({region: 'us-central1'}, async request => replyToSupportForUid(authed(request), request.data || {}));
 export const updateSupportTicket = onCall({region: 'us-central1'}, async request => updateSupportForOperator(operator(request), request.data || {}));
 export const getGrowthOps = onCall({region: 'us-central1', timeoutSeconds: 120}, async request => {
   const uid = operator(request);

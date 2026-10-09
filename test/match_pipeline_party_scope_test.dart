@@ -1,6 +1,7 @@
 import "package:cloud_firestore/cloud_firestore.dart";
 import "package:flutter_test/flutter_test.dart";
 import "package:prox/models/user_settings.dart";
+import "package:prox/models/matching_access.dart";
 import "package:prox/services/geoquery_service.dart";
 import "package:prox/screens/services/matching/match_pipeline.dart";
 
@@ -34,7 +35,7 @@ void main() {
           partyScope: MatchPartyScope.partyOnly,
         ),
       );
-      expect(result.map((candidate) => candidate.uid), ['near', 'party-far']);
+      expect(result.map((candidate) => candidate.uid), ['party-far']);
       expect(result.every((candidate) => !candidate.sameParty), isTrue);
     },
   );
@@ -45,13 +46,19 @@ void main() {
         uid: "member",
         distanceMiles: 0.7,
         loc: const GeoPoint(0, 0),
-        data: <String, dynamic>{},
+        data: <String, dynamic>{
+          'partyScope': 'public',
+          'publicMatchingUnlocked': true,
+        },
       ),
       NearbyDoc(
         uid: "stranger",
         distanceMiles: 0.4,
         loc: const GeoPoint(0, 0),
-        data: <String, dynamic>{},
+        data: <String, dynamic>{
+          'partyScope': 'public',
+          'publicMatchingUnlocked': true,
+        },
       ),
     ];
 
@@ -77,19 +84,25 @@ void main() {
     ], reason: "Never fetch private-scoped strangers' profiles");
   });
 
-  test("does not filter when scope is public", () async {
+  test("unlocked public admits peers who also allow public matching", () async {
     final candidates = <NearbyDoc>[
       NearbyDoc(
         uid: "member",
         distanceMiles: 0.7,
         loc: const GeoPoint(0, 0),
-        data: <String, dynamic>{},
+        data: <String, dynamic>{
+          'partyScope': 'public',
+          'publicMatchingUnlocked': true,
+        },
       ),
       NearbyDoc(
         uid: "stranger",
         distanceMiles: 0.4,
         loc: const GeoPoint(0, 0),
-        data: <String, dynamic>{},
+        data: <String, dynamic>{
+          'partyScope': 'public',
+          'publicMatchingUnlocked': true,
+        },
       ),
     ];
 
@@ -100,6 +113,7 @@ void main() {
           discovery: const MatchDiscoverySettings.defaults().copyWith(
             partyScope: MatchPartyScope.public,
           ),
+          matchingAccess: const MatchingAccessSnapshot(publicUnlocked: true),
         );
 
     final ids = result.map((c) => c.uid).toSet();

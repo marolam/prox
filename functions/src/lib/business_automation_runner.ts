@@ -2,7 +2,7 @@ import * as admin from "firebase-admin";
 import {createHash, randomUUID} from "node:crypto";
 import * as logger from "firebase-functions/logger";
 import {onDocumentWritten} from "firebase-functions/v2/firestore";
-import {HttpsError, onCall} from "firebase-functions/v2/https";
+import {HttpsError, onCall} from "./active_callable";
 import {onSchedule} from "firebase-functions/v2/scheduler";
 
 if (!admin.apps.length) admin.initializeApp();

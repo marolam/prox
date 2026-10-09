@@ -17,6 +17,9 @@ const {updateBusinessMode, setBusinessModeActive} = require('../lib/business_mod
 const {syncPresenceCoordinates} = require('../lib/presence_projection');
 const {onAuthCreate} = require('../lib/on_auth_create');
 const {onInPartyMatchMetrics} = require('../lib/lib/in_party_match_metrics');
+const {syncReferralMentor, sendMentorNudge, deliverMentorNudge, sendReferralMentorNudge, MENTOR_NUDGE_COOLDOWN_MS} = require('../lib/referral_mentors');
+const {reconcileVerifiedPartyConnection} = require('../lib/lib/party');
+const {trustedPartyEdge} = require('../lib/lib/matching_scope_policy');
 beforeEach(async () => {
   const result = await fetch(`http://${process.env.FIRESTORE_EMULATOR_HOST}/emulator/v1/projects/demo-prox-audit/databases/(default)/documents`, {method: 'DELETE'});
   assert.equal(result.status, 200);
@@ -97,6 +100,120 @@ function makeReferralRes() {
   };
   return res;
 }
+
+async function mentorFixture(complete = true, autoAdd = true, inPersonVerified = true) {
+  await db.doc('users/mentor').set({displayName: 'Mentor'});
+  await db.doc('users/invitee').set({referrer: 'mentor', displayName: 'New user',
+    ...(complete ? {selfieUrl: 'https://example.test/selfie.jpg',
+      keywords: {'Searching For': ['gardening'], 'Can Provide': ['cooking']}} : {})});
+  await db.doc('referralAttributions/invitee').set({referrerUid: 'mentor', inPersonVerified, token: 'T-ABCDEF123456789012'});
+  await db.doc('users/mentor/referrals/invitee').set({uid: 'invitee', meetupsCompleted: 0, rewardCredited: false, partyInPersonQrRequested: autoAdd});
+  await db.doc('users/mentor/settings/referral').set({autoAddMentorToParty: autoAdd});
+}
+
+test('direct referrer defaults to mentor and verified QR adds a profile-ready trusted Party pair', async () => {
+  await mentorFixture(false);
+  await syncReferralMentor('invitee');
+  assert.equal((await db.doc('users/invitee/referralMentor/current').get()).data().mentorUid, 'mentor');
+  assert.equal((await db.doc('users/invitee/party/mentor').get()).exists, false);
+  await db.doc('users/invitee').update({selfieUrl: 'https://example.test/selfie.jpg',
+    keywords: {'Searching For': ['gardening'], 'Can Provide': ['cooking']}});
+  await Promise.all([syncReferralMentor('invitee'), syncReferralMentor('invitee')]);
+  const forward = (await db.doc('users/invitee/party/mentor').get()).data();
+  const reverse = (await db.doc('users/mentor/party/invitee').get()).data();
+  const connection = (await db.doc(`partyConnections/${connectionId('mentor', 'invitee')}`).get()).data();
+  assert.equal(forward.metInPerson, true);
+  assert.equal(reverse.metInPerson, true);
+  assert.equal(connection.proof.kind, 'referralQr');
+  assert.equal(trustedPartyEdge('invitee', 'mentor', forward, reverse, connection), true);
+  assert.equal(await reconcileVerifiedPartyConnection('invitee', 'mentor'), true);
+  assert.equal((await db.doc('users/invitee/party/mentor').get()).data().metInPerson, true);
+  const before = (await db.doc('users/mentor/mentorReferrals/invitee').get()).updateTime;
+  await syncReferralMentor('invitee');
+  assert.equal((await db.doc('users/mentor/mentorReferrals/invitee').get()).updateTime.isEqual(before), true);
+});
+
+test('remote attribution never adds a mentor Party contact or establishes trust', async () => {
+  await mentorFixture(true, true, false);
+  await syncReferralMentor('invitee');
+  assert.equal((await db.doc('users/invitee/party/mentor').get()).exists, false);
+  assert.equal((await db.doc('users/invitee/referralMentor/current').get()).data().inPersonVerified, false);
+});
+
+test('a new account cannot bypass mandatory trust with an ordinary referral code', async () => {
+  await db.doc('users/newbie').set({referralTrustRequired: true, referralInPersonVerified: false});
+  await db.doc('users/mentor').set({});
+  await db.doc('referralCodes/INV123').set({referrerUid: 'mentor', active: true});
+  await assert.rejects(linkReferralCode.run({auth: {uid: 'newbie'}, data: {code: 'INV123'}}), /in person/);
+  assert.equal((await db.doc('referralAttributions/newbie').get()).exists, false);
+});
+
+test('mentor summaries show only verified activity and removing the contact never automatically readds it', async () => {
+  await mentorFixture();
+  await syncReferralMentor('invitee');
+  await db.doc('users/peer').set({});
+  await db.doc('meetups/real').set({aUid: 'invitee', bUid: 'peer', status: 'completed',
+    aArrived: true, bArrived: true, completedAt: admin.firestore.Timestamp.now()});
+  await recordCompletedMeetup('real', 'invitee');
+  await syncReferralMentor('invitee');
+  const summary = (await db.doc('users/mentor/mentorReferrals/invitee').get()).data();
+  assert.equal(summary.role, 'mentor');
+  assert.equal(summary.profileComplete, true);
+  assert.equal(summary.meetupsCompleted, 1);
+  assert.equal(summary.meetupId, undefined);
+  assert.equal(summary.location, undefined);
+  await changePartyConnection('invitee', {otherUid: 'mentor', action: 'remove'});
+  await syncReferralMentor('invitee');
+  assert.equal((await db.doc('users/invitee/party/mentor').get()).exists, false);
+  assert.equal((await db.doc('users/invitee/referralMentor/current').get()).data().partyAdded, false);
+  await db.doc('users/invitee/blocks/mentor').set({uid: 'mentor'});
+  await syncReferralMentor('invitee');
+  assert.equal((await db.doc('users/mentor/mentorReferrals/invitee').get()).exists, false);
+  assert.equal((await db.doc('users/invitee/referralMentor/current').get()).exists, false);
+});
+
+test('Party toggle off keeps the mentor relationship without adding contacts or claiming in-person verification', async () => {
+  await mentorFixture(true, false);
+  await syncReferralMentor('invitee');
+  assert.equal((await db.doc('users/invitee/referralMentor/current').get()).data().mentorUid, 'mentor');
+  assert.equal((await db.doc('users/invitee/party/mentor').get()).exists, false);
+  assert.equal((await db.doc('users/mentor/referrals/invitee').get()).data().inPersonVerified, undefined);
+});
+
+test('only direct mentors can nudge; concurrent retries deduplicate and both reminder kinds share a cooldown', async () => {
+  await mentorFixture();
+  await syncReferralMentor('invitee');
+  const request = {inviteeUid: 'invitee', requestId: 'mentor_nudge_request_001', kind: 'use_app'};
+  await assert.rejects(sendMentorNudge('outsider', request), /direct referrer/);
+  await assert.rejects(sendReferralMentorNudge.run({data: request}), /Sign in/);
+  await assert.rejects(sendReferralMentorNudge.run({auth: {uid: 'mentor'}, data: {...request, expectedUid: 'other'}}), /account changed/);
+  const results = await Promise.all([sendMentorNudge('mentor', request), sendMentorNudge('mentor', request)]);
+  assert.equal(results.filter(r => !r.replayed).length, 1);
+  assert.equal((await db.collection('referralMentorNudges').get()).size, 1);
+  await assert.rejects(sendMentorNudge('mentor', {...request, requestId: 'mentor_nudge_request_002', kind: 'support'}), /12 hours/);
+  await db.doc('users/mentor/mentorReferrals/invitee').update({
+    lastReminderAt: admin.firestore.Timestamp.fromMillis(Date.now() - MENTOR_NUDGE_COOLDOWN_MS - 1)});
+  await sendMentorNudge('mentor', {...request, requestId: 'mentor_nudge_request_002', kind: 'support'});
+  assert.match((await db.doc('users/invitee/referralMentor/current').get()).data().lastNudge, /support/);
+  await db.doc('users/mentor/blocks/invitee').set({uid: 'invitee'});
+  await assert.rejects(sendMentorNudge('mentor', request), /direct referrer/);
+});
+
+test('mentor nudges persist without push devices and delivery rechecks blocks and deletion', async () => {
+  await mentorFixture();
+  await syncReferralMentor('invitee');
+  const request = {inviteeUid: 'invitee', requestId: 'mentor_nudge_request_001', kind: 'use_app'};
+  await sendMentorNudge('mentor', request);
+  await deliverMentorNudge('mentor_mentor_nudge_request_001');
+  assert.equal((await db.doc('referralMentorNudges/mentor_mentor_nudge_request_001').get()).data().status, 'no_devices');
+  assert.match((await db.doc('users/invitee/referralMentor/current').get()).data().lastNudge, /mentor/);
+  await db.doc('users/mentor/mentorReferrals/invitee').update({lastReminderAt: admin.firestore.Timestamp.fromMillis(1)});
+  await sendMentorNudge('mentor', {...request, requestId: 'mentor_nudge_request_002'});
+  await db.doc('accountDeletions/invitee').set({status: 'processing'});
+  await deliverMentorNudge('mentor_mentor_nudge_request_002');
+  assert.equal((await db.doc('referralMentorNudges/mentor_mentor_nudge_request_002').get()).data().status, 'cancelled');
+  await assert.rejects(sendMentorNudge('mentor', request), /direct referrer/);
+});
 
 test('delayed meetup lock projection cannot recreate a deleted account', async () => {
   await db.doc('accountDeletions/alice').set({status: 'complete'});
@@ -670,6 +787,10 @@ test('account erasure removes nested private data, media, owned messages and pee
   await db.doc('profiles/alice').set({displayName: 'Alice'});
   await db.doc('publicProfiles/alice').set({displayName: 'Alice'});
   await db.doc('paymentReconciliation/alice_event').set({uid: 'alice', status: 'review_required'});
+  await db.doc('partyInPersonSessions/alice').set({uid:'alice',code:'AABBCCDDEE',active:true});
+  await db.doc('partyInPersonCodes/AABBCCDDEE').set({uid:'alice'});
+  await db.doc('partyInPersonRateLimits/alice').set({attempts:3});
+  await db.doc('matchingLocations/alice').set({uid:'alice',publicMatchingAvailable:true});
   await db.doc('chats/pair').set({participants: ['alice', 'bob'], lastMessage: 'Alice secret'});
   await db.doc('chats/pair/messages/alice').set({from: 'alice', text: 'private'});
   await db.doc('chats/pair/messages/bob').set({from: 'bob', text: 'retained'});
@@ -680,6 +801,10 @@ test('account erasure removes nested private data, media, owned messages and pee
   assert.equal((await db.doc('profiles/alice').get()).exists, false);
   assert.equal((await db.doc('publicProfiles/alice').get()).exists, false);
   assert.equal((await db.doc('paymentReconciliation/alice_event').get()).exists, false);
+  for (const path of ['partyInPersonSessions/alice', 'partyInPersonCodes/AABBCCDDEE',
+    'partyInPersonRateLimits/alice', 'matchingLocations/alice']) {
+    assert.equal((await db.doc(path).get()).exists, false, path);
+  }
   assert.equal((await db.doc('chats/pair/messages/alice').get()).exists, false);
   assert.equal((await db.doc('chats/pair/messages/bob').get()).exists, true);
   assert.deepEqual((await db.doc('chats/pair').get()).data().participants, ['bob']);
@@ -719,16 +844,30 @@ test('public profile projection excludes private fields, replaces stale mirrors 
 });
 
 test('code linking keeps the actual owner, immutable attribution and verified legacy progress', async () => {
+  await db.doc('users/referrer').set({root_referrer: 'root'});
   await db.doc('referralCodes/PROX-ABC').set({referrerUid: 'referrer', active: true});
   await db.doc('users/referrer/referrals/alice').set({uid: 'alice', inPersonVerified: true, rewardEligible: true, meetupsCompleted: 4});
   await db.doc('users/alice').set({referrer: 'referrer'});
   const result = await linkReferralCode.run({auth: {uid: 'alice'}, data: {code: 'PROX-ABC'}});
   assert.equal(result.referrerUid, 'referrer');
+  assert.equal((await db.doc('users/alice').get()).data().root_referrer, 'root');
+  assert.equal((await db.doc('referralAttributions/alice').get()).data().rootReferrerUid, 'root');
   assert.equal((await db.doc('users/referrer/referrals/alice').get()).data().inPersonVerified, true);
   assert.equal((await db.doc('users/referrer/referrals/alice').get()).data().meetupsCompleted, 4);
   assert.equal((await linkReferralCode.run({auth: {uid: 'alice'}, data: {code: 'PROX-ABC'}})).replayed, true);
   await db.doc('referralCodes/PROX-OTHER').set({referrerUid: 'other', active: true});
   await assert.rejects(linkReferralCode.run({auth: {uid: 'alice'}, data: {code: 'PROX-OTHER'}}), /already assigned/);
+});
+
+test('code-only linking rejects missing accounts and ignores forged owner hints', async () => {
+  await db.doc('referralCodes/INV123').set({referrerUid: 'owner', active: true});
+  await db.doc('users/alice').set({});
+  await assert.rejects(linkReferralCode.run({auth: {uid: 'alice'}, data: {code: 'INV123'}}), /unavailable/);
+  await db.doc('users/owner').set({root_referrer: 'root'});
+  const result = await linkReferralCode.run({auth: {uid: 'alice'}, data: {code: 'INV123', referrerUid: 'forged', expectedUid: 'alice'}});
+  assert.equal(result.referrerUid, 'owner');
+  await assert.rejects(linkReferralCode.run({auth: {uid: 'bob'}, data: {code: 'INV123'}}), /unavailable/);
+  await assert.rejects(linkReferralCode.run({auth: {uid: 'alice'}, data: {code: 'INV123', expectedUid: 'bob'}}), /account changed/);
 });
 
 test('referral download android redirect keeps tracking params and tree fields', async () => {
@@ -902,8 +1041,9 @@ test('referral download target precedence uses explicit env then hint then fallb
 });
 
 test('mutual party projection is retry-safe and revokes after either membership is removed', async () => {
-  await db.doc('users/alice/party/bob').set({source: 'manual', mutual: false});
-  await db.doc('users/bob/party/alice').set({source: 'manual', mutual: false});
+  await seedPartyMeetup();
+  await changePartyConnection('alice', feedback('bob'));
+  await changePartyConnection('bob', feedback('alice'));
   const event = {params: {uid: 'alice', friendUid: 'bob'}};
   await onPartyWrite.run(event);
   const first = await db.doc('users/alice/party/bob').get();
@@ -912,7 +1052,8 @@ test('mutual party projection is retry-safe and revokes after either membership 
   assert.equal((await db.doc('users/alice/party/bob').get()).updateTime.isEqual(first.updateTime), true);
   await db.doc('users/bob/party/alice').delete();
   await onPartyWrite.run(event);
-  assert.equal((await db.doc('users/alice/party/bob').get()).data().mutual, false);
+  assert.equal((await db.doc('users/alice/party/bob').get()).exists, false);
+  assert.equal((await partyPairRef().get()).data().status, 'removed');
 });
 
 
@@ -1028,6 +1169,8 @@ test('Party: rating an existing mutual member does not remove an established con
   await seedPartyMeetup();
   await db.doc('users/alice/party/bob').set({uid:'bob',mutual:true});
   await db.doc('users/bob/party/alice').set({uid:'alice',mutual:true});
+  await partyPairRef().set({members:['alice','bob'], status:'connected', decisions:{alice:'add',bob:'add'},
+    proof:{kind:'inPersonCode'}, source:'inPersonDirectInvite'});
   assert.equal((await changePartyConnection('alice', feedback('bob','later'))).status, 'connected');
   await assertPartyPair(true);
 });

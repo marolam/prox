@@ -23,6 +23,7 @@ class _UpdateEnforcementGateState extends State<UpdateEnforcementGate>
   bool _refreshInFlight = false;
   bool _openingUpdateLink = false;
   String? _linkError;
+  String? _checkError;
   Timer? _pollTimer;
 
   @override
@@ -60,19 +61,30 @@ class _UpdateEnforcementGateState extends State<UpdateEnforcementGate>
   Future<void> _refresh({required bool forceRefresh}) async {
     if (!mounted || _refreshInFlight) return;
     _refreshInFlight = true;
-    setState(() => _checking = true);
+    setState(() {
+      _checking = true;
+      _checkError = null;
+    });
     try {
       final result = await _service.check(forceRefresh: forceRefresh);
       if (!mounted) return;
       setState(() => _result = result);
-    } catch (_) {
-      // Retain a known required update if an unexpected platform failure occurs.
+    } catch (error, stack) {
+      debugPrint('[UpdateGate] Version check failed: $error');
+      debugPrintStack(stackTrace: stack);
+      if (mounted) {
+        setState(
+          () => _checkError =
+              "Couldn't verify the app version. Check your connection and try again.",
+        );
+      }
     } finally {
       _refreshInFlight = false;
       if (mounted) {
         setState(() => _checking = false);
         _pollTimer?.cancel();
-        final minutes = _result == null || _result!.checkFailed
+        final minutes =
+            _checkError != null || _result == null || _result!.checkFailed
             ? 1
             : _result!.pollMinutes.clamp(5, 240);
         _pollTimer = Timer(Duration(minutes: minutes), () {
@@ -90,17 +102,22 @@ class _UpdateEnforcementGateState extends State<UpdateEnforcementGate>
       _linkError = null;
     });
     try {
-      final opened = await _service.openLatestUpdate(context,
-          preferredUrl: result.downloadUrl,
-          targetVersion: result.latestVersion);
+      final opened = await _service.openLatestUpdate(
+        context,
+        preferredUrl: result.downloadUrl,
+        targetVersion: result.latestVersion,
+      );
       if (!opened && mounted) {
-        setState(() => _linkError =
-            "Couldn't open the update link. Check your connection and try again.");
+        setState(
+          () => _linkError =
+              "Couldn't open the update link. Check your connection and try again.",
+        );
       }
     } catch (_) {
       if (mounted)
-        setState(() =>
-            _linkError = "Couldn't open the update link. Please try again.");
+        setState(
+          () => _linkError = "Couldn't open the update link. Please try again.",
+        );
     } finally {
       if (mounted) setState(() => _openingUpdateLink = false);
     }
@@ -109,7 +126,7 @@ class _UpdateEnforcementGateState extends State<UpdateEnforcementGate>
   @override
   Widget build(BuildContext context) {
     final result = _result;
-    final initialLoading = _checking && result == null;
+    final initialLoading = result == null;
     final blocked = (result?.mustUpdateNow ?? false) || initialLoading;
     final theme = Theme.of(context);
 
@@ -151,30 +168,54 @@ class _UpdateEnforcementGateState extends State<UpdateEnforcementGate>
                             mainAxisSize: MainAxisSize.min,
                             children: initialLoading
                                 ? [
-                                    const CircularProgressIndicator(),
-                                    const SizedBox(height: 12),
-                                    Text('Checking app version...',
-                                        style: theme.textTheme.titleMedium),
+                                    if (_checking) ...[
+                                      const CircularProgressIndicator(),
+                                      const SizedBox(height: 12),
+                                      Text(
+                                        'Checking app version...',
+                                        style: theme.textTheme.titleMedium,
+                                      ),
+                                    ] else ...[
+                                      Text(
+                                        _checkError!,
+                                        textAlign: TextAlign.center,
+                                      ),
+                                      const SizedBox(height: 12),
+                                      FilledButton(
+                                        onPressed: () => unawaited(
+                                          _refresh(forceRefresh: true),
+                                        ),
+                                        child: const Text(
+                                          'Retry version check',
+                                        ),
+                                      ),
+                                    ],
                                   ]
                                 : [
-                                    Icon(Icons.system_update_alt_rounded,
-                                        size: 42,
-                                        color: theme.colorScheme.primary),
+                                    Icon(
+                                      Icons.system_update_alt_rounded,
+                                      size: 42,
+                                      color: theme.colorScheme.primary,
+                                    ),
                                     const SizedBox(height: 12),
-                                    Text('Update required',
-                                        style: theme.textTheme.headlineSmall,
-                                        textAlign: TextAlign.center),
+                                    Text(
+                                      'Update required',
+                                      style: theme.textTheme.headlineSmall,
+                                      textAlign: TextAlign.center,
+                                    ),
                                     const SizedBox(height: 12),
                                     const Text(
                                       'Please install the required update before continuing.',
                                       textAlign: TextAlign.center,
                                     ),
-                                    if (result!.minimumRequiredNotes
+                                    if (result.minimumRequiredNotes
                                         .trim()
                                         .isNotEmpty) ...[
                                       const SizedBox(height: 12),
-                                      Text(result.minimumRequiredNotes,
-                                          textAlign: TextAlign.center),
+                                      Text(
+                                        result.minimumRequiredNotes,
+                                        textAlign: TextAlign.center,
+                                      ),
                                     ],
                                     const SizedBox(height: 12),
                                     Text(
@@ -184,15 +225,19 @@ class _UpdateEnforcementGateState extends State<UpdateEnforcementGate>
                                       style: theme.textTheme.bodySmall,
                                       textAlign: TextAlign.center,
                                     ),
-                                    if (result.checkFailed ||
+                                    if (_checkError != null ||
+                                        result.checkFailed ||
                                         _linkError != null) ...[
                                       const SizedBox(height: 12),
                                       Text(
-                                          _linkError ??
-                                              'You appear to be offline. The last required update still applies.',
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                              color: theme.colorScheme.error)),
+                                        _linkError ??
+                                            _checkError ??
+                                            'You appear to be offline. The last required update still applies.',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          color: theme.colorScheme.error,
+                                        ),
+                                      ),
                                     ],
                                     const SizedBox(height: 16),
                                     SizedBox(
@@ -202,9 +247,11 @@ class _UpdateEnforcementGateState extends State<UpdateEnforcementGate>
                                             ? null
                                             : _openUpdate,
                                         icon: const Icon(Icons.open_in_new),
-                                        label: Text(_openingUpdateLink
-                                            ? 'Opening update link...'
-                                            : 'Update now'),
+                                        label: Text(
+                                          _openingUpdateLink
+                                              ? 'Opening update link...'
+                                              : 'Update now',
+                                        ),
                                       ),
                                     ),
                                     const SizedBox(height: 8),
@@ -214,10 +261,12 @@ class _UpdateEnforcementGateState extends State<UpdateEnforcementGate>
                                         onPressed: _checking
                                             ? null
                                             : () =>
-                                                _refresh(forceRefresh: true),
-                                        child: Text(_checking
-                                            ? 'Checking...'
-                                            : "I've updated, re-check"),
+                                                  _refresh(forceRefresh: true),
+                                        child: Text(
+                                          _checking
+                                              ? 'Checking...'
+                                              : "I've updated, re-check",
+                                        ),
                                       ),
                                     ),
                                   ],

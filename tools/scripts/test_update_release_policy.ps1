@@ -62,6 +62,7 @@ foreach ($key in @('update_latest_version', 'update_latest_version_android', 'up
 foreach ($invalid in @(
   @('-LatestVersion', 'release-2026'),
   @('-LatestVersion', '0.18.8+18', '-Platform', 'ios'),
+  @('-LatestVersion', '0.18.8+18', '-Platform', 'ios', '-IosDownloadUrl', 'https://testflight.apple.com/join/%3Cyour-code%3E'),
   @('-LatestVersion', '0.18.8+18', '-DownloadUrl', 'http://example.com/app.apk')
 )) {
   Assert-RejectedPolicy -PolicyArguments $invalid -Reason 'invalid version or install URL'

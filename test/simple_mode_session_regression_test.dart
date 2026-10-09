@@ -4,10 +4,10 @@ import "package:flutter_test/flutter_test.dart";
 import "package:prox/services/simple_mode/simple_mode_policy.dart";
 
 void main() {
-  test("Simple Mode keeps only Big-5 home destinations interactive", () {
+  test("Simple Mode allows in-person Party joining alongside the Big-5", () {
     expect(
       SimpleModePolicy.allowedHomeTabs,
-      equals(<String>["Nearby", "Meetups", "Profile"]),
+      equals(<String>["Nearby", "Meetups", "Party", "Profile"]),
     );
   });
 
@@ -38,7 +38,7 @@ void main() {
     expect(sessionBar, contains("!isPartyMember && !isActiveMeetup"));
   });
 
-  test("successful Simple Mode meetup offers Party unlock and highlight", () {
+  test("successful meetup highlights Party without forcing a mode change", () {
     final rating = File(
       "lib/screens/rating/rating_screen.dart",
     ).readAsStringSync();
@@ -49,9 +49,9 @@ void main() {
 
     expect(
       rating,
-      contains("partyRequiresNormalMode: SimpleModePolicy.isActive"),
+      isNot(contains("partyRequiresNormalMode: SimpleModePolicy.isActive")),
     );
-    expect(rating, contains("unlockPartyFromSimpleMode()"));
+    expect(rating, matches(RegExp(r"setPartyUnlockHighlightPending\(\s*true\s*,?\s*\)")));
     expect(settings, contains("partyUnlockHighlightPending: true"));
     expect(shell, contains('tabs[i].label == "Party"'));
     expect(shell, contains("setPartyUnlockHighlightPending(false)"));

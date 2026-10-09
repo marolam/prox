@@ -120,8 +120,9 @@ export const onReferralMilestoneReward = onDocumentWritten(
     const pointsRef = db.doc(`users/${referrerUid}/meta/points`);
 
     await db.runTransaction(async (tx) => {
-      const [freshReferral, deletion] = await tx.getAll(referralRef, db.doc(`accountDeletions/${referrerUid}`));
-      if (!freshReferral.exists || deletion.exists) return;
+      const [freshReferral, deletion, enforcement] = await tx.getAll(referralRef, db.doc(`accountDeletions/${referrerUid}`),
+        db.doc(`accountEnforcements/${referrerUid}`));
+      if (!freshReferral.exists || deletion.exists || (enforcement.exists && enforcement.data()?.status !== 'active')) return;
       const freshData = freshReferral.data() ?? {};
       if (!isTrue(freshData.rewardGranted) || isTrue(freshData.rewardCredited) || !isTrue(freshData.inPersonVerified) || !isTrue(freshData.rewardEligible) || Number(freshData.meetupsCompleted || 0) < 5) return;
 

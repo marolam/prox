@@ -1,5 +1,7 @@
 import "package:prox/models/user_settings.dart";
 import "package:prox/services/user_settings_service.dart";
+import "package:prox/services/matching/matching_mode_service.dart";
+import "package:prox/services/matching_access_service.dart";
 
 class MatchSettingsService {
   MatchSettingsService._();
@@ -24,10 +26,19 @@ class MatchSettingsService {
   }
 
   void setPartyScope(MatchPartyScope scope) {
+    if (<MatchPartyScope>{
+          MatchPartyScope.public,
+          MatchPartyScope.all,
+          MatchPartyScope.none,
+        }.contains(scope) &&
+        !MatchingAccessService.instance.current.publicUnlocked)
+      return;
+    MatchingAccessService.instance.recordLocalScopeSelection(scope);
     final cur = current;
     UserSettingsService.instance.updateMatchDiscovery(
       cur.copyWith(partyScope: scope),
     );
+    MatchingModeService.instance.syncPartyScopeToServer();
   }
 
   void setBusinessOnly(bool enabled) {

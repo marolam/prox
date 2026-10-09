@@ -19,7 +19,7 @@ class MatchScopeSettingsScreen extends StatelessWidget {
             leading: const Icon(Icons.radar),
             title: const Text('Radius and Party scope'),
             subtitle: const Text(
-              'All nearby, extended Party, or direct Party connections.',
+              'Party Only, Party + Tree, or Public when your area unlocks.',
             ),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.of(context).push(
@@ -46,7 +46,7 @@ class MatchScopeSettingsScreen extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         const Text(
-          'If your results are empty, try a wider radius or All nearby. Location permissions and another person’s current availability also affect results.',
+          'If your results are empty, try a wider radius or Party + Tree. Meet in person before joining each other\'s Party. Location permissions and another person\'s current availability also affect results.',
         ),
       ],
     ),

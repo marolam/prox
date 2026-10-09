@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import {onDocumentWritten} from 'firebase-functions/v2/firestore';
 import {isDeepStrictEqual} from 'node:util';
+import {activeEnrolledAccount} from './lib/matching_scope_policy';
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
@@ -11,7 +12,7 @@ export function publicProfilesEqual(previous: unknown, next: unknown): boolean {
 }
 
 /** Explicit projection: never copy arbitrary account maps into discovery data. */
-export function publicProfile(uid: string, account: Record<string, any>, settings: Record<string, any> = {}): Record<string, unknown> {
+export function publicProfile(uid: string, account: Record<string, any>, settings: Record<string, any> = {}, access: Record<string, any> = {}): Record<string, unknown> {
   const text = (value: unknown, max = 2000): string => typeof value === 'string' ? value.trim().slice(0, max) : '';
   const list = (value: unknown): string[] => Array.isArray(value)
     ? [...new Set(value.filter(item => typeof item === 'string').map(item => text(item, 80)).filter(Boolean))].slice(0, 100) : [];
@@ -33,6 +34,8 @@ export function publicProfile(uid: string, account: Record<string, any>, setting
     searchingText: text(account.searchingText), providingText: text(account.providingText),
     businessEnabled: business, isBusiness: business, businessMode: business,
     ...(modeKind ? {modeKind} : {}), ...(normalMode ? {normalMode} : {}), ...(listenRole ? {listenRole} : {}),
+    partyScope: ['partyOnly', 'tree', 'public', 'extendedOnly', 'all', 'none'].includes(settings.partyScope) ? settings.partyScope : 'tree',
+    publicMatchingUnlocked: access.publicUnlocked === true,
     availabilityMinutes: Number.isFinite(account.availabilityMinutes) ? Math.max(0, Math.min(1440, account.availabilityMinutes)) : null,
     ...(Number.isInteger(age) && age >= 13 && age <= 120 ? {ageYears: age, age} : {}),
     SearchingFor: wants, CanProvide: offers,
@@ -50,12 +53,12 @@ export function publicProfile(uid: string, account: Record<string, any>, setting
 export async function syncPublicProfile(uid: string): Promise<void> {
   const target = db.doc(`publicProfiles/${uid}`);
   await db.runTransaction(async tx => {
-    const [account, previous, deletion, settings] = await tx.getAll(db.doc(`users/${uid}`), target, db.doc(`accountDeletions/${uid}`), db.doc(`users/${uid}/settings/matching`));
-    if (!account.exists || deletion.exists) {
+    const [account, previous, deletion, settings, access] = await tx.getAll(db.doc(`users/${uid}`), target, db.doc(`accountDeletions/${uid}`), db.doc(`users/${uid}/settings/matching`), db.doc(`users/${uid}/matchingAccess/current`));
+    if (!account.exists || deletion.exists || !activeEnrolledAccount(account.data())) {
       if (previous.exists) tx.delete(target);
       return;
     }
-    const next = publicProfile(uid, account.data() || {}, settings.data() || {});
+    const next = publicProfile(uid, account.data() || {}, settings.data() || {}, access.data() || {});
     // Replacement removes unknown fields from old projections as well.
     if (!publicProfilesEqual(previous.data(), next)) tx.set(target, next);
   });
@@ -66,5 +69,9 @@ export const onPublicProfileProjection = onDocumentWritten({document: 'users/{ui
 });
 
 export const onPublicMatchingProjection = onDocumentWritten({document: 'users/{uid}/settings/matching', retry: true}, async event => {
+  await syncPublicProfile(event.params.uid);
+});
+
+export const onPublicMatchingAccessProjection = onDocumentWritten({document: 'users/{uid}/matchingAccess/current', retry: true}, async event => {
   await syncPublicProfile(event.params.uid);
 });

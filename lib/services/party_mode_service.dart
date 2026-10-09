@@ -41,7 +41,9 @@ class PartyModeService {
               (doc) =>
                   doc.id != uid &&
                   doc.id != 'current' &&
-                  doc.id != 'partySettings',
+                  doc.id != 'partySettings' &&
+                  doc.data()['metInPerson'] == true &&
+                  (doc.data()['connectionId'] as String?)?.isNotEmpty == true,
             )
             .map((doc) => doc.id)
             .toSet(),

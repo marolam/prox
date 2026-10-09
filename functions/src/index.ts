@@ -2,13 +2,22 @@
  * Prox Cloud Functions entry
  */
 import * as admin from "firebase-admin";
+export {moderateAccount, getAccountModerationStatus} from './account_moderation';
 export { deleteMyAccount, onAuthDelete, onTrustFeedbackWrite } from './account_lifecycle';
 export { purchaseWithPoints } from './points_purchases';
 export { claimVerifiedReward, cancelMySubscription } from './verified_rewards';
 export { onMeetupCompletedAccounting, syncCompletedMeetup } from './meetup_accounting';
+export {
+  sendReferralMentorNudge, onReferralMentorAttribution, onReferralMentorProfile,
+  onReferralMentorMeetup, onReferralMentorReward, onReferralMentorNudge,
+  onReferralMentorProgress, onReferralMentorBlock, onReferralMentorParty,
+  refreshReferralMentor, onReferralMentorGrowthReward,
+} from './referral_mentors';
 export { onPartyWrite } from './lib/party';
 export { respondToPartyConnection, sweepPartyConnections, onPartyConnectionBlock, onPartyConnectionNotification } from './party_connections';
-export { onPublicProfileProjection, onPublicMatchingProjection } from './public_profiles';
+export { startPartyInPersonSession, stopPartyInPersonSession, confirmPartyInPersonCode } from './party_connections';
+export { getMatchingAccess, acknowledgePublicMatchingUnlock, onMatchingForegroundPresence, onMatchingScopeChanged, onMatchingPartyChanged, onMatchingBlockChanged } from './matching_scope';
+export { onPublicProfileProjection, onPublicMatchingProjection, onPublicMatchingAccessProjection } from './public_profiles';
 export { setBusinessModeActive } from './business_mode';
 export { onPresenceCoordinates } from './presence_projection';
 

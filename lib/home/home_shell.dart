@@ -114,7 +114,7 @@ class _HomeShellState extends State<HomeShell> {
     _navPageController = PageController(initialPage: _pageForIndex(_index));
     _settingsSub = UserSettingsService.instance.watch().listen((_) {
       if (!mounted) return;
-      if (_isSimpleMode && !<int>[0, 1, 3].contains(_index)) {
+      if (_isSimpleMode && !<int>[0, 1, 2, 3].contains(_index)) {
         _index = 0;
       }
       setState(() {});

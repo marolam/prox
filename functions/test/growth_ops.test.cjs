@@ -15,6 +15,7 @@ const {claimReward} = require('../lib/verified_rewards');
 const {syncLegacySupport, legacySupportTicketId} = require('../lib/growth_legacy_support');
 const {eraseUserData} = require('../lib/account_lifecycle');
 const {finalizeReferralSingleUseToken, referralApkDownload} = require('../lib/referral_downloads');
+const {recordCompletedMeetup} = require('../lib/meetup_accounting');
 const DAY = 86400000;
 const timestamp = ms => admin.firestore.Timestamp.fromMillis(ms);
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -43,6 +44,15 @@ async function conversation(uid, peer = 'peer') {
   await chat.set({participants: [uid, peer], isGroup: false});
   await chat.collection('messages').doc().set({from: uid, to: peer, text: 'Hello there', kind: 'text', ts: timestamp(Date.now())});
   await chat.collection('messages').doc().set({from: peer, to: uid, text: 'Hello back', kind: 'text', ts: timestamp(Date.now())});
+}
+async function completedMeetup(uid, peer = 'peer') {
+  await db.doc(`users/${peer}`).set({displayName: 'Peer'});
+  const meetupId = `verified_${uid}_${peer}`;
+  await db.doc(`meetups/${meetupId}`).set({
+    aUid: uid, bUid: peer, status: 'completed', aArrived: true, bArrived: true,
+    completedAt: timestamp(Date.now()),
+  });
+  await recordCompletedMeetup(meetupId, uid);
 }
 async function inviteFor(owner = 'owner', request = 'invite_request_0001', device = 'owner-device') {
   if (!(await db.doc(`users/${owner}`).get()).exists) await account(owner);
@@ -96,6 +106,9 @@ test('invite and welcome grants remain idempotent under concurrency, with server
   assert.equal((await db.doc('users/alice/meta/points').get()).data().currentPoints, 5);
   assert.equal((await db.doc('users/owner/meta/points').get()).exists, false);
   await conversation('alice');
+  await growth.syncGrowthProgressForUid('alice');
+  assert.equal((await db.doc('users/owner/meta/points').get()).exists, false, 'A conversation alone must not pay the mentor.');
+  await completedMeetup('alice');
   await Promise.all([growth.syncGrowthProgressForUid('alice'), growth.syncGrowthProgressForUid('alice')]);
   assert.equal((await db.doc('users/owner/meta/points').get()).data().currentPoints, 10);
   assert.equal((await db.collection('users/owner/rewardClaims').get()).size, 1);
@@ -108,6 +121,24 @@ test('a single-use invite cannot be claimed by two accounts concurrently', async
   const outcomes = await Promise.allSettled(['alice', 'bob'].map(uid => growth.acceptGrowthReferralForUid(uid, {code: invite.code, deviceId: uid}, `198.51.100.${uid.length}`)));
   assert.equal(outcomes.filter(row => row.status === 'fulfilled').length, 1);
   assert.equal((await db.collection('growthReferrals').get()).size, 1);
+});
+
+test('growth referral ancestry is preserved while both credits stay with the direct pair', async () => {
+  await account('owner');
+  await db.doc('users/owner').update({referrer: 'root', root_referrer: 'root'});
+  const invite = await inviteFor();
+  assert.equal((await db.doc(`referralCodes/${invite.code}`).get()).data().rootReferrerUid, 'root');
+  await accept('alice', invite.code);
+  assert.equal((await db.doc('users/alice').get()).data().referrer, 'owner');
+  assert.equal((await db.doc('users/alice').get()).data().root_referrer, 'root');
+  assert.equal((await db.doc('referralAttributions/alice').get()).data().rootReferrerUid, 'root');
+  await conversation('alice');
+  await completedMeetup('alice');
+  await growth.syncGrowthProgressForUid('alice');
+  await growth.syncGrowthProgressForUid('alice');
+  assert.equal((await db.doc('users/alice/meta/points').get()).data().currentPoints, 5);
+  assert.equal((await db.doc('users/owner/meta/points').get()).data().currentPoints, 10);
+  assert.equal((await db.doc('users/root/meta/points').get()).exists, false);
 });
 
 test('existing counters and one-sided chat cannot qualify activation; real reciprocal messages can', async () => {
@@ -150,6 +181,8 @@ test('duplicate inviter device holds both grants and the delay cannot be bypasse
   assert.equal((await db.doc('users/alice/meta/points').get()).exists, false);
   await conversation('alice'); await growth.syncGrowthProgressForUid('alice');
   assert.equal((await db.doc('users/owner/meta/points').get()).exists, false);
+  await completedMeetup('alice');
+  await growth.syncGrowthProgressForUid('alice');
   await assert.rejects(growth.reviewGrowthRewardForUid('operator', {inviteeUid: 'alice', decision: 'release', note: 'Reviewed real tester'}), /delay/);
   await db.doc('growthReferrals/alice').update({holdUntil: timestamp(Date.now() - 1)});
   await growth.reviewGrowthRewardForUid('operator', {inviteeUid: 'alice', decision: 'release', note: 'Verified separate real users'});
@@ -163,7 +196,7 @@ test('referrer monthly point caps hold later rewards without altering the welcom
   for (const uid of ['alice', 'bob']) {
     const invite = await inviteFor('owner', `cap_invite_${uid}`);
     await accept(uid, invite.code, `phone-${uid}`, uid === 'alice' ? '198.51.100.10' : '198.51.100.11');
-    await conversation(uid); await growth.syncGrowthProgressForUid(uid);
+    await conversation(uid); await completedMeetup(uid); await growth.syncGrowthProgressForUid(uid);
   }
   assert.equal((await db.doc('users/owner/meta/points').get()).data().currentPoints, 10);
   assert.equal((await db.doc('growthReferrals/bob').get()).data().status, 'held');
@@ -328,7 +361,7 @@ test('account deletion removes growth membership, identities, private reports, e
   await assert.rejects(growth.ensureGrowthIdentity('alice', Date.now()), /being deleted/);
 });
 
-test('single-use legacy verification preserves previous meetup progress and verified eligibility', async () => {
+test('a remote legacy token retry preserves prior progress and eligibility without consuming the token', async () => {
   await account('alice'); await account('owner');
   await db.doc('users/alice').update({referrer: 'owner'});
   await db.doc('users/owner/referrals/alice').set({uid: 'alice', meetupsCompleted: 5, inPersonVerified: true, rewardEligible: true, rewardGranted: true, joinedAt: timestamp(Date.now() - DAY)});
@@ -339,10 +372,11 @@ test('single-use legacy verification preserves previous meetup progress and veri
   try {
     const response = httpResponse();
     await finalizeReferralSingleUseToken({method: 'POST', body: {token}, get: name => name.toLowerCase() === 'authorization' ? 'Bearer fake' : ''}, response);
-    assert.equal(response.statusCode, 200);
+    assert.equal(response.statusCode, 409);
+    assert.equal(response.body.error, 'in_person_verification_required');
     const referral = (await db.doc('users/owner/referrals/alice').get()).data();
     assert.equal(referral.meetupsCompleted, 5); assert.equal(referral.inPersonVerified, true); assert.equal(referral.rewardGranted, true);
-    assert.equal((await db.doc('users/alice').get()).data().referralStatus, 'verified');
+    assert.equal((await db.doc(`referralSingleUseTokens/${token}`).get()).data().status, 'new');
   } finally {auth.verifyIdToken = previous;}
 });
 
