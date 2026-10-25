@@ -22,6 +22,8 @@ import "package:prox/services/referral_attribution_service.dart";
 import "package:prox/services/simple_mode/simple_mode_policy.dart";
 import "package:prox/services/user_profile_service.dart";
 import "package:prox/shell/home_root_shell.dart";
+import "package:prox/widgets/profile_keyword_chip.dart";
+import "package:prox/widgets/profile_save_notice.dart";
 
 class ProfileEditScreen extends StatefulWidget {
   const ProfileEditScreen({
@@ -129,8 +131,16 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   }
 
   void _onFormFieldChanged() {
-    if (_hydratingForm) return;
+    if (_hydratingForm || _formDirty || !mounted) return;
+    setState(_markFormDirty);
+  }
+
+  void _markFormDirty() {
+    if (_formDirty) return;
     _formDirty = true;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text(ProfileSaveNotice.message)),
+    );
   }
 
   void _startLoadWatchdog() {
@@ -555,7 +565,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     }
 
     setState(() {
-      _formDirty = true;
+      _markFormDirty();
       items.add(
           _KeywordBucketItem(value: canonical, status: _KeywordStatus.clear));
       _keywordBuckets[bucketKey] = _dedupeKeywordItems(items);
@@ -606,7 +616,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         : _KeywordStatus.working;
 
     setState(() {
-      _formDirty = true;
+      _markFormDirty();
       list[index] = current.copyWith(status: next);
       _keywordBuckets[bucketKey] = list;
       _syncPrimaryKeywordsFromBuckets();
@@ -645,19 +655,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       }
     }
     _syncPrimaryKeywordsFromBuckets();
-  }
-
-  Color _statusFill(ColorScheme cs, _KeywordStatus status) {
-    switch (status) {
-      case _KeywordStatus.clear:
-        return cs.surface.withValues(alpha: 0.18);
-      case _KeywordStatus.working:
-        return cs.surface.withValues(alpha: 0.18);
-      case _KeywordStatus.satisfied:
-        return const Color(0xFFA5D6A7);
-      case _KeywordStatus.removed:
-        return const Color(0xFFEF9A9A);
-    }
   }
 
   Future<String?> _openTextEditorSheet({
@@ -751,7 +748,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
             ],
           ),
           Text(
-            "Tap to activate keyword for matching.",
+            "Tap a keyword to toggle matching. Tap its remove icon to delete it, "
+            "then Save profile. Keep at least one active keyword in each section.",
             style:
                 theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
           ),
@@ -774,7 +772,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                             const <_KeywordBucketItem>[])
                         .lastIndexWhere((i) => i.value == item.value),
                     item: item,
-                    enabled: true,
+                    enabled: !_saving,
                   ),
               ],
             ),
@@ -789,50 +787,34 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     required _KeywordBucketItem item,
     required bool enabled,
   }) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    final compact = MediaQuery.of(context).size.width < 380;
+    final cs = Theme.of(context).colorScheme;
     final isActiveGlow = _bucketAffectsMatching(bucketKey) &&
         item.status == _KeywordStatus.working;
-    final glowColor = _activeGlowColor(cs, bucketKey);
+    return ProfileKeywordChip(
+      keyword: item.value,
+      active: isActiveGlow,
+      accentColor: _activeGlowColor(cs, bucketKey),
+      onToggle: enabled ? () => _cycleItemStatus(bucketKey, index) : null,
+      onRemove: enabled
+          ? () => _confirmAndRemoveKeyword(bucketKey, item.value)
+          : null,
+    );
+  }
 
-    return InkWell(
-      onTap: enabled ? () => _cycleItemStatus(bucketKey, index) : null,
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: compact ? 8 : 10,
-          vertical: compact ? 6 : 7,
-        ),
-        decoration: BoxDecoration(
-          color: _statusFill(cs, item.status),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: isActiveGlow
-                ? glowColor
-                : (enabled
-                    ? cs.primary.withValues(alpha: 0.55)
-                    : cs.outline.withValues(alpha: 0.40)),
-            width: isActiveGlow ? 1.8 : 1.0,
-          ),
-          boxShadow: isActiveGlow
-              ? <BoxShadow>[
-                  BoxShadow(
-                    color: glowColor.withValues(alpha: 0.30),
-                    blurRadius: 6,
-                    spreadRadius: 0.4,
-                  ),
-                ]
-              : null,
-        ),
-        child: Text(
-          item.value,
-          style: theme.textTheme.labelMedium?.copyWith(
-            fontWeight: FontWeight.w700,
-            color: cs.onSurface,
-          ),
-        ),
-      ),
+  Future<void> _confirmAndRemoveKeyword(String bucketKey, String keyword) async {
+    final confirmed = await _confirmKeywordBulkAction(
+      selectedCount: 1,
+      markFound: false,
+      keyword: keyword,
+    );
+    if (!confirmed || !mounted || _saving) return;
+    final index = (_keywordBuckets[bucketKey] ?? const <_KeywordBucketItem>[])
+        .indexWhere((item) => item.value == keyword);
+    if (index < 0) return;
+    _applyKeywordBulkAction(
+      bucketKey: bucketKey,
+      selectedIndices: {index},
+      markFound: false,
     );
   }
 
@@ -893,7 +875,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      "Select keywords, then use Found or Remove.",
+                      "Select keywords, then use Found or Remove. "
+                      "Save profile afterward to apply your changes.",
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color:
                                 Theme.of(context).colorScheme.onSurfaceVariant,
@@ -1035,15 +1018,18 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   Future<bool> _confirmKeywordBulkAction({
     required int selectedCount,
     required bool markFound,
+    String? keyword,
   }) async {
-    final action = markFound ? "Found" : "Removed";
-    final icon = markFound ? "check" : "trash";
+    final target = keyword == null ? "$selectedCount keywords" : '"$keyword"';
     final result = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text("Confirm keyword action"),
         content: Text(
-          "Are you sure you want to permanantly mark $selectedCount keywords \"$action\" (with $icon icon)?",
+          markFound
+              ? "Mark $target as Found? Save profile afterward to apply this change."
+              : "Remove $target from your profile? Save profile afterward to "
+                  "apply this change. Keep at least one active keyword in each section.",
         ),
         actions: [
           TextButton(
@@ -1092,13 +1078,22 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     }
 
     setState(() {
-      _formDirty = true;
+      _markFormDirty();
       _keywordBuckets[bucketKey] = _dedupeKeywordItems(keep);
       if (markFound) {
         _keywordBuckets[_bucketSatisfied] = _dedupeKeywordItems(satisfied);
       }
       _syncPrimaryKeywordsFromBuckets();
     });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          markFound
+              ? "Keywords marked as Found. Save profile to apply your changes."
+              : "Keywords removed from this draft. Save profile to apply your changes.",
+        ),
+      ),
+    );
   }
 
   bool get _hasAnyPhoto {
@@ -1183,7 +1178,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     if (bytes == null || bytes.isEmpty) return false;
 
     setState(() {
-      _formDirty = true;
+      _markFormDirty();
       _localPhotoX = img;
       _localPhotoBytes = bytes;
     });
@@ -1459,7 +1454,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
 
       if (_searchingKeywords.isEmpty || _canProvideKeywords.isEmpty) {
         throw StateError(
-            "Add at least 1 keyword in both Searching For and Can Provide.");
+            "Keep at least 1 active keyword in both Looking For and Can Provide. "
+            "Tap a remaining keyword to activate it, then save again.");
       }
 
       final List<String> searchingFor = _normalizeKeywords(_searchingKeywords);
@@ -1660,6 +1656,10 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       key: _formKey,
       child: Column(
         children: [
+          if (_formDirty) ...[
+            const ProfileSaveNotice(),
+            const SizedBox(height: 16),
+          ],
           Center(
             child: Column(
               children: [
@@ -1839,7 +1839,10 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                             !_businessPaidUnlock ||
                             _saving)
                         ? null
-                        : (v) => setState(() => _businessEnabled = v),
+                        : (v) => setState(() {
+                            _markFormDirty();
+                            _businessEnabled = v;
+                          }),
                     title: const Text("Use Prox in Business Mode"),
                     subtitle: Text(
                       !_canUseBusinessTier
@@ -1882,8 +1885,10 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                           .toList(growable: false),
                       onChanged: _saving
                           ? null
-                          : (v) =>
-                              setState(() => _availabilityMinutes = v ?? 0),
+                          : (v) => setState(() {
+                              _markFormDirty();
+                              _availabilityMinutes = v ?? 0;
+                            }),
                     ),
                   ],
                 ],
@@ -1899,6 +1904,10 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           ),
           if (widget.inline) ...[
             const SizedBox(height: 18),
+            if (_formDirty) ...[
+              const ProfileSaveNotice(),
+              const SizedBox(height: 12),
+            ],
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
