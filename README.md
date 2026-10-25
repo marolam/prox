@@ -19,6 +19,11 @@ No unfinished matching, Icebreaker, backend, routing, or policy changes from the
 development worktree are included. Publication and platform availability must be
 verified separately; this section alone is not release confirmation.
 
+Release-check maintenance avoids the retired Android SDK `tools` package and
+patches vulnerable `body-parser` 1.x installations to 1.20.9 without downgrading
+2.x installations. Both backend dependency audits are clean; all 221 local
+backend/rule emulator tests pass. No backend deployment is implied by these checks.
+
 ## Current audit candidate: 0.19.0+19
 
 See [the September 8 audit report](docs/prox_audit_20260908.md),
