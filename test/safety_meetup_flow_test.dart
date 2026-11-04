@@ -14,6 +14,52 @@ void main() {
     hasChat: true,
   );
   testWidgets(
+    'full page height returns after keyboard entry and route changes',
+    (tester) async {
+      addTearDown(tester.view.resetViewInsets);
+      final navKey = GlobalKey<NavigatorState>();
+      const bodyKey = ValueKey('page-body');
+      Widget page(String label) => Scaffold(
+        body: SizedBox.expand(key: bodyKey, child: Text(label)),
+        bottomNavigationBar: const SizedBox(height: 64),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorKey: navKey,
+          builder: (_, child) => SafetyAccessShell(
+            loadSessions: () => Stream.value([]),
+            child: child!,
+          ),
+          home: page('Profile'),
+        ),
+      );
+      final fullHeight = tester.getSize(find.byKey(bodyKey)).height;
+      final keyboardHeight = 240 * tester.view.devicePixelRatio;
+      for (var i = 0; i < 3; i++) {
+        tester.view.viewInsets = FakeViewPadding(bottom: keyboardHeight);
+        await tester.pumpAndSettle();
+        expect(
+          tester.getSize(find.byKey(bodyKey)).height,
+          closeTo(fullHeight - 240 + 64, 0.01),
+        );
+        expect(find.text('Safety'), findsOneWidget);
+        tester.view.viewInsets = FakeViewPadding.zero;
+        await tester.pumpAndSettle();
+        expect(tester.getSize(find.byKey(bodyKey)).height, fullHeight);
+      }
+      navKey.currentState!.push(
+        MaterialPageRoute<void>(builder: (_) => page('Nearby')),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byKey(bodyKey)).height, fullHeight);
+      navKey.currentState!.pop();
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byKey(bodyKey)).height, fullHeight);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'Safety remains above dialogs; emergency dialing is two taps and preserves the route',
     (tester) async {
       var calls = 0;

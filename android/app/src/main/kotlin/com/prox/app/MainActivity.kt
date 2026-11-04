@@ -15,9 +15,11 @@ import android.media.ToneGenerator
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
+import android.os.IBinder
 import android.os.PowerManager
 import android.provider.Settings
 import android.text.InputType
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -26,6 +28,9 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.plugin.common.EventChannel
@@ -137,6 +142,7 @@ class MainActivity : FlutterFragmentActivity() {
 	}
 
 	override fun onDestroy() {
+		activeTextInputDialog?.dismiss()
 		stopSystemObservers()
 		eventSink = null
 		super.onDestroy()
@@ -153,17 +159,13 @@ class MainActivity : FlutterFragmentActivity() {
 
 	private fun forceShowKeyboard(): Boolean {
 		return try {
-			runOnUiThread {
-				val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-				val target = currentFocus ?: window?.decorView?.findViewById(android.R.id.content)
-				target?.requestFocus()
-				if (imm != null && target != null) {
-					imm.showSoftInput(target, InputMethodManager.SHOW_FORCED)
-					imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
-				}
-			}
-			true
-		} catch (_: Throwable) {
+			val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+				?: return false
+			val target = currentFocus ?: return false
+			target.requestFocus()
+			imm.showSoftInput(target, InputMethodManager.SHOW_IMPLICIT)
+		} catch (error: RuntimeException) {
+			Log.w("ProxTextInput", "Could not show the keyboard", error)
 			false
 		}
 	}
@@ -184,7 +186,8 @@ class MainActivity : FlutterFragmentActivity() {
 					}
 				}
 
-				var completed = false
+				var output: String? = null
+				var inputWindowToken: IBinder? = null
 				val input = EditText(this).apply {
 					setText(initialValue)
 					setSelection(initialValue.length)
@@ -226,29 +229,26 @@ class MainActivity : FlutterFragmentActivity() {
 					.setTitle(title)
 					.setView(container)
 					.setNegativeButton("Cancel") { d: DialogInterface, _: Int ->
-						if (completed) return@setNegativeButton
-						completed = true
 						d.dismiss()
-						result.success(null)
 					}
 					.setPositiveButton("Use") { d: DialogInterface, _: Int ->
-						if (completed) return@setPositiveButton
-						completed = true
-						val out = input.text?.toString() ?: ""
+						output = input.text.toString()
 						d.dismiss()
-						result.success(out)
-					}
-					.setOnCancelListener {
-						if (completed) return@setOnCancelListener
-						completed = true
-						result.success(null)
 					}
 					.create()
 
 				dialog.setOnDismissListener {
+					input.clearFocus()
+					// The EditText may already be detached when dismissal is delivered.
+					val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+					inputWindowToken?.let { token -> imm?.hideSoftInputFromWindow(token, 0) }
 					if (activeTextInputDialog === dialog) {
 						activeTextInputDialog = null
 					}
+					val decor = window.decorView
+					WindowCompat.getInsetsController(window, decor).hide(WindowInsetsCompat.Type.ime())
+					decor.post { ViewCompat.requestApplyInsets(decor) }
+					result.success(output)
 				}
 
 				dialog.setOnShowListener {
@@ -257,7 +257,9 @@ class MainActivity : FlutterFragmentActivity() {
 							WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
 					)
 					input.post {
+						if (!dialog.isShowing) return@post
 						input.requestFocus()
+						inputWindowToken = input.windowToken
 						input.setSelection(input.text?.length ?: 0)
 						val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
 						imm?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)

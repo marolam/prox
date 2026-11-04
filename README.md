@@ -2,6 +2,28 @@
 
 Flutter app + Firebase backend for Prox.
 
+## Profile stability update: 0.21.1+31
+
+This focused update uses published build 30 as its baseline. Profile edits show
+an unsaved-changes notification and a persistent reminder to tap **Save Profile**.
+Keyword chips have a separate remove control; removal remains a draft until
+saved. Keep at least one active keyword in Looking For and Can Provide.
+
+Android text editors hide the keyboard on dismissal and refresh window insets.
+Keyboard requests no longer force or toggle visibility. Device checks should
+cover Use/Cancel/Back after repeated keyword edits and full-height tab navigation.
+If an older installed build is stuck, save edits if possible, fully close Prox,
+and reopen it; do not clear app data or uninstall.
+
+No unfinished matching, Icebreaker, backend, routing, or policy changes from the
+development worktree are included. Publication and platform availability must be
+verified separately; this section alone is not release confirmation.
+
+Release-check maintenance avoids the retired Android SDK `tools` package and
+patches vulnerable `body-parser` 1.x installations to 1.20.9 without downgrading
+2.x installations. Both backend dependency audits are clean; all 221 local
+backend/rule emulator tests pass. No backend deployment is implied by these checks.
+
 ## Current audit candidate: 0.19.0+19
 
 See [the September 8 audit report](docs/prox_audit_20260908.md),
