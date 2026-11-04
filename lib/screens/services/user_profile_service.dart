@@ -526,7 +526,7 @@ class UserProfileService {
           name: "prox.profile",
         );
         _updateUploadDebug(path: path, status: "uploaded", error: null);
-        return ref.getDownloadURL();
+        return await ref.getDownloadURL();
       } catch (e) {
         _updateUploadDebug(path: path, status: "failed", error: e.toString());
         dev.log(

@@ -374,7 +374,7 @@ class _ProxPointsStoreScreenState extends State<ProxPointsStoreScreen> {
         return const StorePurchaseResult(StorePurchaseStatus.unknownSku);
       }
 
-      return _verifyCardCheckoutForStore(
+      return await _verifyCardCheckoutForStore(
         uid: uid,
         sku: sku,
         title: title,

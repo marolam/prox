@@ -57,7 +57,6 @@ class _SafetyAccessShellState extends State<SafetyAccessShell> {
   @override
   Widget build(BuildContext context) => Material(
     child: SafeArea(
-      bottom: false,
       child: Column(
         children: [
           Align(

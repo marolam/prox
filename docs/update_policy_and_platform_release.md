@@ -224,8 +224,15 @@ is required for older installations during migration. Candidate work remains
 bounded to 500 regional records, with up to four profile reads in flight; this
 is a capped nearby list rather than exhaustive nearest-neighbor pagination.
 
-Flutter CI uses the tested `3.41.1` SDK. All iOS compilation, signed IPA, paired
-release and PR paths require analysis and regression tests to pass.
+Flutter CI uses the tested `3.47.9` SDK; Android uses Gradle `8.14.3`,
+Android Gradle Plugin `8.11.1`, and Kotlin `2.4.0`. All iOS compilation,
+signed IPA, paired release and PR paths require analysis and regression tests
+to pass.
+
+The eMudhra CA remediation uses Dart 3.13.7+ and Flutter 3.47.8+ for Flutter's
+compiled TLS trust bundle, plus the patched FlutterFire 5.1 SDK family
+(`cloud_firestore` 7.1.0). Previously distributed binaries must be rebuilt and
+end users must install the updated app.
 
 No release, Remote Config policy, or website association was published by this
 audit. The Android preview was subsequently installed in place on R5 over USB;
