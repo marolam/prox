@@ -24,6 +24,8 @@ import "package:prox/shell/home_root_shell.dart";
 import "package:prox/widgets/motion/motion.dart";
 import "package:prox/widgets/party_referral_consent.dart";
 import "package:prox/widgets/referral_trust_gate.dart";
+import "package:prox/services/first_use_service.dart";
+import "package:prox/widgets/first_use_guidance.dart";
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
@@ -99,7 +101,15 @@ class _AuthGateState extends State<AuthGate> {
       return const SignInScreen();
     }
 
-    return _ProfileGate(key: ValueKey(user.uid), uid: user.uid);
+    final created = user.metadata.creationTime;
+    final age = created == null ? null : DateTime.now().difference(created);
+    return FirstUseWelcomeGate(
+      key: ValueKey(user.uid),
+      service: FirstUseService.forUser(user.uid),
+      autoWelcome:
+          age != null && !age.isNegative && age < const Duration(days: 1),
+      child: _ProfileGate(key: ValueKey(user.uid), uid: user.uid),
+    );
   }
 }
 

@@ -13,6 +13,7 @@
 import "dart:async";
 
 import "package:flutter/material.dart";
+import "package:firebase_auth/firebase_auth.dart";
 
 import "package:prox/models/user_settings.dart";
 import "package:prox/screens/match_inbox/match_inbox_screen.dart";
@@ -27,6 +28,9 @@ import "package:prox/screens/settings/support_feedback_screen.dart";
 import "package:prox/services/help/context_help_service.dart";
 import "package:prox/services/simple_mode/simple_mode_policy.dart";
 import "package:prox/services/user_settings_service.dart";
+import "package:prox/services/first_use_service.dart";
+import "package:prox/widgets/first_use_guidance.dart";
+import "package:prox/screens/referral/referral_demo_walkthrough_screen.dart";
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -45,6 +49,8 @@ class _HomeShellState extends State<HomeShell> {
   Timer? _testerComboResetTimer;
   StreamSubscription<UserSettings>? _settingsSub;
   static const int _testerComboLongPressGoal = 3;
+  FirstUseService? _firstUse;
+  int? _tourStep;
 
   static const int _tabsPerPage = 5;
 
@@ -120,10 +126,78 @@ class _HomeShellState extends State<HomeShell> {
       setState(() {});
     });
     _syncHelpContext();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      _firstUse = FirstUseService.forUser(uid);
+      _firstUse!.addListener(_onGuideChanged);
+      unawaited(_loadGuide());
+    }
+  }
+
+  Future<void> _loadGuide() async {
+    if (!await saveFirstUse(context, () => _firstUse!.load())) return;
+    if (mounted) _onGuideChanged();
+  }
+
+  void _onGuideChanged() {
+    if (!mounted) return;
+    final service = _firstUse!;
+    if (service.touring && _tourStep != service.step) {
+      final tab = firstUseStops[service.step].tab;
+      final index = _tabs.indexWhere((item) => item.label == tab);
+      if (_isTabEnabled(_tabs[index])) {
+        _index = index;
+        _syncHelpContext();
+      }
+      _tourStep = service.step;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _navPageController.hasClients) {
+          _navPageController.jumpToPage(_pageForIndex(index));
+        }
+      });
+    } else if (!service.touring) {
+      _tourStep = null;
+    }
+    setState(() {});
+  }
+
+  Future<void> _openFirstStep(String id) async {
+    final service = _firstUse!;
+    if (id == 'connections') {
+      final completed = await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(
+          builder: (_) => const ReferralDemoWalkthroughScreen(allowExit: true),
+        ),
+      );
+      if (completed == true && mounted) {
+        await saveFirstUse(
+          context,
+          () => service.markComplete(['connections']),
+        );
+      }
+      return;
+    }
+    final tab = switch (id) {
+      'profile' || 'keywords' => 'Profile',
+      'nearby' => 'Nearby',
+      _ => 'Referrals',
+    };
+    final index = _tabs.indexWhere((item) => item.label == tab);
+    if (!_isTabEnabled(_tabs[index])) {
+      await saveFirstUse(context, () => service.moveTo(4));
+      if (mounted) await saveFirstUse(context, service.startTour);
+      return;
+    }
+    _selectTab(index);
+    _navPageController.jumpToPage(_pageForIndex(index));
+    if (id == 'nearby') {
+      await saveFirstUse(context, () => service.markComplete(['nearby']));
+    }
   }
 
   @override
   void dispose() {
+    _firstUse?.removeListener(_onGuideChanged);
     _testerComboResetTimer?.cancel();
     _settingsSub?.cancel();
     ContextHelpService.instance.setContext(null);
@@ -227,6 +301,15 @@ class _HomeShellState extends State<HomeShell> {
         title: Text("${guidance.step}: ${guidance.title}"),
         content: Text(guidance.message),
         actions: [
+          if (_firstUse != null)
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(false);
+                saveFirstUse(this.context, () =>
+                    _firstUse!.startTour(restart: true));
+              },
+              child: const Text("Welcome tour and first steps"),
+            ),
           TextButton.icon(
             onPressed: () => Navigator.of(context).pop(true),
             icon: const Icon(Icons.tune),
@@ -285,9 +368,15 @@ class _HomeShellState extends State<HomeShell> {
       body: SafeArea(
         top: false,
         bottom: false,
-        child: KeyedSubtree(
-          key: ValueKey<int>(_index),
-          child: _tabs[_index].child,
+        child: FirstUseLearningLayout(
+          service: _firstUse,
+          keyboardVisible: MediaQuery.viewInsetsOf(context).bottom > 0,
+          tab: _tabs[_index].label,
+          onOpen: _openFirstStep,
+          child: KeyedSubtree(
+            key: ValueKey<int>(_index),
+            child: _tabs[_index].child,
+          ),
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
@@ -353,7 +442,10 @@ class _HomeShellState extends State<HomeShell> {
                               enabled: _isTabEnabled(tabs[i]),
                               highlighted: tabs[i].label == "Party" &&
                                   UserSettingsService.instance.current
-                                      .partyUnlockHighlightPending,
+                                      .partyUnlockHighlightPending ||
+                                  (_firstUse?.touring == true &&
+                                      firstUseStops[_firstUse!.step].tab ==
+                                          tabs[i].label),
                               onTap: () => _isTabEnabled(tabs[i])
                                   ? _selectTab(_tabs.indexOf(tabs[i]))
                                   : _showSimpleModeLock(tabs[i]),
@@ -412,7 +504,33 @@ class _HomeShellState extends State<HomeShell> {
       ),
     );
 
-    return scaffold;
+    final service = _firstUse;
+    if (service == null || !service.ready || !service.touring) return scaffold;
+    final target = _tabs.firstWhere(
+      (tab) => tab.label == firstUseStops[service.step].tab,
+    );
+    return Stack(
+      children: [
+        ExcludeSemantics(child: AbsorbPointer(child: scaffold)),
+        const Positioned.fill(
+          child: ModalBarrier(dismissible: false, color: Color(0x55000000)),
+        ),
+        Center(
+          child: SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: 520,
+                maxHeight: MediaQuery.sizeOf(context).height * .70,
+              ),
+              child: FirstUseTourCard(
+                service: service,
+                locked: !_isTabEnabled(target),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
 

@@ -9,6 +9,7 @@ import "dart:ui";
 import "package:cloud_firestore/cloud_firestore.dart";
 import "package:firebase_auth/firebase_auth.dart";
 import "package:flutter/material.dart";
+import "package:prox/widgets/first_use_guidance.dart";
 
 import "package:prox/models/user_settings.dart";
 import "package:prox/screens/discovery/matching_mode_screen.dart";
@@ -1923,7 +1924,10 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                             const ProxLogoMark(size: 36),
                             const SizedBox(height: 8),
                             const Text(
-                              'Try again later or adjust your matching settings.',
+                              'Your local community may still be growing. Check '
+                              'your location permission, keywords, radius, and '
+                              'matching settings. More nearby participants can '
+                              'create more opportunities; invitations are optional.',
                               textAlign: TextAlign.center,
                             ),
                             const SizedBox(height: 8),
@@ -1938,6 +1942,11 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                                 TextButton(
                                   onPressed: _openModeChooser,
                                   child: const Text('Adjust matching'),
+                                ),
+                                TextButton.icon(
+                                  onPressed: () => openInvitationQr(context),
+                                  icon: const Icon(Icons.qr_code),
+                                  label: const Text('Show my invitation QR'),
                                 ),
                               ],
                             ),

@@ -6,6 +6,8 @@ import "package:prox/services/image_picker_guard.dart";
 import "package:prox/services/ui_telemetry_service.dart";
 import "package:prox/services/user_profile_service.dart";
 import "package:prox/shell/home_root_shell.dart";
+import "package:prox/services/first_use_service.dart";
+import "package:prox/widgets/first_use_guidance.dart";
 
 class QuickStartSetupScreen extends StatefulWidget {
   const QuickStartSetupScreen({super.key});
@@ -122,6 +124,9 @@ class _QuickStartSetupScreenState extends State<QuickStartSetupScreen> {
         canProvide: <String>[providingText],
       );
 
+      if (!mounted) return;
+      await saveFirstUse(context, () => FirstUseService.forUser(uid)
+          .markComplete(['profile', 'keywords']));
       if (!mounted) return;
       UiTelemetryService.instance.log("quick_setup_submit_success");
       Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(

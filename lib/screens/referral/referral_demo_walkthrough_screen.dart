@@ -1,7 +1,9 @@
 import "package:flutter/material.dart";
 
 class ReferralDemoWalkthroughScreen extends StatefulWidget {
-  const ReferralDemoWalkthroughScreen({super.key});
+  const ReferralDemoWalkthroughScreen({super.key, this.allowExit = false});
+
+  final bool allowExit;
 
   @override
   State<ReferralDemoWalkthroughScreen> createState() =>
@@ -232,10 +234,10 @@ class _ReferralDemoWalkthroughScreenState
     final last = _index >= _steps.length - 1;
 
     return PopScope(
-      canPop: _completed,
+      canPop: _completed || widget.allowExit,
       child: Scaffold(
         appBar: AppBar(
-          automaticallyImplyLeading: false,
+          automaticallyImplyLeading: widget.allowExit,
           title: const Text("Prox Demo"),
         ),
         body: SafeArea(
@@ -257,7 +259,7 @@ class _ReferralDemoWalkthroughScreenState
                           ),
                         ),
                         Text(
-                          "No skipping",
+                          widget.allowExit ? "Examples only" : "No skipping",
                           style: theme.textTheme.labelSmall?.copyWith(
                             color: cs.onSurfaceVariant,
                             fontWeight: FontWeight.w700,

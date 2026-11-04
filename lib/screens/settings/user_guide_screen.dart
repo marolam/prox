@@ -7,6 +7,8 @@ import 'package:prox/screens/policy/policy_hub_screen.dart';
 import 'package:prox/screens/support/support_center_screen.dart';
 import 'package:prox/screens/dev/bug_reports/bug_reports_list_screen.dart';
 import 'package:prox/screens/review/tester_mission_screen.dart';
+import 'package:prox/widgets/first_use_guidance.dart';
+import 'package:prox/screens/referral/referrals_hub_screen.dart';
 
 class UserGuideScreen extends StatefulWidget {
   const UserGuideScreen({super.key});
@@ -34,7 +36,20 @@ class _UserGuideScreenState extends State<UserGuideScreen> {
           'Build your profile, discover a useful nearby connection, request a meetup, coordinate in chat, then share feedback. The walkthrough uses examples and can be replayed at any time.',
       icon: Icons.explore_outlined,
       action: 'Play the walkthrough',
-      page: ReferralDemoWalkthroughScreen(),
+      page: ReferralDemoWalkthroughScreen(allowExit: true),
+    ),
+    (
+      title: 'Invite people and grow your local community',
+      detail:
+          'More relevant people participating nearby can create more opportunities. '
+          'Invitations are optional, not a recruiting quota. Open Referrals, create '
+          'an in-person QR while together, and help the recipient install Prox. '
+          'Reopen or refresh the QR afterward to complete in-person verification. '
+          'Location, expiry, consent, and eligibility checks still apply. A download '
+          'alone does not create a trusted Party connection or earn a reward.',
+      icon: Icons.qr_code,
+      action: 'Open my invitation QR',
+      page: ReferralsHubScreen(),
     ),
     (
       title: 'Get better nearby matches',
@@ -116,6 +131,11 @@ class _UserGuideScreenState extends State<UserGuideScreen> {
           const Text(
             'Search the guide or open a topic for a practical next step.',
           ),
+          TextButton.icon(
+            onPressed: () => replayFirstUse(context),
+            icon: const Icon(Icons.school_outlined),
+            label: const Text('Replay welcome tour'),
+          ),
           const SizedBox(height: 16),
           TextField(
             decoration: InputDecoration(
@@ -160,9 +180,10 @@ class _UserGuideScreenState extends State<UserGuideScreen> {
                   Text(topic.detail),
                   const SizedBox(height: 12),
                   OutlinedButton(
-                    onPressed: () => Navigator.of(
-                      context,
-                    ).push(MaterialPageRoute<void>(builder: (_) => topic.page)),
+                    onPressed: () => topic.page is ReferralsHubScreen
+                        ? openInvitationQr(context)
+                        : Navigator.of(context).push(
+                            MaterialPageRoute<void>(builder: (_) => topic.page)),
                     child: Text(topic.action),
                   ),
                 ],

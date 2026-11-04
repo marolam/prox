@@ -47,6 +47,7 @@ import "package:prox/services/user_settings_service.dart";
 import "package:prox/widgets/build_info_badge.dart";
 import "package:prox/widgets/mode_switch_card.dart";
 import "package:prox/widgets/prox_trust_bar.dart";
+import "package:prox/widgets/first_use_guidance.dart";
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -799,6 +800,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                 child: Text("Help", style: textTheme.titleMedium),
+              ),
+              ListTile(
+                leading: const Icon(Icons.school_outlined),
+                title: const Text("Replay welcome tour"),
+                subtitle: const Text("Learn the controls and restore your first-steps checklist."),
+                onTap: () => replayFirstUse(context),
               ),
               ListTile(
                 leading: const Icon(Icons.menu_book_outlined),

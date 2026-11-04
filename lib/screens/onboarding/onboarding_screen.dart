@@ -25,9 +25,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final previous = ContextHelpService.instance.contextKey.value;
     ContextHelpService.instance.setContext("onboarding:quick_setup");
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => const QuickStartSetupScreen(),
-      ),
+      MaterialPageRoute<void>(builder: (_) => const QuickStartSetupScreen()),
     );
     ContextHelpService.instance.setContext(previous);
   }
@@ -39,12 +37,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     return Scaffold(
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Spacer(),
               Text(
                 "Welcome to Prox",
                 style: theme.textTheme.headlineMedium?.copyWith(
@@ -53,7 +50,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ),
               const SizedBox(height: 12),
               Text(
-                "Before you can start matching with people nearby, we need a few basics:",
+                "Find nearby people who need what you offer or offer what you need. "
+                "Start a conversation by agreement, then plan a safe public meetup.\n\n"
+                "First, make it easy for others to understand you:",
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: cs.onSurfaceVariant,
                 ),
@@ -75,7 +74,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   color: cs.onSurfaceVariant,
                 ),
               ),
-              const Spacer(),
+              const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
@@ -85,7 +84,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ),
               const SizedBox(height: 10),
               Text(
-                "After your profile is created, open Referrals and complete the required Big-5 walkthrough.",
+                "Your welcome tour and first-steps checklist will explain Nearby, "
+                "chat, meetups, Party, and your invitation QR. You can finish "
+                "learning later. Invite people who could benefit: a growing local "
+                "community helps everyone, but invitations are optional.",
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: cs.onSurfaceVariant,
                 ),

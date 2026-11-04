@@ -15,6 +15,8 @@ import "package:prox/services/user_profile_service.dart";
 import "package:prox/services/user_settings_service.dart";
 import "package:prox/widgets/profile_status_row.dart";
 import "package:prox/widgets/prox_trust_bar.dart";
+import "package:prox/services/first_use_service.dart";
+import "package:prox/widgets/first_use_guidance.dart";
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -224,7 +226,11 @@ class ProfileScreen extends StatelessWidget {
                       thickness: 1,
                       color: cs.outline.withValues(alpha: 0.2),
                     ),
-                    const ProfileEditScreen(inline: true),
+                    ProfileEditScreen(
+                      inline: true,
+                      onSaved: () => saveFirstUse(context, () =>
+                        FirstUseService.forUser(uid).markComplete(['profile', 'keywords'])),
+                    ),
                   ],
                 ),
               ),

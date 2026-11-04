@@ -3,6 +3,7 @@ import "dart:async";
 import "package:cloud_firestore/cloud_firestore.dart";
 import "package:cloud_functions/cloud_functions.dart";
 import "package:flutter/material.dart";
+import "package:prox/widgets/first_use_guidance.dart";
 import "package:flutter/services.dart";
 import "package:qr_flutter/qr_flutter.dart";
 import "package:share_plus/share_plus.dart";
@@ -156,6 +157,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
         children: [
+          const InvitationGuideCard(),
           ReferralMentorCard(uid: uid),
           const GrowthReferralEntry(),
           Card(
