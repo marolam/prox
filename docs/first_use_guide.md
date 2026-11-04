@@ -80,6 +80,43 @@ underlying interactions; example walkthroughs do not contact real users.
 - The production signing certificate and protected rollback release were
   verified. Temporary signing copies were removed after the build.
 
-This is a local Android candidate, not a public release. iOS build/distribution
-and public download-target updates remain part of a separately confirmed
-publication.
+## Verified publication: November 4, 2026
+
+The user authorized publication after candidate validation. Production tag
+`v0.22.0+32` binds commit `2ff282efd41e40b7250178a53032aaf247255f3c`.
+The [paired release workflow](https://github.com/marolam/prox/actions/runs/41813367110)
+passed backend safety checks, application analysis/tests, signed Android/iOS
+builds, native package/version checks, TestFlight upload, public asset publication,
+anonymous pinned/latest APK verification, and Android update-policy activation.
+
+- [Published release](https://github.com/marolam/prox/releases/tag/v0.22.0%2B32):
+  Android APK, iOS IPA, and release manifest; stable GitHub latest.
+- Android package: `com.prox.app`, version `0.22.0`, build `32`.
+  Published APK SHA-256:
+  `d8d566bc31f4da963826f5492768a5912d7bd83f077d4c6eb460c9d40d737488`
+  (87,485,570 bytes). The anonymous latest download, manifest, and production
+  signing certificate were independently verified.
+- iOS bundle: `com.prox-us.prox`, version `0.22.0`, build `32`.
+  Published IPA SHA-256:
+  `73d136512beed81cc2b20c5f2a42066cc80a0d4b2b7ac2f5de47da607d08f904`
+  (42,430,811 bytes). App Store Connect upload reported success.
+- Remote Config version `22` enforces latest/minimum `0.22.0+32` through the
+  highest-priority Android-only condition, including legacy clients, with the
+  verified version-pinned APK URL. Separate iOS defaults were not advanced.
+- The live referral endpoint is `ACTIVE`; ordinary, fallback, and growth Android
+  targets already use production latest, so no backend redeployment was needed.
+  The permanent Tester Portal download now serves this release too.
+- Both connected Android phones received the actual published APK in place of
+  the local candidate, without clearing app data. Version/build and running
+  processes were verified. Moto retained its completed learning progress and
+  launched past the update check. Samsung was locked during the final UI check;
+  its complete tutorial checks had passed on the candidate. Neither published
+  process reported a fatal application exception.
+- Protected private `v1.0` and the original local canonical rollback APK passed
+  verification again after publication.
+
+Apple processing and build-32 tester availability remain pending: read-only
+checks at 10:55 and 10:56 UTC still listed build 31 as the most recent visible
+build. The external TestFlight public link remains disabled. This publication
+does not claim public App Store availability, a public iPhone QR installation
+path, or a completed external beta review.
