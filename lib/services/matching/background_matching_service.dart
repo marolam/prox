@@ -156,7 +156,9 @@ class BackgroundMatchingService extends ChangeNotifier
         !preferences.enabled ||
         !LocationPrivacyService.instance.locationEnabled ||
         UserSettingsService.instance.current.matchDiscovery.modeKind ==
-            MatchingModeKind.off) {
+            MatchingModeKind.off ||
+        UserSettingsService.instance.current.matchDiscovery.modeKind ==
+            MatchingModeKind.icebreaker) {
       _lastConfiguration = null;
       unawaited(_stopNative());
       unawaited(_disableServer());
@@ -203,7 +205,8 @@ class BackgroundMatchingService extends ChangeNotifier
         preferences.enabled &&
         granted &&
         LocationPrivacyService.instance.locationEnabled &&
-        discovery.modeKind != MatchingModeKind.off;
+        discovery.modeKind != MatchingModeKind.off &&
+        discovery.modeKind != MatchingModeKind.icebreaker;
     final payload = {
       ...preferences.toJson(),
       'enabled': enabled,

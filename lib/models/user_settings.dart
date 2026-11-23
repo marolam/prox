@@ -22,6 +22,7 @@ enum MatchingModeKind {
   listen,
   treasureHunt,
   travel,
+  icebreaker,
 }
 
 enum NormalMatchMode {
@@ -355,6 +356,8 @@ class MatchDiscoverySettings {
         return MatchingModeKind.travel;
       case "listen":
         return MatchingModeKind.listen;
+      case "icebreaker":
+        return MatchingModeKind.icebreaker;
       case "normal":
       default:
         return MatchingModeKind.normal;

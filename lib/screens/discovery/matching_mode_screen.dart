@@ -533,6 +533,22 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                             physics: const NeverScrollableScrollPhysics(),
                             children: [
                               ProxGlassCard(
+                                onTap: () =>
+                                    _setKind(MatchingModeKind.icebreaker),
+                                highlight: orange,
+                                glow: orange,
+                                padding: const EdgeInsets.all(14),
+                                child: _ModeCardInner(
+                                  icon: Icons.waving_hand_outlined,
+                                  title: "Icebreaker",
+                                  subtitle:
+                                      "Spontaneous hellos, no match cards",
+                                  selected:
+                                      _kind == MatchingModeKind.icebreaker,
+                                  accent: orange,
+                                ),
+                              ),
+                              ProxGlassCard(
                                 onTap: () => _setKind(MatchingModeKind.off),
                                 highlight: red,
                                 glow: red,
@@ -736,6 +752,13 @@ class _MatchingModeScreenState extends State<MatchingModeScreen> {
                                         setState(() => _treasureRadius = v),
                                   ),
                                 ],
+                              ),
+                            ),
+                          if (_kind == MatchingModeKind.icebreaker)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: Text(
+                                "Opt-in pilot: both people keep Nearby open. Approximate nearby glows and shared color-symbol signals only; no match cards, background alerts, or obligation to respond. GPS cannot confirm the same room. Confirm in person and both agree before keywords are revealed. Party is a separate mutual choice. Normal radius, filters, and Party scope do not apply.",
                               ),
                             ),
                           if (_kind == MatchingModeKind.travel)

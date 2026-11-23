@@ -20,7 +20,7 @@ export async function reconcileVerifiedPartyConnection(uid: string, friendUid: s
     const members = Array.isArray(receipt?.members) ? receipt!.members : [];
     let verified = receipt?.status === 'connected' && members.length === 2 && members.includes(uid) && members.includes(friendUid) &&
       receipt?.decisions?.[uid] === 'add' && receipt?.decisions?.[friendUid] === 'add' &&
-      ['completedMeetup', 'inPersonCode', 'referralQr'].includes(receipt?.proof?.kind);
+      ['completedMeetup', 'inPersonCode', 'referralQr', 'icebreaker'].includes(receipt?.proof?.kind);
     let mentorContact = false;
     if (receipt?.status === 'connected' && receipt.proof?.kind === 'referralMentor' &&
         members.length === 2 && members.includes(uid) && members.includes(friendUid)) {

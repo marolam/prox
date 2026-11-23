@@ -1,5 +1,6 @@
 import 'package:prox/widgets/match_chat_request_actions.dart';
 import 'package:prox/widgets/nearby_profile_sheet.dart';
+import 'package:prox/widgets/icebreaker_panel.dart';
 import 'package:prox/screens/matches/background_matches_screen.dart';
 import 'package:prox/services/matching/background_matching_service.dart';
 import "dart:async";
@@ -180,6 +181,8 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
     switch (d.modeKind) {
       case MatchingModeKind.off:
         return "Matching Off";
+      case MatchingModeKind.icebreaker:
+        return "Icebreaker";
       case MatchingModeKind.listen:
         return "Listen Mode (${_listenRoleLabel(d.listenRole)})";
       case MatchingModeKind.treasureHunt:
@@ -224,6 +227,8 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
         return const Color(0xFFF0C04E);
       case MatchingModeKind.travel:
         return const Color(0xFF4CB8F7);
+      case MatchingModeKind.icebreaker:
+        return const Color(0xFFFF8A3D);
       case MatchingModeKind.normal:
         return discovery.normalMode == NormalMatchMode.active
             ? const Color(0xFF22DE74)
@@ -508,6 +513,9 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
       case MatchingModeKind.travel:
         nextDuration = const Duration(milliseconds: 2300);
         break;
+      case MatchingModeKind.icebreaker:
+        nextDuration = const Duration(milliseconds: 1800);
+        break;
       case MatchingModeKind.normal:
         nextDuration = discovery.normalMode == NormalMatchMode.active
             ? const Duration(milliseconds: 1200)
@@ -674,6 +682,8 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
         return "TREASURE";
       case MatchingModeKind.travel:
         return "TRAVEL";
+      case MatchingModeKind.icebreaker:
+        return "ICEBREAKER";
     }
   }
 
@@ -2399,6 +2409,8 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                 final settings =
                     ssnap.data ?? UserSettingsService.instance.current;
                 final discovery = settings.matchDiscovery;
+                final signedInUid =
+                    FirebaseAuth.instance.currentUser?.uid.trim() ?? '';
                 final simpleMode =
                     settings.simpleModeEnabled && !settings.alwaysUseNormalMode;
                 if (simpleMode) {
@@ -2414,7 +2426,8 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                   ),
                 );
                 if (discovery.modeKind != MatchingModeKind.treasureHunt &&
-                    discovery.modeKind != MatchingModeKind.off) {
+                    discovery.modeKind != MatchingModeKind.off &&
+                    discovery.modeKind != MatchingModeKind.icebreaker) {
                   _ensureNearbyStream(radiusMiles);
                 } else {
                   _nearbyStream = null;
@@ -2455,7 +2468,9 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                           ),
                           title: const Text("Nearby"),
                           actions: [
-                            if (BackgroundMatchingService.available)
+                            if (BackgroundMatchingService.available &&
+                                discovery.modeKind !=
+                                    MatchingModeKind.icebreaker)
                               IconButton(
                                 tooltip: 'Background matches',
                                 icon: const Icon(
@@ -2472,7 +2487,9 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                               padding: const EdgeInsets.only(right: 10),
                               child: Row(
                                 children: [
-                                  GestureDetector(
+                                  if (discovery.modeKind !=
+                                      MatchingModeKind.icebreaker)
+                                    GestureDetector(
                                     onTap: _showMatchFoundForTop,
                                     child: ProxGlass(
                                       radius: 999,
@@ -2596,10 +2613,14 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                             ),
                           ],
                         ),
-                        if (simpleMode)
+                        if (simpleMode &&
+                            discovery.modeKind != MatchingModeKind.icebreaker)
                           _buildSimpleSearchSettings(discovery, cs),
-                        _buildNearbyStatusPanel(discovery, cs, radiusMiles),
-                        _buildProxCircleActivatorCard(discovery, cs),
+                        if (discovery.modeKind !=
+                            MatchingModeKind.icebreaker) ...[
+                          _buildNearbyStatusPanel(discovery, cs, radiusMiles),
+                          _buildProxCircleActivatorCard(discovery, cs),
+                        ],
                         if (discovery.modeKind == MatchingModeKind.normal &&
                             discovery.normalMode == NormalMatchMode.active &&
                             incomingLeft != null &&
@@ -2617,15 +2638,30 @@ class _MatchInboxScreenState extends State<MatchInboxScreen>
                               ),
                             ),
                           ),
-                        SliverFillRemaining(
-                          hasScrollBody: true,
-                          child: _buildNearbyCardsScrollableArea(
-                            discovery: discovery,
-                            matchingAccess: matchingAccess,
-                            cs: cs,
-                            bottomInset: bottomInset,
+                        if (discovery.modeKind ==
+                            MatchingModeKind.icebreaker)
+                          SliverFillRemaining(
+                            hasScrollBody: true,
+                            child: signedInUid.isNotEmpty
+                                ? IcebreakerPanel(
+                                    uid: signedInUid,
+                                    onMode: _openModeChooser,
+                                    circleKey: _kNearbyProxCircleAnchorKey,
+                                  )
+                                : const Center(
+                                    child: Text('Sign in to use Icebreaker.'),
+                                  ),
+                          )
+                        else
+                          SliverFillRemaining(
+                            hasScrollBody: true,
+                            child: _buildNearbyCardsScrollableArea(
+                              discovery: discovery,
+                              matchingAccess: matchingAccess,
+                              cs: cs,
+                              bottomInset: bottomInset,
+                            ),
                           ),
-                        ),
                       ],
                     );
                   },

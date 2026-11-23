@@ -1,7 +1,7 @@
 name: prox
 description: Prox dev app
 publish_to: "none"
-version: 0.22.0+32
+version: 0.22.0+33
 
 environment:
   sdk: ">=3.13.7 <4.0.0"
@@ -53,6 +53,7 @@ dependencies:
   flutter_svg: ^2.2.1
   screen_brightness: ^2.1.11
   wakelock_plus: ^1.5.2
+  mobile_scanner: ^7.4.2
 
 dev_dependencies:
   flutter_test:

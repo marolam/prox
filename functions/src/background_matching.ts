@@ -97,7 +97,7 @@ export async function scanBackgroundMatches(uid: string, nowMs = Date.now()) {
   const local = l.data() || {};
   const settings = s.data() || {};
   if (!p.data()?.enabled || deleted.exists || !mine.exists || !liveLocation(local, nowMs) ||
-      local.deviceId !== p.data()?.deviceId || ['off', 'treasureHunt'].includes(settings.modeKind)) return;
+      local.deviceId !== p.data()?.deviceId || ['off', 'treasureHunt', 'icebreaker'].includes(settings.modeKind)) return;
   const gate = db.doc(`users/${uid}/backgroundScanState/current`);
   const admitted = await db.runTransaction(async tx => {
     const old = await tx.get(gate);

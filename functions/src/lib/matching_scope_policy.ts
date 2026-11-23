@@ -46,7 +46,7 @@ export function trustedPartyEdge(a: string, b: string, forward: Record<string, a
     typeof forward.connectionId === 'string' && forward.connectionId.length > 0 && forward.connectionId === reverse.connectionId &&
     receipt.status === 'connected' && Array.isArray(receipt.members) && receipt.members.length === 2 &&
     receipt.members.includes(a) && receipt.members.includes(b) && receipt.decisions?.[a] === 'add' && receipt.decisions?.[b] === 'add' &&
-    ['completedMeetup', 'inPersonCode', 'referralQr'].includes(receipt.proof?.kind);
+    ['completedMeetup', 'inPersonCode', 'referralQr', 'icebreaker'].includes(receipt.proof?.kind);
 }
 
 export function scopeAllows(scope: unknown, unlocked: boolean, relationship: Relationship): boolean {

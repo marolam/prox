@@ -42,7 +42,7 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSCameraUsageDescription</key>
-	<string>Prox uses the camera when you choose to add a profile photo or evidence image.</string>
+	<string>Prox uses the camera when you choose to add a profile photo, evidence image, or scan an Icebreaker encounter code.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Prox can use Face ID to help protect your account on this device.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

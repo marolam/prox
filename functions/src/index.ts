@@ -52,6 +52,7 @@ export {
 } from "./referral_downloads";
 
 export {onBackgroundPresence, onBackgroundMatchAlert, getBackgroundOpportunity, listBackgroundOpportunities} from './background_matching';
+export {icebreaker, sweepIcebreaker} from './icebreaker';
 export {
   getGrowthStatus, joinTesterCohort, createGrowthInvite, acceptGrowthReferral,
   syncGrowthProgress, recordGrowthSession, submitGrowthSupport, replyToSupportTicket,

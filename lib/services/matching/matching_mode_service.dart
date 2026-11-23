@@ -122,6 +122,7 @@ class MatchingModeService extends ChangeNotifier {
   }
 
   Future<void> _syncQueue = Future<void>.value();
+  Future<void> flushPendingSync() => _syncQueue;
   int _syncRevision = 0;
   int _scopeRevision = 0;
 

@@ -22,6 +22,7 @@ class MatchPipeline {
     MatchingAccessSnapshot? matchingAccess,
   }) async {
     final settings = discovery ?? const MatchDiscoverySettings.defaults();
+    if (settings.modeKind == MatchingModeKind.icebreaker) return const [];
     final access =
         matchingAccess ??
         MatchingAccessSnapshot(directUids: partyMemberUids ?? const <String>{});

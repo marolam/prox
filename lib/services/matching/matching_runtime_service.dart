@@ -104,7 +104,8 @@ class MatchingRuntimeService {
     List<NearbyDoc> raw,
     MatchDiscoverySettings settings,
   ) async {
-    if (settings.modeKind == MatchingModeKind.off) {
+    if (settings.modeKind == MatchingModeKind.off ||
+        settings.modeKind == MatchingModeKind.icebreaker) {
       return const <NearbyDoc>[];
     }
 
@@ -548,6 +549,8 @@ class MatchingRuntimeService {
     switch (normalized) {
       case "off":
         return MatchingModeKind.off;
+      case "icebreaker":
+        return MatchingModeKind.icebreaker;
       case "treasurehunt":
         return MatchingModeKind.treasureHunt;
       case "travel":

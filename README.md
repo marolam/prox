@@ -2,6 +2,14 @@
 
 Flutter app + Firebase backend for Prox.
 
+## Icebreaker mode
+
+Icebreaker is an opt-in, foreground-only Nearby mode for approximate local
+discovery. Participants receive anonymous proximity signals, then may confirm
+an in-person encounter by QR/manual code, mutually reveal connecting keywords,
+and separately choose reciprocal Party membership. It creates no Normal match
+cards or background alerts. See [the pilot contract](docs/icebreaker_pilot.md).
+
 ## Current audit candidate: 0.19.0+19
 
 See [the September 8 audit report](docs/prox_audit_20260908.md),
