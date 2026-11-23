@@ -1,6 +1,6 @@
 # Icebreaker pilot
 
-Release candidate `0.22.0+33` implements Icebreaker on the current production
+Release candidate `0.22.0+34` implements Icebreaker on the current production
 branch. Production backend activation, paired Android/iOS publication, and
 physical-device proximity/camera validation are release-time gates.
 
